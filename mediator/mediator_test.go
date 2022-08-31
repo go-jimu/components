@@ -1,4 +1,4 @@
-package event
+package mediator
 
 import (
 	"context"
@@ -11,11 +11,17 @@ type testEvent struct {
 	called int32
 }
 
-func (e *testEvent) Kind() Kind {
+func (e *testEvent) Kind() EventKind {
 	return "test-event"
 }
 
-func handleTestEvent(ctx context.Context, ev Event) {
+type testHandler struct{}
+
+func (h testHandler) Listening() []EventKind {
+	return []EventKind{"test-event"}
+}
+
+func (h testHandler) Handle(ctx context.Context, ev Event) {
 	te, ok := ev.(*testEvent)
 	if !ok {
 		panic("unexpected event type")
@@ -25,7 +31,7 @@ func handleTestEvent(ctx context.Context, ev Event) {
 
 func TestEvent(t *testing.T) {
 	mediator := NewInMemMediator(3)
-	mediator.Subscribe("test-event", handleTestEvent)
+	mediator.Subscribe(testHandler{})
 
 	ev := &testEvent{}
 	mediator.Dispatch(context.Background(), ev)
@@ -38,7 +44,7 @@ func TestEvent(t *testing.T) {
 
 func TestEventCollection(t *testing.T) {
 	mediator := NewInMemMediator(3)
-	mediator.Subscribe("test-event", handleTestEvent)
+	mediator.Subscribe(testHandler{})
 
 	collection := NewEventCollection()
 	ev := &testEvent{}
