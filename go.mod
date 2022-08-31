@@ -1,3 +1,3 @@
 module github.com/go-jimu/components
 
-go 1.19
+go 1.18
