@@ -1,15 +1,15 @@
-package event
+package mediator
 
 import "context"
 
 type (
 	Mediator interface {
 		Dispatch(context.Context, Event)
-		Subscribe(Kind, HandleFunc)
+		Subscribe(EventHandler)
 	}
 
 	inMemMediator struct {
-		handlers           map[Kind][]HandleFunc
+		handlers           map[EventKind][]EventHandler
 		concurrent         chan struct{}
 		orphanEventHandler func(Event)
 	}
@@ -27,7 +27,7 @@ func NewInMemMediator(concurrent int, opts ...Option) Mediator {
 	}
 
 	m := &inMemMediator{
-		handlers:   make(map[Kind][]HandleFunc),
+		handlers:   make(map[EventKind][]EventHandler),
 		concurrent: make(chan struct{}, concurrent),
 	}
 
@@ -37,11 +37,13 @@ func NewInMemMediator(concurrent int, opts ...Option) Mediator {
 	return m
 }
 
-func (m *inMemMediator) Subscribe(et Kind, hdl HandleFunc) {
-	if _, ok := m.handlers[et]; !ok {
-		m.handlers[et] = make([]HandleFunc, 0)
+func (m *inMemMediator) Subscribe(hdl EventHandler) {
+	for _, kind := range hdl.Listening() {
+		if _, ok := m.handlers[kind]; !ok {
+			m.handlers[kind] = make([]EventHandler, 0)
+		}
+		m.handlers[kind] = append(m.handlers[kind], hdl)
 	}
-	m.handlers[et] = append(m.handlers[et], hdl)
 }
 
 func (m *inMemMediator) Dispatch(ctx context.Context, ev Event) {
@@ -54,12 +56,12 @@ func (m *inMemMediator) Dispatch(ctx context.Context, ev Event) {
 	}
 
 	m.concurrent <- struct{}{}
-	go func(ctx context.Context, ev Event, handlers ...HandleFunc) { // 确保event的多个handler处理的顺序以及时效性
+	go func(ctx context.Context, ev Event, handlers ...EventHandler) { // 确保event的多个handler处理的顺序以及时效性
 		defer func() {
 			<-m.concurrent
 		}()
 		for _, handler := range handlers {
-			handler(ctx, ev) // 在handler内部处理ctx.Done()
+			handler.Handle(ctx, ev) // 在handler内部处理ctx.Done()
 		}
 	}(ctx, ev, m.handlers[ev.Kind()]...)
 }

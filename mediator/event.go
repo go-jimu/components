@@ -1,4 +1,4 @@
-package event
+package mediator
 
 import (
 	"context"
@@ -6,15 +6,17 @@ import (
 )
 
 type (
-	// Kind 事件类型描述
-	Kind string
+	// EventKind 事件类型描述
+	EventKind string
 
-	// HandleFunc 事件处理函数
-	HandleFunc func(context.Context, Event)
+	EventHandler interface {
+		Listening() []EventKind
+		Handle(context.Context, Event)
+	}
 
 	// Event 事件接口
 	Event interface {
-		Kind() Kind
+		Kind() EventKind
 	}
 
 	eventCollection struct {
