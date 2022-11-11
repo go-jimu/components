@@ -71,3 +71,7 @@ func (logger *stdLogger) Log(level Level, keyvalues ...interface{}) {
 	default:
 	}
 }
+
+func Default() Logger {
+	return NewStdLogger(os.Stdout)
+}

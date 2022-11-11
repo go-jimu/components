@@ -15,3 +15,7 @@ func TestMissingValue(t *testing.T) {
 	logger.Log(Info, "hello", "world", "non-value")
 	logger.Log(Info)
 }
+
+func TestDefault(t *testing.T) {
+	Default().Log(Info, "msg", "default")
+}
