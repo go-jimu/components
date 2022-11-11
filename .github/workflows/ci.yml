@@ -18,7 +18,7 @@ jobs:
     - name: Install tools
       run: make tool
     - name: Unittest
-      run: gotestsum --junitfile report.xml --format pkgname --raw command make test extend=-json
+      run: gotestsum --junitfile report.xml --format pkgname --raw-command make test extend=-json
     - name: Publish Test Report
       uses: mikepenz/action-junit-report@v3
       if: always()
