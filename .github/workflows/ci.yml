@@ -15,8 +15,15 @@ jobs:
         go-version: ${{matrix.go-version}}
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
+    - name: Install tools
+      run: make tool
     - name: Unittest
-      run: make test
+      run: gotestsum --junitfile report.xml --format pkgname --raw command make test extend=-json
+    - name: Publish Test Report
+      uses: mikepenz/action-junit-report@v3
+      if: always()
+      with:
+        report_paths: report.xml
     - name: Upload code coverage report
       if: ${{ matrix.os == 'ubuntu-latest' && matrix.go-version == '1.18.x' }}
       uses: actions/upload-artifact@v2

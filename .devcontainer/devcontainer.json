@@ -38,7 +38,8 @@
 				"k--kato.intellij-idea-keybindings",
 				"donjayamanne.githistory",
 				"github.vscode-pull-request-github",
-				"PascalReitermann93.vscode-yaml-sort"
+				"PascalReitermann93.vscode-yaml-sort",
+				"kennylong.kubernetes-yaml-formatter"
 			]
 		}
 	},
