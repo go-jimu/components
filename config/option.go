@@ -126,7 +126,7 @@ func defaultResolver(input map[string]interface{}) error {
 
 func defaultLogger() *logger.Helper {
 	log := logger.NewStdLogger(os.Stdout)
-	return logger.NewHelper(log, logger.WithLevel(logger.Debug))
+	return logger.NewHelper(log, logger.WithLevel(logger.Info))
 }
 
 func expand(s string, mapping func(string) string) string {

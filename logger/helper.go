@@ -36,18 +36,15 @@ func (h *Helper) Log(level Level, keyvals ...interface{}) {
 	h.log.Log(level, keyvals...)
 }
 
-func (h *Helper) logIfMatchLevel(level Level, keyvals []interface{}) {
+func (h *Helper) logIfMatchLevel(level Level, msg string, keyvals []interface{}) {
 	if level < h.level {
 		return
 	}
-	h.log.Log(level, keyvals...)
-}
-
-func (h *Helper) logLevel(level Level, msg string, keyvals []interface{}) {
+	// keyvals = append(keyvals, h.messageKey, msg)
 	kvs := make([]interface{}, 0, 2+len(keyvals))
 	kvs = append(kvs, h.messageKey, msg)
 	kvs = append(kvs, keyvals...)
-	h.logIfMatchLevel(level, kvs)
+	h.log.Log(level, kvs...)
 }
 
 func (h *Helper) printfIfMatchLevel(level Level, format string, a ...interface{}) {
@@ -58,7 +55,7 @@ func (h *Helper) printfIfMatchLevel(level Level, format string, a ...interface{}
 }
 
 func (h *Helper) Debug(msg string, keyvals ...interface{}) {
-	h.logLevel(Debug, msg, keyvals)
+	h.logIfMatchLevel(Debug, msg, keyvals)
 }
 
 func (h *Helper) Debugf(format string, a ...interface{}) {
@@ -66,7 +63,7 @@ func (h *Helper) Debugf(format string, a ...interface{}) {
 }
 
 func (h *Helper) Info(msg string, keyvals ...interface{}) {
-	h.logLevel(Info, msg, keyvals)
+	h.logIfMatchLevel(Info, msg, keyvals)
 }
 
 func (h *Helper) Infof(format string, a ...interface{}) {
@@ -74,21 +71,21 @@ func (h *Helper) Infof(format string, a ...interface{}) {
 }
 
 func (h *Helper) Warn(msg string, keyvals ...interface{}) {
-	h.logLevel(Warn, msg, keyvals)
+	h.logIfMatchLevel(Warn, msg, keyvals)
 }
 func (h *Helper) Warnf(format string, a ...interface{}) {
 	h.printfIfMatchLevel(Warn, format, a...)
 }
 
 func (h *Helper) Error(msg string, keyvals ...interface{}) {
-	h.logLevel(Error, msg, keyvals)
+	h.logIfMatchLevel(Error, msg, keyvals)
 }
 func (h *Helper) Errorf(format string, a ...interface{}) {
 	h.printfIfMatchLevel(Error, format, a...)
 }
 
 func (h *Helper) Panic(msg string, keyvals ...interface{}) {
-	h.logLevel(Panic, msg, keyvals)
+	h.logIfMatchLevel(Panic, msg, keyvals)
 }
 
 func (h *Helper) Panicf(format string, a ...interface{}) {
@@ -96,7 +93,7 @@ func (h *Helper) Panicf(format string, a ...interface{}) {
 }
 
 func (h *Helper) Fatal(msg string, keyvals ...interface{}) {
-	h.logLevel(Fatal, msg, keyvals)
+	h.logIfMatchLevel(Fatal, msg, keyvals)
 }
 func (h *Helper) Fatalf(format string, a ...interface{}) {
 	h.printfIfMatchLevel(Fatal, format, a...)
