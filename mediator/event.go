@@ -26,7 +26,7 @@ type (
 
 	EventCollection interface {
 		Add(Event)
-		Raise(context.Context, Mediator)
+		Raise(Mediator)
 	}
 )
 
@@ -40,10 +40,10 @@ func (es *eventCollection) Add(ev Event) {
 	}
 }
 
-func (es *eventCollection) Raise(ctx context.Context, m Mediator) {
+func (es *eventCollection) Raise(m Mediator) {
 	if atomic.CompareAndSwapInt32(&es.raised, 0, 1) {
 		for _, event := range es.events {
-			m.Dispatch(ctx, event)
+			m.Dispatch(event)
 		}
 	}
 }

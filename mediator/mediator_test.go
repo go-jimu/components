@@ -34,7 +34,7 @@ func TestEvent(t *testing.T) {
 	mediator.Subscribe(testHandler{})
 
 	ev := &testEvent{}
-	mediator.Dispatch(context.Background(), ev)
+	mediator.Dispatch(ev)
 	<-time.After(100 * time.Millisecond)
 
 	if atomic.LoadInt32(&ev.called) != 1 {
@@ -49,14 +49,14 @@ func TestEventCollection(t *testing.T) {
 	collection := NewEventCollection()
 	ev := &testEvent{}
 	collection.Add(ev)
-	collection.Raise(context.Background(), mediator)
+	collection.Raise(mediator)
 	<-time.After(100 * time.Millisecond)
 
 	if atomic.LoadInt32(&ev.called) != 1 {
 		t.FailNow()
 	}
 
-	collection.Raise(context.Background(), mediator)
+	collection.Raise(mediator)
 	<-time.After(100 * time.Millisecond)
 
 	if atomic.LoadInt32(&ev.called) != 1 {
