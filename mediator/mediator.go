@@ -56,16 +56,14 @@ func (m *inMemMediator) Dispatch(ev Event) {
 	}
 
 	m.concurrent <- struct{}{}
-	ctx, cancel := context.WithCancel(context.Background())
-	go func(ctx context.Context, ev Event, handlers ...EventHandler) { // 确保event的多个handler处理的顺序以及时效性
+	go func(ev Event, handlers ...EventHandler) { // 确保event的多个handler处理的顺序以及时效性
 		defer func() {
 			<-m.concurrent
-			cancel()
 		}()
 		for _, handler := range handlers {
-			handler.Handle(ctx, ev) // 在handler内部处理ctx.Done()
+			handler.Handle(context.TODO(), ev) // 在handler内部处理ctx.Done()
 		}
-	}(ctx, ev, m.handlers[ev.Kind()]...)
+	}(ev, m.handlers[ev.Kind()]...)
 }
 
 func WithOrphanEventHandler(fn func(Event)) Option {
