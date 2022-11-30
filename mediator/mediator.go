@@ -4,7 +4,7 @@ import "context"
 
 type (
 	Mediator interface {
-		Dispatch(context.Context, Event)
+		Dispatch(Event)
 		Subscribe(EventHandler)
 	}
 
@@ -46,7 +46,7 @@ func (m *inMemMediator) Subscribe(hdl EventHandler) {
 	}
 }
 
-func (m *inMemMediator) Dispatch(ctx context.Context, ev Event) {
+func (m *inMemMediator) Dispatch(ev Event) {
 	if _, ok := m.handlers[ev.Kind()]; !ok {
 		if m.orphanEventHandler != nil {
 			m.orphanEventHandler(ev)
@@ -56,9 +56,11 @@ func (m *inMemMediator) Dispatch(ctx context.Context, ev Event) {
 	}
 
 	m.concurrent <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
 	go func(ctx context.Context, ev Event, handlers ...EventHandler) { // 确保event的多个handler处理的顺序以及时效性
 		defer func() {
 			<-m.concurrent
+			cancel()
 		}()
 		for _, handler := range handlers {
 			handler.Handle(ctx, ev) // 在handler内部处理ctx.Done()
