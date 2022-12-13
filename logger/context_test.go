@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/go-jimu/components/logger"
-	"github.com/stretchr/testify/assert"
 )
 
 func counterValuer(c *int32) logger.Valuer {
@@ -25,5 +24,7 @@ func TestFromContext(t *testing.T) {
 	log := logger.FromContextAsHelper(ctx)
 	log.Info("hello")
 
-	assert.EqualValues(t, atomic.LoadInt32(&called), 1)
+	if atomic.LoadInt32(&called) != 1 {
+		t.FailNow()
+	}
 }
