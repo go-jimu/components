@@ -6,7 +6,7 @@
 		"dockerfile": "Dockerfile",
 		"args": {
 			// Update the VARIANT arg to pick a version of Go: 1, 1.16, 1.15
-			"VARIANT": "1.18-bullseye",
+			"VARIANT": "1.19-bullseye",
 			// Options
 			"NODE_VERSION": "none"
 		}
@@ -34,12 +34,12 @@
 				"cschleiden.vscode-github-actions",
 				"redhat.vscode-yaml",
 				"carlos-algms.make-task-provider",
-				"streetsidesoftware.code-spell-checker",
 				"k--kato.intellij-idea-keybindings",
 				"donjayamanne.githistory",
 				"github.vscode-pull-request-github",
 				"PascalReitermann93.vscode-yaml-sort",
-				"kennylong.kubernetes-yaml-formatter"
+				"kennylong.kubernetes-yaml-formatter",
+				"oderwat.indent-rainbow"
 			]
 		}
 	},
@@ -69,10 +69,8 @@
 	// },
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "go mod download",
+	"postCreateCommand": "go work sync && make tools",
 
 	// Uncomment to connect as a non-root user. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode"
-	// "workspaceFolder": "/workspace/components",
-	// "workspaceMount": "source=/home/admin/workspace/components,target=/workspace/components,type=bind,consistency=cached"
 }

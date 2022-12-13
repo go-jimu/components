@@ -47,7 +47,7 @@ func (h *Helper) logIfMatchLevel(level Level, msg string, keyvals []interface{})
 	h.log.Log(level, kvs...)
 }
 
-func (h *Helper) printfIfMatchLevel(level Level, format string, a ...interface{}) {
+func (h *Helper) printIfMatchLevelf(level Level, format string, a ...interface{}) {
 	if level < h.level {
 		return
 	}
@@ -59,7 +59,7 @@ func (h *Helper) Debug(msg string, keyvals ...interface{}) {
 }
 
 func (h *Helper) Debugf(format string, a ...interface{}) {
-	h.printfIfMatchLevel(Debug, format, a...)
+	h.printIfMatchLevelf(Debug, format, a...)
 }
 
 func (h *Helper) Info(msg string, keyvals ...interface{}) {
@@ -67,21 +67,21 @@ func (h *Helper) Info(msg string, keyvals ...interface{}) {
 }
 
 func (h *Helper) Infof(format string, a ...interface{}) {
-	h.printfIfMatchLevel(Info, format, a...)
+	h.printIfMatchLevelf(Info, format, a...)
 }
 
 func (h *Helper) Warn(msg string, keyvals ...interface{}) {
 	h.logIfMatchLevel(Warn, msg, keyvals)
 }
 func (h *Helper) Warnf(format string, a ...interface{}) {
-	h.printfIfMatchLevel(Warn, format, a...)
+	h.printIfMatchLevelf(Warn, format, a...)
 }
 
 func (h *Helper) Error(msg string, keyvals ...interface{}) {
 	h.logIfMatchLevel(Error, msg, keyvals)
 }
 func (h *Helper) Errorf(format string, a ...interface{}) {
-	h.printfIfMatchLevel(Error, format, a...)
+	h.printIfMatchLevelf(Error, format, a...)
 }
 
 func (h *Helper) Panic(msg string, keyvals ...interface{}) {
@@ -89,14 +89,14 @@ func (h *Helper) Panic(msg string, keyvals ...interface{}) {
 }
 
 func (h *Helper) Panicf(format string, a ...interface{}) {
-	h.printfIfMatchLevel(Panic, format, a...)
+	h.printIfMatchLevelf(Panic, format, a...)
 }
 
 func (h *Helper) Fatal(msg string, keyvals ...interface{}) {
 	h.logIfMatchLevel(Fatal, msg, keyvals)
 }
 func (h *Helper) Fatalf(format string, a ...interface{}) {
-	h.printfIfMatchLevel(Fatal, format, a...)
+	h.printIfMatchLevelf(Fatal, format, a...)
 }
 
 func (h *Helper) WithContext(ctx context.Context) *Helper {

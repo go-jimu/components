@@ -1,21 +1,24 @@
-package logger
+package logger_test
 
 import (
 	"os"
 	"testing"
+
+	"github.com/go-jimu/components/logger"
 )
 
 func TestLogger(t *testing.T) {
-	logger := NewStdLogger(os.Stdout)
-	logger.Log(Warn, "hello", "world", "bytes", []byte("bytes"), "map", map[string]string{"wosai": "shouqianba"}, "bool", true)
+	log := logger.NewStdLogger(os.Stdout)
+	log.Log(logger.Warn, "hello", "world", "bytes", []byte("bytes"),
+		"map", map[string]string{"wosai": "shouqianba"}, "bool", true)
 }
 
 func TestMissingValue(t *testing.T) {
-	logger := NewStdLogger(os.Stdout)
-	logger.Log(Info, "hello", "world", "non-value")
-	logger.Log(Info)
+	log := logger.NewStdLogger(os.Stdout)
+	log.Log(logger.Info, "hello", "world", "non-value")
+	log.Log(logger.Info)
 }
 
 func TestDefault(t *testing.T) {
-	Default().Log(Info, "msg", "default")
+	logger.Default().Log(logger.Info, "msg", "default")
 }

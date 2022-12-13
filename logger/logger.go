@@ -22,7 +22,7 @@ type (
 		hasValuer bool
 	}
 
-	// Level
+	// Level .
 	Level int
 )
 
@@ -53,7 +53,8 @@ func (cl *contextualLogger) Log(level Level, keyvals ...interface{}) {
 
 func With(l Logger, keyvals ...interface{}) Logger {
 	if cl, ok := l.(*contextualLogger); ok {
-		kvs := make([]interface{}, 0, len(cl.prefix)+len(keyvals)) // https://github.com/uber-go/guide/blob/master/style.md#specifying-slice-capacity
+		// https://github.com/uber-go/guide/blob/master/style.md#specifying-slice-capacity
+		kvs := make([]interface{}, 0, len(cl.prefix)+len(keyvals))
 		kvs = append(kvs, cl.prefix...)
 		kvs = append(kvs, keyvals...)
 		return &contextualLogger{
