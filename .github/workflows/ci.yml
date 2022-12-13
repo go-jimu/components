@@ -16,7 +16,7 @@ jobs:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
     - name: Install tools
-      run: make tool
+      run: make tools
     - name: Unittest
       run: gotestsum --junitfile report.xml --format pkgname --raw-command make test extend=-json
     - name: Publish Test Report
