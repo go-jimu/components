@@ -1,5 +1,13 @@
 # Change log
 
+## v0.2.3
+
+### Changes
+
+- Updated: Golang to version 1.19
+- Enhanced: Add `FromContextAsHelper` to convert `Logger` from context as `Helper`
+- Enhanced: Add `SetDefault` to change `Default` behavior
+
 ## v0.2.2
 
 ### Fixed

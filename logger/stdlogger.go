@@ -2,6 +2,7 @@ package logger
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -27,9 +28,13 @@ var (
 		Panic: "panic",
 		Fatal: "fatal",
 	}
+
+	genDefault = func() Logger {
+		return NewStdLogger(os.Stdout)
+	}
 )
 
-// NewStdLogger new a logger implements Logger interface
+// NewStdLogger new a logger implements Logger interface.
 func NewStdLogger(output io.Writer) Logger {
 	return &stdLogger{
 		log: log.New(output, "", log.LstdFlags),
@@ -41,7 +46,7 @@ func NewStdLogger(output io.Writer) Logger {
 	}
 }
 
-// Log implements implements Logger.Log(Level, ...interfaced{}) method
+// Log implements implements Logger.Log(Level, ...interfaced{}) method.
 func (logger *stdLogger) Log(level Level, keyvalues ...interface{}) {
 	if len(keyvalues) == 0 {
 		return
@@ -50,7 +55,10 @@ func (logger *stdLogger) Log(level Level, keyvalues ...interface{}) {
 		keyvalues = append(keyvalues, ErrMissingValue.Error())
 	}
 
-	buffer := logger.pool.Get().(*bytes.Buffer)
+	buffer, ok := logger.pool.Get().(*bytes.Buffer)
+	if !ok {
+		panic(errors.New("unexpected type"))
+	}
 	defer logger.pool.Put(buffer)
 	defer buffer.Reset()
 
@@ -73,5 +81,11 @@ func (logger *stdLogger) Log(level Level, keyvalues ...interface{}) {
 }
 
 func Default() Logger {
-	return NewStdLogger(os.Stdout)
+	return genDefault()
+}
+
+func SetDefault(fn func() Logger) {
+	if fn != nil {
+		genDefault = fn
+	}
 }
