@@ -20,5 +20,5 @@ func FromContext(ctx context.Context) Logger {
 // FromContextAsHelper 从Context中提取Logger，返回Helper对象。
 func FromContextAsHelper(ctx context.Context) *Helper {
 	log := FromContext(ctx)
-	return NewHelper(log).WithContext(ctx)
+	return NewHelper(log)
 }
