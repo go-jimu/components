@@ -68,6 +68,7 @@ func With(l Logger, keyvals ...interface{}) Logger {
 		log:       l,
 		prefix:    keyvals,
 		hasValuer: containsValuer(keyvals),
+		ctx:       context.Backgroud(),
 	}
 }
 
