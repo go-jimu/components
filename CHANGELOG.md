@@ -1,5 +1,9 @@
 # Change log
 
+## v0.2.5
+
+- Fixed: bad method name
+
 ## v0.2.3
 
 ### Changes
