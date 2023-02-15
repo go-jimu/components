@@ -81,5 +81,8 @@ func WithContext(ctx context.Context, l Logger) Logger {
 			ctx:       ctx,
 		}
 	}
+	if hl, ok := l.(*Helper); ok {
+		return hl.WithContext(ctx)
+	}
 	return &logger{log: l, ctx: ctx}
 }

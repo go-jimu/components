@@ -32,3 +32,32 @@ func TestWith(t *testing.T) {
 
 	log.Log(logger.Panic, "panic", "debug.stack")
 }
+
+var key = &struct{}{}
+
+func extract(recv *string) logger.Valuer {
+	return func(ctx context.Context) interface{} {
+		val, ok := ctx.Value(key).(string)
+		if ok {
+			*recv = val
+		} else {
+			*recv = ""
+		}
+		return ctx.Value(key)
+	}
+}
+
+func TestWithContextOrder(t *testing.T) {
+	ctx := context.WithValue(context.Background(), key, "foobar")
+	helper := logger.NewHelper(logger.NewStdLogger(os.Stdout))
+
+	var ret string
+	log := logger.With(helper, "test", extract(&ret))
+	helper = logger.NewHelper(log)
+	log = logger.WithContext(ctx, helper)
+	helper = logger.NewHelper(log)
+	helper.Info("hello world")
+	if ret != "foobar" {
+		t.FailNow()
+	}
+}
