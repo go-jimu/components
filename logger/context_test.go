@@ -21,8 +21,8 @@ func TestFromContext(t *testing.T) {
 	defer cancel()
 
 	ctx = logger.InContext(ctx, clog)
-	log := logger.FromContextAsHelper(ctx)
-	log.Info("hello")
+	helper := logger.FromContextAsHelper(ctx)
+	helper.Info("hello")
 
 	if atomic.LoadInt32(&called) != 1 {
 		t.FailNow()

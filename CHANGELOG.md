@@ -3,6 +3,7 @@
 ## v0.2.5
 
 - Fixed: bad method name
+- Fixed: `FromContextAsHelper`
 
 ## v0.2.3
 
