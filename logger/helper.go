@@ -21,11 +21,13 @@ type (
 )
 
 func NewHelper(logger Logger, opts ...Option) *Helper {
-	helper, ok := logger.(*Helper)
+	helper := &Helper{level: DefaultLevel, messageKey: DefaultMessageKey}
+	original, ok := logger.(*Helper)
 	if ok {
-		return NewHelper(helper.log, opts...)
+		*helper = *original
+	} else {
+		helper.log = logger
 	}
-	helper = &Helper{log: logger, level: DefaultLevel, messageKey: DefaultMessageKey}
 	for _, opt := range opts {
 		opt(helper)
 	}
