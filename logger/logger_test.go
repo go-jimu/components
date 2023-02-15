@@ -49,10 +49,19 @@ func extract(recv *string) logger.Valuer {
 
 func TestWithContextOrder(t *testing.T) {
 	ctx := context.WithValue(context.Background(), key, "foobar")
-	helper := logger.NewHelper(logger.NewStdLogger(os.Stdout))
+	log := logger.NewStdLogger(os.Stdout)
+	log = logger.WithContext(context.Background(), log)
+	helper := logger.NewHelper(log)
+	log = logger.With(helper, "field", "value")
 
 	var ret string
-	log := logger.With(helper, "test", extract(&ret))
+	log = logger.With(log, "test", extract(&ret))
+	log = logger.WithContext(ctx, log)
+	log.Log(logger.Info, "msg", "log")
+	if ret != "foobar" {
+		t.FailNow()
+	}
+
 	helper = logger.NewHelper(log)
 	log = logger.WithContext(ctx, helper)
 	helper = logger.NewHelper(log)

@@ -64,6 +64,9 @@ func With(l Logger, keyvals ...interface{}) Logger {
 			ctx:       cl.ctx,
 		}
 	}
+	if hl, ok := l.(*Helper); ok {
+		return With(hl.log, keyvals...)
+	}
 	return &logger{
 		log:       l,
 		prefix:    keyvals,
