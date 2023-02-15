@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const (
+var (
 	DefaultMessageKey = "msg"
 	DefaultLevel      = Info
 )
@@ -21,17 +21,24 @@ type (
 )
 
 func NewHelper(logger Logger, opts ...Option) *Helper {
-	helper := &Helper{level: DefaultLevel, messageKey: DefaultMessageKey}
-	original, ok := logger.(*Helper)
+	helper, ok := logger.(*Helper)
 	if ok {
-		*helper = *original
-	} else {
-		helper.log = logger
+		currentOpts := []Option{helper.shadowCopy()}
+		currentOpts = append(currentOpts, opts...)
+		return NewHelper(helper.log, currentOpts...)
 	}
+	helper = &Helper{log: logger, messageKey: DefaultMessageKey, level: DefaultLevel}
 	for _, opt := range opts {
 		opt(helper)
 	}
 	return helper
+}
+
+func (h *Helper) shadowCopy() Option {
+	return func(another *Helper) {
+		another.level = h.level
+		another.messageKey = h.messageKey
+	}
 }
 
 func (h *Helper) Log(level Level, keyvals ...interface{}) {

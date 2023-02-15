@@ -15,14 +15,14 @@ type (
 		Log(level Level, keyvals ...interface{})
 	}
 
-	contextualLogger struct {
+	logger struct {
 		log       Logger
 		ctx       context.Context
 		prefix    []interface{}
 		hasValuer bool
 	}
 
-	// Level .
+	// Level 日志等级定义.
 	Level int
 )
 
@@ -38,10 +38,10 @@ const (
 var (
 	// ErrMissingValue is appended to key-values slices with odd length to substitute the missing value.
 	ErrMissingValue        = errors.New("(missing value)")
-	_               Logger = (*contextualLogger)(nil)
+	_               Logger = (*logger)(nil)
 )
 
-func (cl *contextualLogger) Log(level Level, keyvals ...interface{}) {
+func (cl *logger) Log(level Level, keyvals ...interface{}) {
 	kvs := make([]interface{}, 0, len(cl.prefix)+len(keyvals))
 	kvs = append(kvs, cl.prefix...)
 	if cl.hasValuer {
@@ -52,19 +52,19 @@ func (cl *contextualLogger) Log(level Level, keyvals ...interface{}) {
 }
 
 func With(l Logger, keyvals ...interface{}) Logger {
-	if cl, ok := l.(*contextualLogger); ok {
+	if cl, ok := l.(*logger); ok {
 		// https://github.com/uber-go/guide/blob/master/style.md#specifying-slice-capacity
 		kvs := make([]interface{}, 0, len(cl.prefix)+len(keyvals))
 		kvs = append(kvs, cl.prefix...)
 		kvs = append(kvs, keyvals...)
-		return &contextualLogger{
+		return &logger{
 			log:       cl.log,
 			prefix:    kvs,
 			hasValuer: containsValuer(kvs),
 			ctx:       cl.ctx,
 		}
 	}
-	return &contextualLogger{
+	return &logger{
 		log:       l,
 		prefix:    keyvals,
 		hasValuer: containsValuer(keyvals),
@@ -73,13 +73,13 @@ func With(l Logger, keyvals ...interface{}) Logger {
 }
 
 func WithContext(ctx context.Context, l Logger) Logger {
-	if cl, ok := l.(*contextualLogger); ok {
-		return &contextualLogger{
+	if cl, ok := l.(*logger); ok {
+		return &logger{
 			log:       cl.log,
 			prefix:    cl.prefix,
 			hasValuer: cl.hasValuer,
 			ctx:       ctx,
 		}
 	}
-	return &contextualLogger{log: l, ctx: ctx}
+	return &logger{log: l, ctx: ctx}
 }

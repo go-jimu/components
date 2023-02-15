@@ -39,4 +39,11 @@ func TestNewHelper(t *testing.T) {
 	if atomic.LoadUint32(&counts) != 2 {
 		t.FailNow()
 	}
+
+	child = logger.NewHelper(parent, logger.WithLevel(logger.Info))
+	child.Info("you can see me")
+	child.Warn("you can see me")
+	if atomic.LoadUint32(&counts) != 4 {
+		t.FailNow()
+	}
 }
