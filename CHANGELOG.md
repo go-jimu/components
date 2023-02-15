@@ -1,5 +1,9 @@
 # Change log
 
+## v0.2.7
+
+- Fixed: 解除logger.Helper、logger.logger对`WithContext`使用顺序要求
+
 ## v0.2.5
 
 - Fixed: bad method name
