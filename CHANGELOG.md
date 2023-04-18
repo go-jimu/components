@@ -1,5 +1,12 @@
 # Change log
 
+## v0.2.9
+
+- bump package github.com/fsnotify/fsnotify from v1.5.4 to v1.6.0
+- bump package github.com/imdario/mergo from v0.3.13 to v0.3.15
+- bump package github.com/pelletier/go-toml/v2 from v2.0.5 to v2.0.7
+
+
 ## v0.2.7
 
 - Fixed: 解除logger.Helper、logger.logger对`WithContext`使用顺序要求
