@@ -1,27 +1,28 @@
-package mediator
+package mediator_test
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/go-jimu/components/mediator"
 )
 
 type testEvent struct {
 	called int32
 }
 
-func (e *testEvent) Kind() EventKind {
+func (e *testEvent) Kind() mediator.EventKind {
 	return "test-event"
 }
 
 type testHandler struct{}
 
-func (h testHandler) Listening() []EventKind {
-	return []EventKind{"test-event"}
+func (h testHandler) Listening() []mediator.EventKind {
+	return []mediator.EventKind{"test-event"}
 }
 
-func (h testHandler) Handle(ctx context.Context, ev Event) {
+func (h testHandler) Handle(ev mediator.Event) {
 	te, ok := ev.(*testEvent)
 	if !ok {
 		panic("unexpected event type")
@@ -30,7 +31,7 @@ func (h testHandler) Handle(ctx context.Context, ev Event) {
 }
 
 func TestEvent(t *testing.T) {
-	mediator := NewInMemMediator(3)
+	mediator := mediator.NewInMemMediator(3)
 	mediator.Subscribe(testHandler{})
 
 	ev := &testEvent{}
@@ -43,20 +44,20 @@ func TestEvent(t *testing.T) {
 }
 
 func TestEventCollection(t *testing.T) {
-	mediator := NewInMemMediator(3)
-	mediator.Subscribe(testHandler{})
+	eb := mediator.NewInMemMediator(3)
+	eb.Subscribe(testHandler{})
 
-	collection := NewEventCollection()
+	collection := mediator.NewEventCollection()
 	ev := &testEvent{}
 	collection.Add(ev)
-	collection.Raise(mediator)
+	collection.Raise(eb)
 	<-time.After(100 * time.Millisecond)
 
 	if atomic.LoadInt32(&ev.called) != 1 {
 		t.FailNow()
 	}
 
-	collection.Raise(mediator)
+	collection.Raise(eb)
 	<-time.After(100 * time.Millisecond)
 
 	if atomic.LoadInt32(&ev.called) != 1 {
