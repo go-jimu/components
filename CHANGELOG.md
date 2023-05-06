@@ -1,5 +1,9 @@
 # Change log
 
+## v0.3.0
+
+- redefine `EventHandler.Handle`
+
 ## v0.2.9
 
 - bump package github.com/fsnotify/fsnotify from v1.5.4 to v1.6.0
