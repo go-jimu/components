@@ -1,7 +1,6 @@
 package mediator
 
 import (
-	"context"
 	"sync/atomic"
 )
 
@@ -11,7 +10,7 @@ type (
 
 	EventHandler interface {
 		Listening() []EventKind
-		Handle(context.Context, Event)
+		Handle(Event)
 	}
 
 	// Event 事件接口

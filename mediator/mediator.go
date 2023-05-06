@@ -1,7 +1,5 @@
 package mediator
 
-import "context"
-
 type (
 	Mediator interface {
 		Dispatch(Event)
@@ -61,7 +59,7 @@ func (m *inMemMediator) Dispatch(ev Event) {
 			<-m.concurrent
 		}()
 		for _, handler := range handlers {
-			handler.Handle(context.TODO(), ev) // 在handler内部处理ctx.Done()
+			handler.Handle(ev) // 在handler内部处理ctx.Done()
 		}
 	}(ev, m.handlers[ev.Kind()]...)
 }
