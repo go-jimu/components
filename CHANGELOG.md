@@ -1,5 +1,9 @@
 # Change log
 
+## v0.3.1
+
+- added support for `golang.org/x/exp/slog`
+
 ## v0.3.0
 
 - redefine `EventHandler.Handle`
