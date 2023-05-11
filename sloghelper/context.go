@@ -8,7 +8,7 @@ import (
 
 var ctxKey = &struct{}{}
 
-func InContext(ctx context.Context, logger *slog.Logger) context.Context {
+func NewContext(ctx context.Context, logger *slog.Logger) context.Context {
 	return context.WithValue(ctx, ctxKey, logger)
 }
 

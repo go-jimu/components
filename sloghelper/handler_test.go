@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewHandler(t *testing.T) {
-	hdl := slog.NewJSONHandler(os.Stdout)
+	hdl := slog.NewJSONHandler(os.Stdout, nil)
 	ch := sloghelper.NewHandler(hdl, sloghelper.WithDisableStackTrace(true))
 	logger := slog.New(ch)
 	logger.Error("world peace")
