@@ -1,6 +1,7 @@
 package sloghelper_test
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -10,7 +11,12 @@ import (
 
 func TestNewHandler(t *testing.T) {
 	hdl := slog.NewJSONHandler(os.Stdout, nil)
-	ch := sloghelper.NewHandler(hdl, sloghelper.WithDisableStackTrace(true))
+	ch := sloghelper.NewHandler(
+		hdl,
+		sloghelper.WithDisableStackTrace(true),
+		sloghelper.WithHandleFunc(func(ctx context.Context, r *slog.Record) {
+			r.Add(slog.String("additional", "foobar"))
+		}))
 	logger := slog.New(ch)
 	logger.Error("world peace")
 
