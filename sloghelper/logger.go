@@ -63,6 +63,6 @@ func NewLog(opt Options) *slog.Logger {
 	return logger
 }
 
-func With(opt HandlerOption) {
+func Apply(opt HandlerOption) {
 	defaultHandler.Apply(opt)
 }
