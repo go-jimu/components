@@ -39,6 +39,13 @@ func NewHandler(hdl slog.Handler, opts ...HandlerOption) slog.Handler {
 	return nh
 }
 
+func (ch *Handler) clone(hdl slog.Handler) *Handler {
+	cloned := new(Handler)
+	*cloned = *ch
+	cloned.handler = hdl
+	return cloned
+}
+
 func (ch *Handler) Enabled(ctx context.Context, level slog.Level) bool {
 	return ch.handler.Enabled(ctx, level)
 }
@@ -53,12 +60,12 @@ func (ch *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 func (ch *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	hdl := ch.handler.WithAttrs(attrs)
-	return NewHandler(hdl)
+	return ch.clone(hdl)
 }
 
 func (ch *Handler) WithGroup(name string) slog.Handler {
 	hdl := ch.handler.WithGroup(name)
-	return NewHandler(hdl)
+	return ch.clone(hdl)
 }
 
 func (ch *Handler) Apply(opt HandlerOption) {
