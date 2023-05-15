@@ -1,19 +1,20 @@
 package mediator
 
 import (
+	"context"
 	"sync/atomic"
 )
 
 type (
-	// EventKind 事件类型描述
+	// EventKind 事件类型描述.
 	EventKind string
 
 	EventHandler interface {
 		Listening() []EventKind
-		Handle(Event)
+		Handle(context.Context, Event)
 	}
 
-	// Event 事件接口
+	// Event 事件接口.
 	Event interface {
 		Kind() EventKind
 	}

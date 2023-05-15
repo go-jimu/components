@@ -1,6 +1,7 @@
 package mediator_test
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ func (h testHandler) Listening() []mediator.EventKind {
 	return []mediator.EventKind{"test-event"}
 }
 
-func (h testHandler) Handle(ev mediator.Event) {
+func (h testHandler) Handle(_ context.Context, ev mediator.Event) {
 	te, ok := ev.(*testEvent)
 	if !ok {
 		panic("unexpected event type")
@@ -31,7 +32,7 @@ func (h testHandler) Handle(ev mediator.Event) {
 }
 
 func TestEvent(t *testing.T) {
-	mediator := mediator.NewInMemMediator(3)
+	mediator, _ := mediator.NewInMemMediator(mediator.Options{Concurrent: 3})
 	mediator.Subscribe(testHandler{})
 
 	ev := &testEvent{}
@@ -44,7 +45,7 @@ func TestEvent(t *testing.T) {
 }
 
 func TestEventCollection(t *testing.T) {
-	eb := mediator.NewInMemMediator(3)
+	eb, _ := mediator.NewInMemMediator(mediator.Options{Concurrent: 3})
 	eb.Subscribe(testHandler{})
 
 	collection := mediator.NewEventCollection()

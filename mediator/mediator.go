@@ -1,41 +1,56 @@
 package mediator
 
+import (
+	"context"
+	"time"
+)
+
 type (
 	Mediator interface {
 		Dispatch(Event)
 		Subscribe(EventHandler)
 	}
 
-	inMemMediator struct {
+	InMemMediator struct {
+		timeout            time.Duration
 		handlers           map[EventKind][]EventHandler
 		concurrent         chan struct{}
 		orphanEventHandler func(Event)
 	}
 
-	Option func(*inMemMediator)
+	Options struct {
+		Timeout    string `json:"timeout" yaml:"timeout" toml:"timeout"`
+		Concurrent int    `json:"concurrent" yaml:"concurrent" toml:"concurrent"`
+	}
 )
 
-var (
-	_ Mediator = (*inMemMediator)(nil)
-)
+var _ Mediator = (*InMemMediator)(nil)
 
-func NewInMemMediator(concurrent int, opts ...Option) Mediator {
-	if concurrent < 1 {
-		concurrent = 1
+func NewInMemMediator(opt Options) (Mediator, error) {
+	if opt.Concurrent < 1 {
+		opt.Concurrent = 1
 	}
 
-	m := &inMemMediator{
+	if opt.Timeout == "" {
+		opt.Timeout = "0s"
+	}
+	d, err := time.ParseDuration(opt.Timeout)
+	if err != nil {
+		return nil, err
+	}
+	if d < 0 {
+		d = 0
+	}
+
+	m := &InMemMediator{
 		handlers:   make(map[EventKind][]EventHandler),
-		concurrent: make(chan struct{}, concurrent),
+		concurrent: make(chan struct{}, opt.Concurrent),
+		timeout:    d,
 	}
-
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
+	return m, nil
 }
 
-func (m *inMemMediator) Subscribe(hdl EventHandler) {
+func (m *InMemMediator) Subscribe(hdl EventHandler) {
 	for _, kind := range hdl.Listening() {
 		if _, ok := m.handlers[kind]; !ok {
 			m.handlers[kind] = make([]EventHandler, 0)
@@ -44,7 +59,7 @@ func (m *inMemMediator) Subscribe(hdl EventHandler) {
 	}
 }
 
-func (m *inMemMediator) Dispatch(ev Event) {
+func (m *InMemMediator) Dispatch(ev Event) {
 	if _, ok := m.handlers[ev.Kind()]; !ok {
 		if m.orphanEventHandler != nil {
 			m.orphanEventHandler(ev)
@@ -58,14 +73,18 @@ func (m *inMemMediator) Dispatch(ev Event) {
 		defer func() {
 			<-m.concurrent
 		}()
+		var ctx = context.Background()
+		var cancel context.CancelFunc
+		if m.timeout > 0 {
+			ctx, cancel = context.WithTimeout(context.Background(), m.timeout)
+			defer cancel()
+		}
 		for _, handler := range handlers {
-			handler.Handle(ev) // 在handler内部处理ctx.Done()
+			handler.Handle(ctx, ev) // 在handler内部处理ctx.Done()
 		}
 	}(ev, m.handlers[ev.Kind()]...)
 }
 
-func WithOrphanEventHandler(fn func(Event)) Option {
-	return func(m *inMemMediator) {
-		m.orphanEventHandler = fn
-	}
+func (m *InMemMediator) WithOrphanEventHandler(fn func(Event)) {
+	m.orphanEventHandler = fn
 }
