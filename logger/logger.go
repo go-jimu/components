@@ -11,6 +11,7 @@ type (
 	// Implementations must be safe for concurrent use by multiple goroutines. In
 	// particular, any implementation of Logger that appends to keyvals or
 	// modifies or retains any of its elements must make a copy first.
+	// Deprecated: Please use log/slog instead of this module.
 	Logger interface {
 		Log(level Level, keyvals ...interface{})
 	}
