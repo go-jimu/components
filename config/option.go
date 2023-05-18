@@ -2,12 +2,11 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
 	"github.com/go-jimu/components/encoding"
-	"github.com/go-jimu/components/logger"
+	"golang.org/x/exp/slog"
 )
 
 // Decoder is config decoder.
@@ -23,7 +22,7 @@ type options struct {
 	sources  []Source
 	decoder  Decoder
 	resolver Resolver
-	logger   *logger.Helper
+	logger   *slog.Logger
 }
 
 // WithSource with config source.
@@ -52,7 +51,7 @@ func WithResolver(r Resolver) Option {
 }
 
 // WithLogger with config logger.
-func WithLogger(l *logger.Helper) Option {
+func WithLogger(l *slog.Logger) Option {
 	return func(o *options) {
 		o.logger = l
 	}
@@ -124,9 +123,8 @@ func defaultResolver(input map[string]interface{}) error {
 	return resolve(input)
 }
 
-func defaultLogger() *logger.Helper {
-	log := logger.NewStdLogger(os.Stdout)
-	return logger.NewHelper(log, logger.WithLevel(logger.Info))
+func defaultLogger() *slog.Logger {
+	return slog.Default()
 }
 
 func expand(s string, mapping func(string) string) string {
