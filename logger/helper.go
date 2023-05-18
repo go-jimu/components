@@ -11,6 +11,7 @@ var (
 )
 
 type (
+	// Deprecated: Please use log/slog instead of this module.
 	Helper struct {
 		log        Logger
 		level      Level
