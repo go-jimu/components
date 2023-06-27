@@ -1,6 +1,7 @@
 package sloghelper
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -34,14 +35,14 @@ func NewLog(opt Options) *slog.Logger {
 		Level:     levelDescriptions[opt.Level],
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.SourceKey {
-				subs := strings.Split(a.Value.String(), "/")
-				if len(subs) >= 2 {
-					a.Value = slog.StringValue(strings.Join(subs[len(subs)-2:], "/"))
+				if src, ok := a.Value.Any().(*slog.Source); ok {
+					a.Value = slog.StringValue(fmt.Sprintf("%s:%d", src.File, src.Line))
 				}
 			}
 			return a
 		},
 	}
+
 	var output io.Writer
 	if strings.ToLower(opt.Output) == "console" {
 		output = os.Stdout

@@ -13,7 +13,7 @@ func TestNewLog(t *testing.T) {
 	var called int32
 	ctx := context.WithValue(context.Background(), "foobar", "helloworld")
 
-	logger := sloghelper.NewLog(sloghelper.Options{Output: "console"})
+	logger := sloghelper.NewLog(sloghelper.Options{Output: "console", Level: "debug"})
 	sloghelper.Apply(sloghelper.WithHandleFunc(func(ctx context.Context, r *slog.Record) {
 		r.AddAttrs(slog.String("value", ctx.Value("foobar").(string)))
 		atomic.AddInt32(&called, 1)
