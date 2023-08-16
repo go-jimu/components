@@ -3,10 +3,10 @@ package sloghelper
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
-	"golang.org/x/exp/slog"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 

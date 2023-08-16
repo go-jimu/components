@@ -1,6 +1,6 @@
 package sloghelper
 
-import "golang.org/x/exp/slog"
+import "log/slog"
 
 var ErrorKey = "error"
 
