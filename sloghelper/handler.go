@@ -2,9 +2,8 @@ package sloghelper
 
 import (
 	"context"
+	"log/slog"
 	"runtime/debug"
-
-	"golang.org/x/exp/slog"
 )
 
 type (

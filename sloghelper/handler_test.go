@@ -2,11 +2,11 @@ package sloghelper_test
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"testing"
 
 	"github.com/go-jimu/components/sloghelper"
-	"golang.org/x/exp/slog"
 )
 
 func TestNewHandler(t *testing.T) {
@@ -19,9 +19,9 @@ func TestNewHandler(t *testing.T) {
 			r.Add(slog.String("value", ctx.Value("foo").(string)))
 		}))
 	logger := slog.New(ch)
-	logger.ErrorCtx(ctx, "world peace")
+	logger.ErrorContext(ctx, "world peace")
 
 	ch2 := sloghelper.NewHandler(ch)
 	logger2 := slog.New(ch2)
-	logger2.ErrorCtx(ctx, "hello world")
+	logger2.ErrorContext(ctx, "hello world")
 }

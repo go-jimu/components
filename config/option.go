@@ -2,11 +2,11 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
 	"github.com/go-jimu/components/encoding"
-	"golang.org/x/exp/slog"
 )
 
 // Decoder is config decoder.

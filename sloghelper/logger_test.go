@@ -2,11 +2,11 @@ package sloghelper_test
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 
 	"github.com/go-jimu/components/sloghelper"
-	"golang.org/x/exp/slog"
 )
 
 func TestNewLog(t *testing.T) {
@@ -22,7 +22,7 @@ func TestNewLog(t *testing.T) {
 	ctx = sloghelper.NewContext(ctx, logger)
 	logger = sloghelper.FromContext(ctx)
 
-	logger.InfoCtx(ctx, "print something")
+	logger.InfoContext(ctx, "print something")
 	if atomic.LoadInt32(&called) != 1 {
 		t.FailNow()
 	}
