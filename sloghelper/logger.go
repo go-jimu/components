@@ -57,7 +57,7 @@ func NewLog(opt Options) *slog.Logger {
 		}
 	}
 
-	defaultHandler = NewHandler(slog.NewJSONHandler(output, opts)).(*Handler)
+	defaultHandler, _ = NewHandler(slog.NewJSONHandler(output, opts)).(*Handler)
 	logger := slog.New(defaultHandler)
 	slog.SetDefault(logger)
 	logger.Info("the log module has been initialized successfully.", slog.Any("option", opt))

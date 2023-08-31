@@ -5,7 +5,7 @@ import (
 	"log/slog"
 )
 
-var ctxKey = &struct{}{}
+var ctxKey = &struct{ key string }{"context"}
 
 func NewContext(ctx context.Context, logger *slog.Logger) context.Context {
 	return context.WithValue(ctx, ctxKey, logger)
