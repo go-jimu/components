@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -31,16 +32,9 @@ var defaultHandler *Handler
 
 func NewLog(opt Options) *slog.Logger {
 	opts := &slog.HandlerOptions{
-		AddSource: true,
-		Level:     levelDescriptions[opt.Level],
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.SourceKey {
-				if src, ok := a.Value.Any().(*slog.Source); ok {
-					a.Value = slog.StringValue(fmt.Sprintf("%s:%d", src.File, src.Line))
-				}
-			}
-			return a
-		},
+		AddSource:   true,
+		Level:       levelDescriptions[opt.Level],
+		ReplaceAttr: shortFilePath,
 	}
 
 	var output io.Writer
@@ -66,4 +60,15 @@ func NewLog(opt Options) *slog.Logger {
 
 func Apply(opt HandlerOption) {
 	defaultHandler.Apply(opt)
+}
+
+func shortFilePath(_ []string, a slog.Attr) slog.Attr {
+	if a.Key == slog.SourceKey {
+		if src, ok := a.Value.Any().(*slog.Source); ok {
+			d, f := filepath.Split(src.File)
+			dir := filepath.Base(d)
+			a.Value = slog.StringValue(fmt.Sprintf("%s/%s:%d", dir, f, src.Line))
+		}
+	}
+	return a
 }
