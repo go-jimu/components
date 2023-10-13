@@ -10,9 +10,8 @@ import (
 )
 
 type watcher struct {
-	f  *file
-	fw *fsnotify.Watcher
-
+	f      *file
+	fw     *fsnotify.Watcher
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -24,7 +23,7 @@ func newWatcher(f *file) (config.Watcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := fw.Add(f.path); err != nil {
+	if err = fw.Add(f.path); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -38,7 +37,7 @@ func (w *watcher) Next() ([]*config.KeyValue, error) {
 	case event := <-w.fw.Events:
 		if event.Op == fsnotify.Rename {
 			if _, err := os.Stat(event.Name); err == nil || os.IsExist(err) {
-				if err := w.fw.Add(event.Name); err != nil {
+				if err = w.fw.Add(event.Name); err != nil {
 					return nil, err
 				}
 			}
