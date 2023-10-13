@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	_ "github.com/go-jimu/components/encoding/json"
 	_ "github.com/go-jimu/components/encoding/toml"
 	_ "github.com/go-jimu/components/encoding/yaml"
+	"github.com/go-jimu/components/sloghelper"
 )
 
 var (
@@ -49,7 +51,6 @@ func New(opts ...Option) Config {
 	o := options{
 		decoder:  defaultDecoder,
 		resolver: defaultResolver,
-		logger:   defaultLogger(),
 	}
 	for _, opt := range opts {
 		opt(&o)
@@ -63,25 +64,29 @@ func New(opts ...Option) Config {
 func (c *config) watch(w Watcher) {
 	for {
 		kvs, err := w.Next()
-		if errors.Is(err, context.Canceled) {
-			return
-		}
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				slog.Info("watcher's ctx was canceled")
+				return
+			}
 			time.Sleep(time.Second)
+			slog.Error("faield to watch next config", sloghelper.Error(err))
 			continue
 		}
 		if err = c.reader.Merge(kvs...); err != nil {
-			c.opts.logger.Error(fmt.Sprintf("failed to merge config: %v", err))
+			slog.Error("failed to merge config", sloghelper.Error(err))
 			continue
 		}
 		if err = c.reader.Resolve(); err != nil {
-			c.opts.logger.Error(fmt.Sprintf("failed to resolve: %v", err))
+			slog.Error("failed to resolve", sloghelper.Error(err))
 			continue
 		}
 		c.cached.Range(func(key, value interface{}) bool {
-			k := key.(string)
-			v := value.(Value)
-			if n, ok := c.reader.Value(k); ok && reflect.TypeOf(n.Load()) == reflect.TypeOf(v.Load()) && !reflect.DeepEqual(n.Load(), v.Load()) {
+			k, _ := key.(string)
+			v, _ := value.(Value)
+			if n, ok := c.reader.Value(k); ok &&
+				reflect.TypeOf(n.Load()) == reflect.TypeOf(v.Load()) &&
+				!reflect.DeepEqual(n.Load(), v.Load()) {
 				v.Store(n.Load())
 				if o, ok := c.observers.Load(k); ok {
 					o.(Observer)(k, v)
@@ -99,22 +104,22 @@ func (c *config) Load() error {
 			return err
 		}
 		for _, v := range kvs {
-			c.opts.logger.Debug(fmt.Sprintf("config loaded: %s format: %s", v.Key, v.Format))
+			slog.Debug(fmt.Sprintf("config loaded: %s format: %s", v.Key, v.Format))
 		}
 		if err = c.reader.Merge(kvs...); err != nil {
-			c.opts.logger.Error(fmt.Sprintf("failed to merge config source: %v", err))
+			slog.Error("failed to merge config source", sloghelper.Error(err))
 			return err
 		}
 		w, err := src.Watch()
 		if err != nil {
-			c.opts.logger.Error(fmt.Sprintf("failed to watch config source: %v", err))
+			slog.Error("failed to watch config source", sloghelper.Error(err))
 			return err
 		}
 		c.watchers = append(c.watchers, w)
 		go c.watch(w)
 	}
 	if err := c.reader.Resolve(); err != nil {
-		c.opts.logger.Error(fmt.Sprintf("failed to resolve config source: %v", err))
+		slog.Error("failed to resolve config source", sloghelper.Error(err))
 		return err
 	}
 	return nil
