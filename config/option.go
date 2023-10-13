@@ -22,7 +22,6 @@ type options struct {
 	sources  []Source
 	decoder  Decoder
 	resolver Resolver
-	logger   *slog.Logger
 }
 
 // WithSource with config source.
@@ -47,13 +46,6 @@ func WithDecoder(d Decoder) Option {
 func WithResolver(r Resolver) Option {
 	return func(o *options) {
 		o.resolver = r
-	}
-}
-
-// WithLogger with config logger.
-func WithLogger(l *slog.Logger) Option {
-	return func(o *options) {
-		o.logger = l
 	}
 }
 

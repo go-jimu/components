@@ -5,9 +5,11 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
+	"github.com/go-jimu/components/sloghelper"
 	"github.com/imdario/mergo"
 )
 
@@ -29,24 +31,27 @@ func newReader(opts options) Reader {
 	return &reader{
 		opts:   opts,
 		values: make(map[string]interface{}),
-		lock:   sync.Mutex{},
 	}
 }
 
 func (r *reader) Merge(kvs ...*KeyValue) error {
-	r.lock.Lock()
-	merged, err := cloneMap(r.values)
-	r.lock.Unlock()
+	merged, err := r.cloneMap()
 	if err != nil {
 		return err
 	}
 	for _, kv := range kvs {
 		next := make(map[string]interface{})
-		if err := r.opts.decoder(kv, next); err != nil {
-			return fmt.Errorf("decode error: {%s: %s}: %w", kv, string(kv.Value), err)
+		if err = r.opts.decoder(kv, next); err != nil {
+			slog.Error(
+				"failed to config decode",
+				slog.String("key", kv.Key), slog.String("value", string(kv.Value)), sloghelper.Error(err))
+			return err
 		}
-		if err := mergo.Map(&merged, convertMap(next), mergo.WithOverride); err != nil {
-			return fmt.Errorf("merge error: {%s: %s}: %w", kv, string(kv.Value), err)
+		if err = mergo.Map(&merged, convertMap(next), mergo.WithOverride); err != nil {
+			slog.Error(
+				"failed to config merge",
+				slog.String("key", kv.Key), slog.String("value", string(kv.Value)), sloghelper.Error(err))
+			return err
 		}
 	}
 	r.lock.Lock()
@@ -73,6 +78,12 @@ func (r *reader) Resolve() error {
 	return r.opts.resolver(r.values)
 }
 
+func (r *reader) cloneMap() (map[string]interface{}, error) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	return cloneMap(r.values)
+}
+
 func cloneMap(src map[string]interface{}) (map[string]interface{}, error) {
 	// https://gist.github.com/soroushjp/0ec92102641ddfc3ad5515ca76405f4d
 	var buf bytes.Buffer
@@ -84,12 +95,12 @@ func cloneMap(src map[string]interface{}) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	var copy map[string]interface{}
-	err = dec.Decode(&copy)
+	var clone map[string]interface{}
+	err = dec.Decode(&clone)
 	if err != nil {
 		return nil, err
 	}
-	return copy, nil
+	return clone, nil
 }
 
 func convertMap(src interface{}) interface{} {

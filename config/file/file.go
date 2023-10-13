@@ -41,11 +41,12 @@ func (f *file) loadFile(path string) (*config.KeyValue, error) {
 	}, nil
 }
 
-func (f *file) loadDir(path string) (kvs []*config.KeyValue, err error) {
+func (f *file) loadDir(path string) ([]*config.KeyValue, error) {
 	files, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}
+	kvs := make([]*config.KeyValue, 0)
 	for _, file := range files {
 		// ignore hidden files
 		if file.IsDir() || strings.HasPrefix(file.Name(), ".") {
@@ -57,10 +58,10 @@ func (f *file) loadDir(path string) (kvs []*config.KeyValue, err error) {
 		}
 		kvs = append(kvs, kv)
 	}
-	return
+	return kvs, nil
 }
 
-func (f *file) Load() (kvs []*config.KeyValue, err error) {
+func (f *file) Load() ([]*config.KeyValue, error) {
 	fi, err := os.Stat(f.path)
 	if err != nil {
 		return nil, err

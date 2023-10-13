@@ -30,7 +30,8 @@
 				"github.vscode-pull-request-github",
 				"PascalReitermann93.vscode-yaml-sort",
 				"kennylong.kubernetes-yaml-formatter",
-				"oderwat.indent-rainbow"
+				"oderwat.indent-rainbow",
+				"github.vscode-github-actions"
 			]
 		}
 	},
