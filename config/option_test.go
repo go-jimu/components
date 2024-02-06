@@ -206,23 +206,30 @@ func TestExpand(t *testing.T) {
 		want    string
 	}{
 		{
-			input: "${a}",
-			mapping: func(s string) string {
-				return strings.ToUpper(s)
-			},
-			want: "A",
+			input:   "${a}",
+			mapping: strings.ToUpper,
+			want:    "A",
 		},
 		{
-			input: "a",
-			mapping: func(s string) string {
-				return strings.ToUpper(s)
-			},
-			want: "a",
+			input:   "a",
+			mapping: strings.ToUpper,
+			want:    "a",
 		},
 	}
 	for _, tt := range tests {
 		if got := expand(tt.input, tt.mapping); got != tt.want {
 			t.Errorf("expand() want: %s, got: %s", tt.want, got)
 		}
+	}
+}
+
+func TestWithMergeFunc(t *testing.T) {
+	c := &options{}
+	a := func(dst, src interface{}) error {
+		return nil
+	}
+	WithMergeFunc(a)(c)
+	if c.merge == nil {
+		t.Fatal("c.merge is nil")
 	}
 }

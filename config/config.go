@@ -51,6 +51,7 @@ func New(opts ...Option) Config {
 	o := options{
 		decoder:  defaultDecoder,
 		resolver: defaultResolver,
+		merge:    defaultMerge,
 	}
 	for _, opt := range opts {
 		opt(&o)

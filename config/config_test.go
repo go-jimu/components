@@ -131,6 +131,7 @@ func TestConfig(t *testing.T) {
 		sources:  []Source{jSource},
 		decoder:  defaultDecoder,
 		resolver: defaultResolver,
+		merge:    defaultMerge,
 	}
 	cf := &config{}
 	cf.opts = opts
