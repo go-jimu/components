@@ -2,10 +2,10 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
 	"regexp"
 	"strings"
 
+	"dario.cat/mergo"
 	"github.com/go-jimu/components/encoding"
 )
 
@@ -18,10 +18,14 @@ type Resolver func(map[string]interface{}) error
 // Option is config option.
 type Option func(*options)
 
+// Merge is config merge func.
+type Merge func(dst, src interface{}) error
+
 type options struct {
 	sources  []Source
 	decoder  Decoder
 	resolver Resolver
+	merge    Merge
 }
 
 // WithSource with config source.
@@ -46,6 +50,13 @@ func WithDecoder(d Decoder) Option {
 func WithResolver(r Resolver) Option {
 	return func(o *options) {
 		o.resolver = r
+	}
+}
+
+// WithMergeFunc with config merge func.
+func WithMergeFunc(m Merge) Option {
+	return func(o *options) {
+		o.merge = m
 	}
 }
 
@@ -92,10 +103,12 @@ func defaultResolver(input map[string]interface{}) error {
 			switch vt := v.(type) {
 			case string:
 				sub[k] = expand(vt, mapper)
+
 			case map[string]interface{}:
 				if err := resolve(vt); err != nil {
 					return err
 				}
+
 			case []interface{}:
 				for i, iface := range vt {
 					switch it := iface.(type) {
@@ -115,8 +128,8 @@ func defaultResolver(input map[string]interface{}) error {
 	return resolve(input)
 }
 
-func defaultLogger() *slog.Logger {
-	return slog.Default()
+func defaultMerge(dst, src interface{}) error {
+	return mergo.Map(dst, src, mergo.WithOverride)
 }
 
 func expand(s string, mapping func(string) string) string {

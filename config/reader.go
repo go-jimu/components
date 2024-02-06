@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/go-jimu/components/sloghelper"
-	"github.com/imdario/mergo"
 )
 
 // Reader is config reader.
@@ -42,14 +41,13 @@ func (r *reader) Merge(kvs ...*KeyValue) error {
 	for _, kv := range kvs {
 		next := make(map[string]interface{})
 		if err = r.opts.decoder(kv, next); err != nil {
-			slog.Error(
-				"failed to config decode",
+			slog.Error("failed to decode configurations",
 				slog.String("key", kv.Key), slog.String("value", string(kv.Value)), sloghelper.Error(err))
 			return err
 		}
-		if err = mergo.Map(&merged, convertMap(next), mergo.WithOverride); err != nil {
+		if err = r.opts.merge(&merged, convertMap(next)); err != nil {
 			slog.Error(
-				"failed to config merge",
+				"failed to merge configurations",
 				slog.String("key", kv.Key), slog.String("value", string(kv.Value)), sloghelper.Error(err))
 			return err
 		}
@@ -111,21 +109,25 @@ func convertMap(src interface{}) interface{} {
 			dst[k] = convertMap(v)
 		}
 		return dst
+
 	case map[interface{}]interface{}:
 		dst := make(map[string]interface{}, len(m))
 		for k, v := range m {
 			dst[fmt.Sprint(k)] = convertMap(v)
 		}
 		return dst
+
 	case []interface{}:
 		dst := make([]interface{}, len(m))
 		for k, v := range m {
 			dst[k] = convertMap(v)
 		}
 		return dst
+
 	case []byte:
 		// there will be no binary data in the config data
 		return string(m)
+
 	default:
 		return src
 	}
