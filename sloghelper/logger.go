@@ -38,7 +38,7 @@ func NewLog(opt Options) *slog.Logger {
 	}
 
 	var output io.Writer
-	if strings.ToLower(opt.Output) == "console" {
+	if opt.Output == "" || strings.ToLower(opt.Output) == "console" {
 		output = os.Stdout
 	} else {
 		output = &lumberjack.Logger{
