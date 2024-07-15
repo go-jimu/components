@@ -56,7 +56,6 @@ type testConfigStruct struct {
 	} `json:"data"`
 	Endpoints []string `json:"endpoints"`
 }
-
 type testJSONSource struct {
 	data string
 	sig  chan struct{}
