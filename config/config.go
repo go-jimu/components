@@ -75,11 +75,11 @@ func (c *config) watch(w Watcher) {
 			continue
 		}
 		if err = c.reader.Merge(kvs...); err != nil {
-			slog.Error("failed to merge config", sloghelper.Error(err))
+			slog.Error("failed to merge next config", sloghelper.Error(err))
 			continue
 		}
 		if err = c.reader.Resolve(); err != nil {
-			slog.Error("failed to resolve", sloghelper.Error(err))
+			slog.Error("failed to resolve next config", sloghelper.Error(err))
 			continue
 		}
 		c.cached.Range(func(key, value interface{}) bool {
