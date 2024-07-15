@@ -4,7 +4,7 @@ jobs:
   unittest:
     strategy:
       matrix:
-        go-version: [1.21.x]
+        go-version: [1.21.x, 1.22.x]
         os: [ubuntu-latest]
       fail-fast: true
     runs-on: ${{matrix.os}}
