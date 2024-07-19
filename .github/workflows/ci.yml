@@ -1,5 +1,6 @@
 name: CI
 on:
+  push:
   pull_request:
     types:
     - closed
@@ -65,5 +66,5 @@ jobs:
     - run: |
         git config --global user.name "Github Action"
         git config --global user.email "go-jimu@users.noreply.github.com"
-        echo ${{github.ref_name}}
-        echo ${{github.event.pull_request.base.ref}}
+        echo ${{ github.head_ref || github.ref_name }}
+        echo ${{ github.event.pull_request.base.ref }}
