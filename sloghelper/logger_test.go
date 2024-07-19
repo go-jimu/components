@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-jimu/components/sloghelper"
+	"github.com/pkg/errors"
 )
 
 func TestNewLog(t *testing.T) {
@@ -26,4 +27,14 @@ func TestNewLog(t *testing.T) {
 	if atomic.LoadInt32(&called) != 1 {
 		t.FailNow()
 	}
+}
+
+func TestLogError(t *testing.T) {
+	fn := func() error {
+		err := errors.New("unknown error")
+		return errors.WithStack(err)
+	}
+	err := fn()
+	logger := sloghelper.NewLog(sloghelper.Options{Output: "console", Level: "debug"})
+	logger.Error("found a error", sloghelper.Error(err))
 }

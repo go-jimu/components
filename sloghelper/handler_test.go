@@ -16,7 +16,6 @@ func TestNewHandler(t *testing.T) {
 	hdl := slog.NewJSONHandler(os.Stdout, nil)
 	ch := sloghelper.NewHandler(
 		hdl,
-		sloghelper.WithDisableStackTrace(true),
 		sloghelper.WithHandleFunc(func(ctx context.Context, r *slog.Record) {
 			r.AddAttrs(slog.Int64("called", atomic.AddInt64(&called, 1)))
 		}))
