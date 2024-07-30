@@ -64,7 +64,7 @@ jobs:
   auto-tag:
     runs-on: ubuntu-latest
     needs: unittest
-    if: github.event.pull_request.merged == true
+    # if: github.event.pull_request.merged == true
     steps:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v4
