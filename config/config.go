@@ -10,8 +10,9 @@ import (
 	"sync"
 	"time"
 
-	// init encoding
+	// init encoding.
 	_ "github.com/go-jimu/components/encoding/json"
+	_ "github.com/go-jimu/components/encoding/proto"
 	_ "github.com/go-jimu/components/encoding/toml"
 	_ "github.com/go-jimu/components/encoding/yaml"
 	"github.com/go-jimu/components/sloghelper"
