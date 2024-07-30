@@ -2,6 +2,8 @@ name: CI
 on:
   push:
   pull_request:
+    branches:
+    - master
     types:
     - closed
 jobs:
@@ -68,3 +70,4 @@ jobs:
         git config --global user.email "go-jimu@users.noreply.github.com"
         echo ${{ github.head_ref || github.ref_name }}
         echo ${{ github.event.pull_request.base.ref }}
+        echo ${{ github.event.head_commit.message }}
