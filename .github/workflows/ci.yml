@@ -1,7 +1,11 @@
 name: CI
 on:
   push:
-  pull_request:
+    branches:
+    - master
+    tags:
+    - v*.*.*
+  pull_request_target:
     branches:
     - master
 concurrency:
