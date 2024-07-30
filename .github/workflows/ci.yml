@@ -74,6 +74,8 @@ jobs:
     steps:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v4
+      with:
+        fetch-tags: true
     - run: |
         git config --global user.name "Github Action Bot"
         git config --global user.email "go-jimu@users.noreply.github.com"
