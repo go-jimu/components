@@ -32,7 +32,7 @@ func (h testHandler) Handle(_ context.Context, ev mediator.Event) {
 }
 
 func TestEvent(t *testing.T) {
-	mediator, _ := mediator.NewInMemMediator(mediator.Options{Concurrent: 3})
+	mediator := mediator.NewInMemMediator(mediator.Options{Concurrent: 3})
 	mediator.Subscribe(testHandler{})
 
 	ev := &testEvent{}
@@ -45,7 +45,7 @@ func TestEvent(t *testing.T) {
 }
 
 func TestEventCollection(t *testing.T) {
-	eb, _ := mediator.NewInMemMediator(mediator.Options{Concurrent: 3})
+	eb := mediator.NewInMemMediator(mediator.Options{Concurrent: 3})
 	eb.Subscribe(testHandler{})
 
 	collection := mediator.NewEventCollection()

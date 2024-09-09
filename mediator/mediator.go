@@ -6,18 +6,22 @@ import (
 )
 
 type (
+	// Mediator is the interface that wraps the methods of a mediator.
 	Mediator interface {
 		Dispatch(Event)
 		Subscribe(EventHandler)
 	}
 
+	// InMemMediator is a simple in-memory mediator implementation.
 	InMemMediator struct {
 		timeout            time.Duration
 		handlers           map[EventKind][]EventHandler
 		concurrent         chan struct{}
 		orphanEventHandler func(Event)
+		genContextFn       func(ctx context.Context) context.Context
 	}
 
+	// Options is the options for the mediator.
 	Options struct {
 		Timeout    string `json:"timeout" yaml:"timeout" toml:"timeout"`
 		Concurrent int    `json:"concurrent" yaml:"concurrent" toml:"concurrent"`
@@ -26,17 +30,14 @@ type (
 
 var _ Mediator = (*InMemMediator)(nil)
 
-func NewInMemMediator(opt Options) (Mediator, error) {
+func NewInMemMediator(opt Options) Mediator {
 	if opt.Concurrent < 1 {
 		opt.Concurrent = 1
 	}
 
-	if opt.Timeout == "" {
-		opt.Timeout = "0s"
-	}
 	d, err := time.ParseDuration(opt.Timeout)
 	if err != nil {
-		return nil, err
+		d = 0
 	}
 	if d < 0 {
 		d = 0
@@ -47,9 +48,10 @@ func NewInMemMediator(opt Options) (Mediator, error) {
 		concurrent: make(chan struct{}, opt.Concurrent),
 		timeout:    d,
 	}
-	return m, nil
+	return m
 }
 
+// Subscribe registers an event handler to the mediator.
 func (m *InMemMediator) Subscribe(hdl EventHandler) {
 	for _, kind := range hdl.Listening() {
 		if _, ok := m.handlers[kind]; !ok {
@@ -59,6 +61,7 @@ func (m *InMemMediator) Subscribe(hdl EventHandler) {
 	}
 }
 
+// Dispatch dispatches an event to the mediator.
 func (m *InMemMediator) Dispatch(ev Event) {
 	if _, ok := m.handlers[ev.Kind()]; !ok {
 		if m.orphanEventHandler != nil {
@@ -69,7 +72,7 @@ func (m *InMemMediator) Dispatch(ev Event) {
 	}
 
 	m.concurrent <- struct{}{}
-	go func(ev Event, handlers ...EventHandler) { // 确保event的多个handler处理的顺序以及时效性
+	go func(ev Event, handlers ...EventHandler) { // make sure the order of event's multiple handlers and the timeliness
 		defer func() {
 			<-m.concurrent
 		}()
@@ -79,12 +82,26 @@ func (m *InMemMediator) Dispatch(ev Event) {
 			ctx, cancel = context.WithTimeout(context.Background(), m.timeout)
 			defer cancel()
 		}
+		if m.genContextFn != nil {
+			ctx = m.genContextFn(ctx)
+		}
 		for _, handler := range handlers {
-			handler.Handle(ctx, ev) // 在handler内部处理ctx.Done()
+			handler.Handle(ctx, ev)
 		}
 	}(ev, m.handlers[ev.Kind()]...)
 }
 
+// WithOrphanEventHandler present a function to handle the event when no handler is found.
 func (m *InMemMediator) WithOrphanEventHandler(fn func(Event)) {
 	m.orphanEventHandler = fn
+}
+
+// WithGenContext present a function to generate a new context for each handler.
+func (m *InMemMediator) WithGenContext(fn func(ctx context.Context) context.Context) {
+	m.genContextFn = fn
+}
+
+// WithTimeout present a timeout for each handler.
+func (m *InMemMediator) WithTimeout(timeout time.Duration) {
+	m.timeout = timeout
 }
