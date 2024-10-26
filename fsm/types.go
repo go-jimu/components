@@ -19,18 +19,17 @@ type (
 
 	// StateContext define the state context interface.
 	StateContext interface {
-		CurrentState() State          // get the current state
-		TransitionTo(State)           // transition to the next state
-		SetStateMachine(StateMachine) // set the state machine
+		CurrentState() State // get the current state
+		TransitionTo(State)  // transition to the next state
 	}
 
 	// StateMachine define the state machine interface.
 	StateMachine interface {
-		Name() string                                                  // get the state machine name
-		AddTransition(from, to StateLabel, action Action) error        // add a transition
-		HasTransition(from StateLabel, action Action) bool             // check if has transition from one state to another
-		TransitionToNext(from StateLabel, action Action) (State, bool) // transition to the next state
-		Check() error                                                  // Check the completeness of States and Transitions.
-		RegisterStateBuilder(label StateLabel, state StateBuilder)     // register a state
+		Name() string                                              // get the state machine name
+		AddTransition(from, to StateLabel, action Action) error    // add a transition
+		HasTransition(from StateLabel, action Action) bool         // check if has transition from one state to another
+		TransitionToNext(StateContext, Action) bool                // transition to the next state
+		Check() error                                              // Check the completeness of States and Transitions.
+		RegisterStateBuilder(label StateLabel, state StateBuilder) // register a state
 	}
 )
