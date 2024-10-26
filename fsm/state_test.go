@@ -11,9 +11,11 @@ import (
 
 // ShoppingCart is StateContext implementation.
 type ShoppingCart struct {
+	ID      string
 	State   ShoppingCartState
 	Machine fsm.StateMachine
 	Items   [10]string
+	Version int
 }
 
 type (
