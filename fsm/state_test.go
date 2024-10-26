@@ -22,6 +22,8 @@ type (
 		AddItem() error
 		Remove() error
 		Checkout() error
+		Succeed() // eg. add_pending -> adding -> pay_pending
+		Fail()    // eg. add_pending -> adding -> add_failed
 	}
 
 	BaseShoppingCartState struct {
@@ -37,11 +39,13 @@ type (
 	}
 )
 
-const (
-	ActionCreate   fsm.Action = "CREATE"
-	ActionAdd      fsm.Action = "ADD"
-	ActionRemove   fsm.Action = "REMOVE"
-	ActionCheckout fsm.Action = "CHECKOUT"
+var (
+	ActionMarkAsSucceed fsm.Action = "MARK_AS_SUCCEED"
+	ActionMarkAsFail    fsm.Action = "MARK_AS_FAIL"
+	ActionCreate        fsm.Action = "CREATE"
+	ActionAdd           fsm.Action = "ADD"
+	ActionRemove        fsm.Action = "REMOVE"
+	ActionCheckout      fsm.Action = "CHECKOUT"
 )
 
 const (
@@ -108,6 +112,12 @@ func (base *BaseShoppingCartState) Remove() error {
 
 func (base *BaseShoppingCartState) Checkout() error {
 	return fsm.NewTransitionError(base.Label(), ActionCheckout)
+}
+
+func (base *BaseShoppingCartState) Succeed() {
+}
+
+func (base *BaseShoppingCartState) Fail() {
 }
 
 func NewEmptyState() fsm.State {
