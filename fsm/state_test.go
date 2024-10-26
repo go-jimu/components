@@ -1,6 +1,7 @@
 package fsm_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/go-jimu/components/fsm"
@@ -12,6 +13,7 @@ import (
 type ShoppingCart struct {
 	State   ShoppingCartState
 	Machine fsm.StateMachine
+	Items   [10]string
 }
 
 type (
@@ -49,9 +51,12 @@ const (
 )
 
 func NewShoppingCart() *ShoppingCart {
-	return &ShoppingCart{
-		State: NewEmptyState().(ShoppingCartState),
+	state := NewEmptyState()
+	cart := &ShoppingCart{
+		Items: [10]string{},
 	}
+	cart.TransitionTo(state)
+	return cart
 }
 
 func (sc *ShoppingCart) CurrentState() fsm.State {
@@ -121,6 +126,10 @@ func NewItemAddedState() fsm.State {
 
 // AddItem is a valid transition from EmptyState.
 func (state *EmptyState) AddItem() error {
+	_, ok := state.Context().(*ShoppingCart)
+	if !ok {
+		return fmt.Errorf("context is not a *ShoppingCart")
+	}
 	return nil
 }
 
