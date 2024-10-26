@@ -29,7 +29,7 @@ func TestNewLog(t *testing.T) {
 	}
 }
 
-func TestLogError(t *testing.T) {
+func TestLogError(_ *testing.T) {
 	fn := func() error {
 		err := errors.New("unknown error")
 		return errors.WithStack(err)

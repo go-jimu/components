@@ -8,16 +8,25 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	"github.com/samber/oops"
 )
 
-var ErrorKey = "error"
+var (
+	ErrorKey = "error"
+
+	oopsError = &oops.OopsError{}
+)
 
 type StackTracer interface {
 	StackTrace() errors.StackTrace
 }
 
 func Error(err error) slog.Attr {
-	group := make([]slog.Attr, 0, 2)
+	if errors.As(err, oopsError) {
+		return slog.Any("error", err)
+	}
+
+	group := make([]slog.Attr, 0, 2) //nolint:gomnd //no why
 	group = append(group, slog.String("msg", err.Error()))
 
 	var st StackTracer
