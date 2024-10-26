@@ -18,7 +18,7 @@ type (
 		handlers           map[EventKind][]EventHandler
 		concurrent         chan struct{}
 		orphanEventHandler func(Event)
-		genContextFn       func(ctx context.Context) context.Context
+		genContextFn       func(ctx context.Context, ev Event) context.Context
 	}
 
 	// Options is the options for the mediator.
@@ -83,7 +83,7 @@ func (m *InMemMediator) Dispatch(ev Event) {
 			defer cancel()
 		}
 		if m.genContextFn != nil {
-			ctx = m.genContextFn(ctx)
+			ctx = m.genContextFn(ctx, ev)
 		}
 		for _, handler := range handlers {
 			handler.Handle(ctx, ev)
@@ -97,7 +97,7 @@ func (m *InMemMediator) WithOrphanEventHandler(fn func(Event)) {
 }
 
 // WithGenContext present a function to generate a new context for each handler.
-func (m *InMemMediator) WithGenContext(fn func(ctx context.Context) context.Context) {
+func (m *InMemMediator) WithGenContext(fn func(ctx context.Context, ev Event) context.Context) {
 	m.genContextFn = fn
 }
 
