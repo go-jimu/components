@@ -80,7 +80,7 @@ jobs:
         git config --global user.name "Github Action Bot"
         git config --global user.email "go-jimu@users.noreply.github.com"
         type=patch
-        pattern="^Merge pull request #\d+ from go-jimu/release.*"
+        pattern="^Merge pull request #[0-9]+ from go-jimu/release.*"
         echo "commit message: $COMMIT_MESSAGE"
         if [[ $COMMIT_MESSAGE =~ $pattern ]]; then
           echo "bump up minor version number"
