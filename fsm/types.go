@@ -19,8 +19,8 @@ type (
 
 	// StateContext define the state context interface.
 	StateContext interface {
-		CurrentState() State // get the current state
-		TransitionTo(State)  // transition to the next state
+		CurrentState() State                // get the current state
+		TransitionTo(next State, by Action) // transition to the next state
 	}
 
 	// StateMachine define the state machine interface.

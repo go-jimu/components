@@ -68,7 +68,7 @@ func (sm *simpleStateMachine) TransitionToNext(sc StateContext, action Action) b
 	builder := sm.builders[sm.transitions[sc.CurrentState().Label()][action]]
 	sm.mu.RUnlock()
 
-	sc.TransitionTo(builder())
+	sc.TransitionTo(builder(), action)
 	return true
 }
 
