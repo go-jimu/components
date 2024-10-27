@@ -1,6 +1,7 @@
 package fsm_test
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"testing"
@@ -96,11 +97,21 @@ func (sc *ShoppingCart) CurrentState() fsm.State {
 	return sc.State
 }
 
-func (sc *ShoppingCart) TransitionTo(state fsm.State, by fsm.Action) {
+func (sc *ShoppingCart) TransitionTo(state fsm.State, by fsm.Action) error {
+	ss, ok := state.(ShoppingCartState)
+	if !ok {
+		return oops.Wrap(errors.New("state is not a ShoppingCartState"))
+	}
+
+	if !fsm.MustGetStateMachine(sc.StateMachineName).HasTransition(sc.State.Label(), by) {
+		return oops.Wrap(fsm.NewTransitionError(sc.State.Label(), by))
+	}
+
 	original := sc.State.Label()
 	current := state.Label()
+
 	state.SetContext(sc)
-	sc.State = state.(ShoppingCartState)
+	sc.State = ss
 
 	sc.Events.Add(
 		&EventTransitionState{
@@ -109,15 +120,19 @@ func (sc *ShoppingCart) TransitionTo(state fsm.State, by fsm.Action) {
 			Action:         by,
 			ShoppingCartID: sc.ID,
 		})
+	return nil
 }
 
 func (sc *ShoppingCart) AddItem(items ...string) error {
 	sm := fsm.MustGetStateMachine(sc.StateMachineName)
 	if !sm.HasTransition(sc.State.Label(), ActionAdd) {
-		return fsm.NewTransitionError(sc.State.Label(), ActionAdd)
+		return oops.Wrap(fsm.NewTransitionError(sc.State.Label(), ActionAdd))
 	}
+
 	if err := sc.State.AddItem(items...); err != nil {
-		sm.TransitionToNext(sc, ActionFail) // Added_Failed
+		if tranErr := sm.TransitionToNext(sc, ActionFail); tranErr != nil {
+			return oops.Join(err, tranErr)
+		}
 		return err
 	}
 
@@ -128,7 +143,7 @@ func (sc *ShoppingCart) AddItem(items ...string) error {
 func (sc *ShoppingCart) Remove(_ ...string) error {
 	sm := fsm.MustGetStateMachine(sc.StateMachineName)
 	if !sm.HasTransition(sc.State.Label(), ActionRemove) {
-		return fsm.NewTransitionError(sc.State.Label(), ActionRemove)
+		return oops.Wrap(fsm.NewTransitionError(sc.State.Label(), ActionRemove))
 	}
 	if err := sc.State.Remove(); err != nil {
 		return err
