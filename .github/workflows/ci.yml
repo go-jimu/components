@@ -81,7 +81,9 @@ jobs:
         git config --global user.email "go-jimu@users.noreply.github.com"
         type=patch
         pattern="^Merge pull request #\d+ from go-jimu/release.*"
+        echo "commit message: $COMMIT_MESSAGE"
         if [[ $COMMIT_MESSAGE =~ $pattern ]]; then
+          echo "bump up minor version number"
           type=minor
         fi
         ./scripts/auto_bump_version.sh $type
