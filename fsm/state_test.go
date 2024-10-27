@@ -1,10 +1,14 @@
 package fsm_test
 
 import (
+	"errors"
 	"fmt"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/go-jimu/components/fsm"
+	"github.com/go-jimu/components/mediator"
 	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 )
@@ -16,53 +20,76 @@ type ShoppingCart struct {
 	State            ShoppingCartState
 	Items            [10]string
 	Version          int
+	Events           mediator.EventCollection
 }
 
 type (
 	ShoppingCartState interface {
 		fsm.State
-		AddItem() error
+		AddItem(...string) error
 		Remove() error
 		Checkout() error
-		Succeed() // eg. add_pending -> adding -> pay_pending
-		Fail()    // eg. add_pending -> adding -> add_failed
+		Fail() // eg. add_pending -> adding -> add_failed
 	}
 
 	BaseShoppingCartState struct {
 		*fsm.SimpleState
 	}
 
-	EmptyState struct {
+	AddPendingState struct {
 		BaseShoppingCartState
 	}
 
-	ItemAddedState struct {
+	AddFailedState struct {
 		BaseShoppingCartState
+	}
+
+	CheckoutPendingState struct {
+		BaseShoppingCartState
+	}
+)
+
+type (
+	EventTransitionState struct {
+		From           fsm.StateLabel
+		To             fsm.StateLabel
+		Action         fsm.Action
+		ShoppingCartID string
 	}
 )
 
 var (
-	ActionMarkAsSucceed fsm.Action = "MARK_AS_SUCCEED"
-	ActionMarkAsFail    fsm.Action = "MARK_AS_FAIL"
-	ActionCreate        fsm.Action = "CREATE"
-	ActionAdd           fsm.Action = "ADD"
-	ActionRemove        fsm.Action = "REMOVE"
-	ActionCheckout      fsm.Action = "CHECKOUT"
+	ActionFail     fsm.Action = "FAIL"
+	ActionCreate   fsm.Action = "CREATE"
+	ActionAdd      fsm.Action = "ADD"
+	ActionRemove   fsm.Action = "REMOVE"
+	ActionCheckout fsm.Action = "CHECKOUT"
 )
 
 const (
-	StateEmpty      fsm.StateLabel = "state.empty"
-	StateItemAdded  fsm.StateLabel = "state.added"
-	StateCheckedOut fsm.StateLabel = "state.checkedout"
+	StateAddPending      fsm.StateLabel = "state.add_pending"
+	StateAddFailed       fsm.StateLabel = "state.add_failed"
+	StateCheckoutPending fsm.StateLabel = "state.checkout_pending"
+	StateCheckedOut      fsm.StateLabel = "state.checkedout"
 )
 
+var (
+	EventKindTransition mediator.EventKind = "event.kind.transition"
+)
+
+func (ev *EventTransitionState) Kind() mediator.EventKind {
+	return EventKindTransition
+}
+
 func NewShoppingCart() *ShoppingCart {
-	state := NewEmptyState()
 	cart := &ShoppingCart{
+		ID:               strconv.FormatInt(time.Now().UnixMicro(), 36),
 		Items:            [10]string{},
 		StateMachineName: "shopping_cart",
+		State:            NewAddPendingState().(ShoppingCartState),
+		Events:           mediator.NewEventCollection(),
 	}
-	cart.TransitionTo(state)
+	cart.State.SetContext(cart)
 	return cart
 }
 
@@ -70,17 +97,42 @@ func (sc *ShoppingCart) CurrentState() fsm.State {
 	return sc.State
 }
 
-func (sc *ShoppingCart) TransitionTo(state fsm.State) {
+func (sc *ShoppingCart) TransitionTo(state fsm.State, by fsm.Action) error {
+	ss, ok := state.(ShoppingCartState)
+	if !ok {
+		return oops.Wrap(errors.New("state is not a ShoppingCartState"))
+	}
+
+	if !fsm.MustGetStateMachine(sc.StateMachineName).HasTransition(sc.State.Label(), by) {
+		return oops.Wrap(fsm.NewTransitionError(sc.State.Label(), by))
+	}
+
+	original := sc.State.Label()
+	current := state.Label()
+
 	state.SetContext(sc)
-	sc.State = state.(ShoppingCartState)
+	sc.State = ss
+
+	sc.Events.Add(
+		&EventTransitionState{
+			From:           original,
+			To:             current,
+			Action:         by,
+			ShoppingCartID: sc.ID,
+		})
+	return nil
 }
 
-func (sc *ShoppingCart) AddItem(_ ...string) error {
+func (sc *ShoppingCart) AddItem(items ...string) error {
 	sm := fsm.MustGetStateMachine(sc.StateMachineName)
 	if !sm.HasTransition(sc.State.Label(), ActionAdd) {
-		return fsm.NewTransitionError(sc.State.Label(), ActionAdd)
+		return oops.Wrap(fsm.NewTransitionError(sc.State.Label(), ActionAdd))
 	}
-	if err := sc.State.AddItem(); err != nil {
+
+	if err := sc.State.AddItem(items...); err != nil {
+		if tranErr := sm.TransitionToNext(sc, ActionFail); tranErr != nil {
+			return oops.Join(err, tranErr)
+		}
 		return err
 	}
 
@@ -91,7 +143,7 @@ func (sc *ShoppingCart) AddItem(_ ...string) error {
 func (sc *ShoppingCart) Remove(_ ...string) error {
 	sm := fsm.MustGetStateMachine(sc.StateMachineName)
 	if !sm.HasTransition(sc.State.Label(), ActionRemove) {
-		return fsm.NewTransitionError(sc.State.Label(), ActionRemove)
+		return oops.Wrap(fsm.NewTransitionError(sc.State.Label(), ActionRemove))
 	}
 	if err := sc.State.Remove(); err != nil {
 		return err
@@ -101,7 +153,7 @@ func (sc *ShoppingCart) Remove(_ ...string) error {
 	return nil
 }
 
-func (base *BaseShoppingCartState) AddItem() error {
+func (base *BaseShoppingCartState) AddItem(...string) error {
 	return fsm.NewTransitionError(base.Label(), ActionAdd)
 }
 
@@ -119,38 +171,49 @@ func (base *BaseShoppingCartState) Succeed() {
 func (base *BaseShoppingCartState) Fail() {
 }
 
-func NewEmptyState() fsm.State {
-	base := BaseShoppingCartState{fsm.NewSimpleState(StateEmpty)}
-	return &EmptyState{
+func NewAddPendingState() fsm.State {
+	base := BaseShoppingCartState{fsm.NewSimpleState(StateAddPending)}
+	return &AddPendingState{
 		BaseShoppingCartState: base,
 	}
 }
 
-func NewItemAddedState() fsm.State {
-	base := BaseShoppingCartState{fsm.NewSimpleState(StateItemAdded)}
-	return &ItemAddedState{
+func NewAddFailedState() fsm.State {
+	base := BaseShoppingCartState{fsm.NewSimpleState(StateAddFailed)}
+	return &AddFailedState{
+		BaseShoppingCartState: base,
+	}
+}
+
+func NewCheckoutPendingState() fsm.State {
+	base := BaseShoppingCartState{fsm.NewSimpleState(StateCheckoutPending)}
+	return &CheckoutPendingState{
 		BaseShoppingCartState: base,
 	}
 }
 
 // AddItem is a valid transition from EmptyState.
-func (state *EmptyState) AddItem() error {
-	_, ok := state.Context().(*ShoppingCart)
+func (state *AddPendingState) AddItem(items ...string) error {
+	sc, ok := state.Context().(*ShoppingCart)
 	if !ok {
 		return fmt.Errorf("context is not a *ShoppingCart")
 	}
+	if len(items) > cap(sc.Items) {
+		return fmt.Errorf("items is too many")
+	}
+	copy(sc.Items[0:len(sc.Items)], items)
 	return nil
 }
 
 func TestStateMachine(t *testing.T) {
 	sm := fsm.NewStateMachine("shopping_cart")
 	fsm.RegisterStateMachine(sm)
-	sm.RegisterStateBuilder(StateEmpty, NewEmptyState)
+	sm.RegisterStateBuilder(StateAddPending, NewAddPendingState)
 	sm.RegisterStateBuilder(StateCheckedOut, func() fsm.State {
 		return fsm.NewSimpleState(StateCheckedOut)
 	})
 
-	err := sm.AddTransition(StateEmpty, StateItemAdded, ActionCreate)
+	err := sm.AddTransition(StateAddPending, StateCheckoutPending, ActionCreate)
 	assert.NoError(t, err)
 
 	err = sm.Check()
@@ -159,7 +222,7 @@ func TestStateMachine(t *testing.T) {
 	assert.EqualValues(t,
 		oopsErr.Context(),
 		map[string]any{
-			"missed_state_builders": []fsm.StateLabel{StateItemAdded},
+			"missed_state_builders": []fsm.StateLabel{StateCheckoutPending},
 			"missed_transitions":    []fsm.StateLabel{StateCheckedOut},
 		},
 	)
@@ -168,17 +231,47 @@ func TestStateMachine(t *testing.T) {
 func TestStateContext(t *testing.T) {
 	sm := fsm.NewStateMachine("shopping_cart")
 	fsm.RegisterStateMachine(sm)
-	sm.RegisterStateBuilder(StateEmpty, NewEmptyState)
-	sm.RegisterStateBuilder(StateItemAdded, NewItemAddedState)
+	sm.RegisterStateBuilder(StateAddPending, NewAddPendingState)
+	sm.RegisterStateBuilder(StateCheckoutPending, NewCheckoutPendingState)
 
-	err := sm.AddTransition(StateEmpty, StateItemAdded, ActionAdd)
+	err := sm.AddTransition(StateAddPending, StateCheckoutPending, ActionAdd)
+	assert.NoError(t, err)
+	err = sm.AddTransition(StateAddPending, StateAddFailed, ActionFail)
 	assert.NoError(t, err)
 
 	sc := NewShoppingCart()
-	assert.Equal(t, StateEmpty, sc.CurrentState().Label())
-	err = sc.AddItem()
+	assert.Equal(t, StateAddPending, sc.CurrentState().Label())
+	err = sc.AddItem("a", "b", "c")
 	assert.NoError(t, err)
+	assert.Equal(t, StateCheckoutPending, sc.CurrentState().Label())
+	t.Log(sc.Items)
 
 	err = sc.Remove()
 	assert.Error(t, err)
+}
+
+func TestStateTransition_HandleFail(t *testing.T) {
+	sm := fsm.NewStateMachine("shopping_cart")
+	fsm.RegisterStateMachine(sm)
+	sm.RegisterStateBuilder(StateAddPending, NewAddPendingState)
+	sm.RegisterStateBuilder(StateCheckoutPending, NewCheckoutPendingState)
+	sm.RegisterStateBuilder(StateAddFailed, NewAddFailedState)
+
+	err := sm.AddTransition(StateAddPending, StateCheckoutPending, ActionAdd)
+	assert.NoError(t, err)
+	err = sm.AddTransition(StateAddPending, StateAddFailed, ActionFail)
+	assert.NoError(t, err)
+	err = sm.Check()
+	assert.NoError(t, err)
+
+	sc := NewShoppingCart()
+	assert.Equal(t, StateAddPending, sc.CurrentState().Label())
+
+	items := make([]string, 0)
+	for i := 0; i <= cap(sc.Items); i++ {
+		items = append(items, strconv.Itoa(i))
+	}
+	err = sc.AddItem(items...)
+	assert.Error(t, err)
+	assert.Equal(t, StateAddFailed, sc.CurrentState().Label())
 }

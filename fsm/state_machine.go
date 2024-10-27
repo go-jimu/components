@@ -60,16 +60,15 @@ func (sm *simpleStateMachine) HasTransition(from StateLabel, action Action) bool
 	return false
 }
 
-func (sm *simpleStateMachine) TransitionToNext(sc StateContext, action Action) bool {
+func (sm *simpleStateMachine) TransitionToNext(sc StateContext, action Action) error {
 	if !sm.HasTransition(sc.CurrentState().Label(), action) {
-		return false
+		return NewTransitionError(sc.CurrentState().Label(), action)
 	}
 	sm.mu.RLock()
 	builder := sm.builders[sm.transitions[sc.CurrentState().Label()][action]]
 	sm.mu.RUnlock()
 
-	sc.TransitionTo(builder())
-	return true
+	return sc.TransitionTo(builder(), action)
 }
 
 func (sm *simpleStateMachine) RegisterStateBuilder(label StateLabel, builder StateBuilder) {
