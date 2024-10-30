@@ -2,6 +2,7 @@ package mediator
 
 import (
 	"context"
+	"log/slog"
 	"time"
 )
 
@@ -19,6 +20,7 @@ type (
 		concurrent         chan struct{}
 		orphanEventHandler func(Event)
 		genContextFn       func(ctx context.Context, ev Event) context.Context
+		logger             *slog.Logger
 	}
 
 	// Options is the options for the mediator.
@@ -74,8 +76,16 @@ func (m *InMemMediator) Dispatch(ev Event) {
 	m.concurrent <- struct{}{}
 	go func(ev Event, handlers ...EventHandler) { // make sure the order of event's multiple handlers and the timeliness
 		defer func() {
+			if recv := recover(); recv != nil {
+				logger := slog.Default()
+				if m.logger != nil {
+					logger = m.logger
+				}
+				logger.Error("panic occurred while handling event", slog.Any("panic", recv))
+			}
 			<-m.concurrent
 		}()
+
 		var ctx = context.Background()
 		var cancel context.CancelFunc
 		if m.timeout > 0 {
@@ -104,4 +114,8 @@ func (m *InMemMediator) WithGenContext(fn func(ctx context.Context, ev Event) co
 // WithTimeout present a timeout for each handler.
 func (m *InMemMediator) WithTimeout(timeout time.Duration) {
 	m.timeout = timeout
+}
+
+func (m *InMemMediator) WithLogger(logger *slog.Logger) {
+	m.logger = logger
 }
