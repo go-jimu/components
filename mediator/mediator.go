@@ -3,6 +3,7 @@ package mediator
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 	"time"
 )
 
@@ -81,7 +82,10 @@ func (m *InMemMediator) Dispatch(ev Event) {
 				if m.logger != nil {
 					logger = m.logger
 				}
-				logger.Error("panic occurred while handling event", slog.Any("panic", recv))
+				logger.Error("panic occurred while handling event",
+					slog.Any("event", ev),
+					slog.Any("panic", recv),
+					slog.Any("stack_trace", string(debug.Stack())))
 			}
 			<-m.concurrent
 		}()
