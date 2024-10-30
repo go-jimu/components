@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/go-jimu/components/mediator"
+	"github.com/stretchr/testify/assert"
 )
 
 type testEvent struct {
-	called int32
+	called  int32
+	paniced bool
 }
 
 func (e *testEvent) Kind() mediator.EventKind {
@@ -27,6 +29,9 @@ func (h testHandler) Handle(_ context.Context, ev mediator.Event) {
 	te, ok := ev.(*testEvent)
 	if !ok {
 		panic("unexpected event type")
+	}
+	if te.paniced {
+		panic("test panic")
 	}
 	atomic.AddInt32(&te.called, 1)
 }
@@ -64,4 +69,13 @@ func TestEventCollection(t *testing.T) {
 	if atomic.LoadInt32(&ev.called) != 1 {
 		t.FailNow()
 	}
+}
+
+func TestPanic(t *testing.T) {
+	eb := mediator.NewInMemMediator(mediator.Options{Concurrent: 3})
+	eb.Subscribe(testHandler{})
+
+	assert.NotPanics(t, func() {
+		eb.Dispatch(&testEvent{paniced: true})
+	})
 }
