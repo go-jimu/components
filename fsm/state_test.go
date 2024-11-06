@@ -3,6 +3,7 @@ package fsm_test
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ type ShoppingCart struct {
 	ID               string
 	StateMachineName string
 	State            ShoppingCartState
-	Items            [10]string
+	Items            []string
 	Version          int
 	Events           mediator.EventCollection
 }
@@ -81,10 +82,10 @@ func (ev *EventTransitionState) Kind() mediator.EventKind {
 	return EventKindTransition
 }
 
-func NewShoppingCart() *ShoppingCart {
+func NewShoppingCart(n int) *ShoppingCart {
 	cart := &ShoppingCart{
 		ID:               strconv.FormatInt(time.Now().UnixMicro(), 36),
-		Items:            [10]string{},
+		Items:            make([]string, 0, n),
 		StateMachineName: "shopping_cart",
 		State:            NewAddPendingState().(ShoppingCartState),
 		Events:           mediator.NewEventCollection(),
@@ -98,6 +99,10 @@ func (sc *ShoppingCart) CurrentState() fsm.State {
 }
 
 func (sc *ShoppingCart) TransitionTo(state fsm.State, by fsm.Action) error {
+	if sc.State.Label() == state.Label() {
+		return nil
+	}
+
 	ss, ok := state.(ShoppingCartState)
 	if !ok {
 		return oops.Wrap(errors.New("state is not a ShoppingCartState"))
@@ -198,11 +203,17 @@ func (state *AddPendingState) AddItem(items ...string) error {
 	if !ok {
 		return fmt.Errorf("context is not a *ShoppingCart")
 	}
-	if len(items) > cap(sc.Items) {
+	if len(items) > 10 {
 		return fmt.Errorf("items is too many")
 	}
-	copy(sc.Items[0:len(sc.Items)], items)
+	sc.Items = append(sc.Items, items...)
 	return nil
+}
+
+func TransitionToFully(sc fsm.StateContext) bool {
+	cart := sc.(*ShoppingCart)
+	slog.Info("check condition", slog.Int("cap", cap(cart.Items)), slog.Int("length", len(cart.Items)))
+	return len(cart.Items) == 10
 }
 
 func TestStateMachine(t *testing.T) {
@@ -213,10 +224,9 @@ func TestStateMachine(t *testing.T) {
 		return fsm.NewSimpleState(StateCheckedOut)
 	})
 
-	err := sm.AddTransition(StateAddPending, StateCheckoutPending, ActionCreate)
-	assert.NoError(t, err)
+	sm.AddTransition(StateAddPending, StateCheckoutPending, ActionCreate, nil)
 
-	err = sm.Check()
+	err := sm.Check()
 	assert.Error(t, err)
 	oopsErr := err.(oops.OopsError)
 	assert.EqualValues(t,
@@ -234,14 +244,12 @@ func TestStateContext(t *testing.T) {
 	sm.RegisterStateBuilder(StateAddPending, NewAddPendingState)
 	sm.RegisterStateBuilder(StateCheckoutPending, NewCheckoutPendingState)
 
-	err := sm.AddTransition(StateAddPending, StateCheckoutPending, ActionAdd)
-	assert.NoError(t, err)
-	err = sm.AddTransition(StateAddPending, StateAddFailed, ActionFail)
-	assert.NoError(t, err)
+	sm.AddTransition(StateAddPending, StateCheckoutPending, ActionAdd, nil)
+	sm.AddTransition(StateAddPending, StateAddFailed, ActionFail, nil)
 
-	sc := NewShoppingCart()
+	sc := NewShoppingCart(10)
 	assert.Equal(t, StateAddPending, sc.CurrentState().Label())
-	err = sc.AddItem("a", "b", "c")
+	err := sc.AddItem("a", "b", "c")
 	assert.NoError(t, err)
 	assert.Equal(t, StateCheckoutPending, sc.CurrentState().Label())
 	t.Log(sc.Items)
@@ -257,21 +265,41 @@ func TestStateTransition_HandleFail(t *testing.T) {
 	sm.RegisterStateBuilder(StateCheckoutPending, NewCheckoutPendingState)
 	sm.RegisterStateBuilder(StateAddFailed, NewAddFailedState)
 
-	err := sm.AddTransition(StateAddPending, StateCheckoutPending, ActionAdd)
-	assert.NoError(t, err)
-	err = sm.AddTransition(StateAddPending, StateAddFailed, ActionFail)
-	assert.NoError(t, err)
-	err = sm.Check()
+	sm.AddTransition(StateAddPending, StateCheckoutPending, ActionAdd, nil)
+	sm.AddTransition(StateAddPending, StateAddFailed, ActionFail, nil)
+	err := sm.Check()
 	assert.NoError(t, err)
 
-	sc := NewShoppingCart()
+	sc := NewShoppingCart(10)
 	assert.Equal(t, StateAddPending, sc.CurrentState().Label())
 
 	items := make([]string, 0)
-	for i := 0; i <= cap(sc.Items); i++ {
+	for i := 0; i < 11; i++ {
 		items = append(items, strconv.Itoa(i))
 	}
 	err = sc.AddItem(items...)
 	assert.Error(t, err)
 	assert.Equal(t, StateAddFailed, sc.CurrentState().Label())
+}
+
+func TestStateTransition_WithCondition(t *testing.T) {
+	sm := fsm.NewStateMachine("shopping_cart")
+	fsm.RegisterStateMachine(sm)
+	sm.RegisterStateBuilder(StateAddPending, NewAddPendingState)
+	sm.RegisterStateBuilder(StateCheckoutPending, NewCheckoutPendingState)
+
+	sm.AddTransition(StateAddPending, StateCheckoutPending, ActionAdd, TransitionToFully)
+	err := sm.Check()
+	assert.NoError(t, err)
+
+	sc := NewShoppingCart(10)
+	assert.Equal(t, StateAddPending, sc.CurrentState().Label())
+	err = sc.AddItem("a", "b", "c")
+	assert.NoError(t, err)
+	assert.Equal(t, StateAddPending, sc.CurrentState().Label())
+
+	// add ten items
+	err = sc.AddItem("d", "e", "f", "g", "h", "i", "j")
+	assert.NoError(t, err)
+	assert.Equal(t, StateCheckoutPending, sc.CurrentState().Label())
 }

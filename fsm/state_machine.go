@@ -2,7 +2,6 @@ package fsm
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/samber/oops"
@@ -12,8 +11,13 @@ import (
 type simpleStateMachine struct {
 	mu          sync.RWMutex
 	name        string
-	transitions map[StateLabel]map[Action]StateLabel
+	transitions map[StateLabel]map[Action][]transition
 	builders    map[StateLabel]StateBuilder
+}
+
+type transition struct {
+	to        StateLabel
+	condition Condition
 }
 
 func NewStateMachine(name string) StateMachine {
@@ -22,7 +26,7 @@ func NewStateMachine(name string) StateMachine {
 	}
 	return &simpleStateMachine{
 		name:        name,
-		transitions: make(map[StateLabel]map[Action]StateLabel),
+		transitions: make(map[StateLabel]map[Action][]transition),
 		builders:    make(map[StateLabel]StateBuilder),
 	}
 }
@@ -31,21 +35,24 @@ func (sm *simpleStateMachine) Name() string {
 	return sm.name
 }
 
-func (sm *simpleStateMachine) AddTransition(from, to StateLabel, action Action) error {
+func (sm *simpleStateMachine) AddTransition(from, to StateLabel, action Action, condition Condition) {
+	if from == "" || to == "" || action == "" {
+		return
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	nexts, ok := sm.transitions[from]
-	if !ok {
-		nexts = make(map[Action]StateLabel)
-		sm.transitions[from] = nexts
+	if _, ok := sm.transitions[from]; !ok {
+		sm.transitions[from] = make(map[Action][]transition)
+		sm.transitions[from][action] = []transition{{to: to, condition: condition}}
+		return
 	}
-	conflict, ok := nexts[action]
-	if ok {
-		return fmt.Errorf("transition already exists: %s -(%s)-> %s", from, action, conflict)
+	if _, ok := sm.transitions[from][action]; !ok {
+		sm.transitions[from][action] = []transition{{to: to, condition: condition}}
+		return
 	}
-	nexts[action] = to
-	return nil
+	sm.transitions[from][action] = append(sm.transitions[from][action], transition{to: to, condition: condition})
 }
 
 func (sm *simpleStateMachine) HasTransition(from StateLabel, action Action) bool {
@@ -53,7 +60,7 @@ func (sm *simpleStateMachine) HasTransition(from StateLabel, action Action) bool
 	defer sm.mu.RUnlock()
 
 	if nexts, ok := sm.transitions[from]; ok {
-		if _, ok = nexts[action]; ok {
+		if trans, ok2 := nexts[action]; ok2 && len(trans) > 0 {
 			return true
 		}
 	}
@@ -64,14 +71,35 @@ func (sm *simpleStateMachine) TransitionToNext(sc StateContext, action Action) e
 	if !sm.HasTransition(sc.CurrentState().Label(), action) {
 		return NewTransitionError(sc.CurrentState().Label(), action)
 	}
-	sm.mu.RLock()
-	builder := sm.builders[sm.transitions[sc.CurrentState().Label()][action]]
-	sm.mu.RUnlock()
 
-	return sc.TransitionTo(builder(), action)
+	var next StateLabel
+	sm.mu.RLock()
+
+	trans := sm.transitions[sc.CurrentState().Label()][action]
+	for _, tran := range trans {
+		if tran.condition == nil {
+			next = tran.to
+			break
+		}
+		if tran.condition(sc) {
+			next = tran.to
+			break
+		}
+	}
+	if next != "" {
+		builder := sm.builders[next]
+		sm.mu.RUnlock()
+		return sc.TransitionTo(builder(), action)
+	}
+	sm.mu.RUnlock()
+	return nil
 }
 
 func (sm *simpleStateMachine) RegisterStateBuilder(label StateLabel, builder StateBuilder) {
+	if label == "" || builder == nil {
+		return
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -88,7 +116,9 @@ func (sm *simpleStateMachine) Check() error {
 	for from, nexts := range sm.transitions {
 		missedStateBuilder[from] = struct{}{}
 		for _, next := range nexts {
-			missedStateBuilder[next] = struct{}{}
+			for _, tran := range next {
+				missedStateBuilder[tran.to] = struct{}{}
+			}
 		}
 	}
 
