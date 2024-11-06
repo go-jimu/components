@@ -10,8 +10,8 @@ type (
 	// State define the state interface.
 	State interface {
 		SetContext(StateContext) // set the state context
-		Context() StateContext
-		Label() StateLabel // get the state label
+		Context() StateContext   // return the state context
+		Label() StateLabel       // get the state label
 	}
 
 	// StateBuilder define the state builder interface.
@@ -23,13 +23,16 @@ type (
 		TransitionTo(next State, by Action) error // transition to the next state
 	}
 
+	// Condition define the condition function type.
+	Condition func(StateContext) bool
+
 	// StateMachine define the state machine interface.
 	StateMachine interface {
-		Name() string                                              // get the state machine name
-		AddTransition(from, to StateLabel, action Action) error    // add a transition
-		HasTransition(from StateLabel, action Action) bool         // check if has transition from one state to another
-		TransitionToNext(StateContext, Action) error               // transition to the next state
-		Check() error                                              // Check the completeness of States and Transitions.
-		RegisterStateBuilder(label StateLabel, state StateBuilder) // register a state
+		Name() string                                            // get the state machine name
+		AddTransition(StateLabel, StateLabel, Action, Condition) // add a transition
+		HasTransition(StateLabel, Action) bool                   // check if has transition from one state to another
+		TransitionToNext(StateContext, Action) error             // transition to the next state
+		Check() error                                            // Check the completeness of States and Transitions.
+		RegisterStateBuilder(StateLabel, StateBuilder)           // register a state
 	}
 )

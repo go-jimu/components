@@ -2,6 +2,7 @@ package mediator_test
 
 import (
 	"context"
+	"log"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +14,11 @@ import (
 type testEvent struct {
 	called  int32
 	paniced bool
+	obj     *PanicObj
+}
+
+type PanicObj struct {
+	Name string
 }
 
 func (e *testEvent) Kind() mediator.EventKind {
@@ -31,7 +37,7 @@ func (h testHandler) Handle(_ context.Context, ev mediator.Event) {
 		panic("unexpected event type")
 	}
 	if te.paniced {
-		panic("test panic")
+		log.Println(te.obj.Name)
 	}
 	atomic.AddInt32(&te.called, 1)
 }
