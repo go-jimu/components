@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"runtime/debug"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,6 +24,8 @@ type (
 		orphanEventHandler func(Event)
 		genContextFn       func(ctx context.Context, ev Event) context.Context
 		logger             *slog.Logger
+		closed             int32
+		wg                 sync.WaitGroup
 	}
 
 	// Options is the options for the mediator.
@@ -50,6 +54,7 @@ func NewInMemMediator(opt Options) Mediator {
 		handlers:   make(map[EventKind][]EventHandler),
 		concurrent: make(chan struct{}, opt.Concurrent),
 		timeout:    d,
+		logger:     slog.Default(),
 	}
 	return m
 }
@@ -66,6 +71,11 @@ func (m *InMemMediator) Subscribe(hdl EventHandler) {
 
 // Dispatch dispatches an event to the mediator.
 func (m *InMemMediator) Dispatch(ev Event) {
+	if atomic.LoadInt32(&m.closed) == 1 {
+		m.logger.Error("mediator is closed, drop the event", slog.Any("event", ev))
+		return
+	}
+
 	if _, ok := m.handlers[ev.Kind()]; !ok {
 		if m.orphanEventHandler != nil {
 			m.orphanEventHandler(ev)
@@ -75,6 +85,7 @@ func (m *InMemMediator) Dispatch(ev Event) {
 	}
 
 	m.concurrent <- struct{}{}
+	m.wg.Add(1)
 	go func(ev Event, handlers ...EventHandler) { // make sure the order of event's multiple handlers and the timeliness
 		defer func() {
 			if recv := recover(); recv != nil {
@@ -88,6 +99,7 @@ func (m *InMemMediator) Dispatch(ev Event) {
 					slog.Any("stack_trace", string(debug.Stack())))
 			}
 			<-m.concurrent
+			m.wg.Done()
 		}()
 
 		var ctx = context.Background()
@@ -103,6 +115,22 @@ func (m *InMemMediator) Dispatch(ev Event) {
 			handler.Handle(ctx, ev)
 		}
 	}(ev, m.handlers[ev.Kind()]...)
+}
+
+func (m *InMemMediator) GracefulShutdown(ctx context.Context) error {
+	atomic.StoreInt32(&m.closed, 1)
+	waitCh := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(waitCh)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-waitCh:
+		return nil
+	}
 }
 
 // WithOrphanEventHandler present a function to handle the event when no handler is found.
@@ -121,5 +149,8 @@ func (m *InMemMediator) WithTimeout(timeout time.Duration) {
 }
 
 func (m *InMemMediator) WithLogger(logger *slog.Logger) {
+	if logger == nil {
+		return
+	}
 	m.logger = logger
 }
