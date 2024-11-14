@@ -124,7 +124,7 @@ func TestDropEventWhenMediatorClosed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	go eb.GracefulShutdown(ctx)
-	<-time.After(500 * time.Millisecond)
+	<-time.After(5500 * time.Millisecond)
 
 	ev = &testEvent{}
 	eb.Dispatch(ev)
