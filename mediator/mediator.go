@@ -26,6 +26,7 @@ type (
 		logger             *slog.Logger
 		closed             int32
 		wg                 sync.WaitGroup
+		delayClose         time.Duration
 	}
 
 	// Options is the options for the mediator.
@@ -55,6 +56,7 @@ func NewInMemMediator(opt Options) Mediator {
 		concurrent: make(chan struct{}, opt.Concurrent),
 		timeout:    d,
 		logger:     slog.Default(),
+		delayClose: 5 * time.Second,
 	}
 	return m
 }
@@ -117,8 +119,10 @@ func (m *InMemMediator) Dispatch(ev Event) {
 	}(ev, m.handlers[ev.Kind()]...)
 }
 
+// GracefulShutdown waits for all the events to be processed and then closes the mediator.
 func (m *InMemMediator) GracefulShutdown(ctx context.Context) error {
-	atomic.StoreInt32(&m.closed, 1)
+	<-time.After(m.delayClose)
+	atomic.CompareAndSwapInt32(&m.closed, 0, 1)
 	waitCh := make(chan struct{})
 	go func() {
 		m.wg.Wait()
