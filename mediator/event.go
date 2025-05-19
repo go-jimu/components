@@ -28,8 +28,11 @@ type (
 	EventCollection interface {
 		Add(Event)
 		Raise(Mediator)
+		AsyncRaise(Mediator)
 	}
 )
+
+var _ EventCollection = (*eventCollection)(nil)
 
 func NewEventCollection() EventCollection {
 	return &eventCollection{events: make([]Event, 0)}
