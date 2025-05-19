@@ -43,6 +43,7 @@ func (es *eventCollection) Add(ev Event) {
 	slog.Error("failed to add event, already raised", slog.Any("dropped_event", ev))
 }
 
+// Raise raises the event collection synchronously.
 func (es *eventCollection) Raise(m Mediator) {
 	if atomic.CompareAndSwapInt32(&es.raised, 0, 1) {
 		for _, event := range es.events {
@@ -52,4 +53,9 @@ func (es *eventCollection) Raise(m Mediator) {
 	}
 
 	slog.Error("failed to raise event, already raised", slog.Any("events", es.events))
+}
+
+// AsyncRaise raises the event collection asynchronously.
+func (es *eventCollection) AsyncRaise(m Mediator) {
+	go es.Raise(m)
 }
