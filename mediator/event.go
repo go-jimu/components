@@ -2,6 +2,7 @@ package mediator
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 )
 
@@ -37,7 +38,9 @@ func NewEventCollection() EventCollection {
 func (es *eventCollection) Add(ev Event) {
 	if atomic.LoadInt32(&es.raised) == 0 {
 		es.events = append(es.events, ev)
+		return
 	}
+	slog.Error("failed to add event, already raised", slog.Any("dropped_event", ev))
 }
 
 func (es *eventCollection) Raise(m Mediator) {
@@ -45,5 +48,8 @@ func (es *eventCollection) Raise(m Mediator) {
 		for _, event := range es.events {
 			m.Dispatch(event)
 		}
+		return
 	}
+
+	slog.Error("failed to raise event, already raised", slog.Any("events", es.events))
 }

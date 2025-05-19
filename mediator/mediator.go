@@ -83,6 +83,7 @@ func (m *InMemMediator) Dispatch(ev Event) {
 			m.orphanEventHandler(ev)
 			return
 		}
+		m.logger.Error("no handler found for event", slog.Any("event", ev))
 		return
 	}
 

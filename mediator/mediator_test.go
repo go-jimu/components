@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -129,4 +130,26 @@ func TestDropEventWhenMediatorClosed(t *testing.T) {
 	ev = &testEvent{}
 	eb.Dispatch(ev)
 	assert.True(t, atomic.LoadInt32(&ev.called) == 0)
+}
+
+func TestBlockDispatch(t *testing.T) {
+	eb := mediator.NewInMemMediator(mediator.Options{Concurrent: 1}).(*mediator.InMemMediator)
+	eb.Subscribe(testHandler{})
+	start := time.Now()
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		for i := 0; i < 3; i++ {
+			ev := &testEvent{blocked: true}
+			go func(event mediator.Event) {
+				defer wg.Done()
+				slog.Info("dispatching event", slog.Any("event", event))
+				eb.Dispatch(ev)
+			}(ev)
+		}
+	}()
+
+	wg.Wait()
+	elasped := time.Since(start)
+	assert.True(t, elasped > 10*time.Second)
 }
