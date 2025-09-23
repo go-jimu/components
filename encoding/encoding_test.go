@@ -2,7 +2,6 @@ package encoding_test
 
 import (
 	"encoding/xml"
-	"fmt"
 	"runtime/debug"
 	"testing"
 
@@ -42,7 +41,7 @@ func TestRegisterCodec(t *testing.T) {
 	f := func() { encoding.RegisterCodec(nil) }
 	funcDidPanic, panicValue, _ := didPanic(f)
 	if !funcDidPanic {
-		t.Fatalf(fmt.Sprintf("func should panic\n\tPanic value:\t%#v", panicValue))
+		t.Fatalf("func should panic\n\tPanic value:\t%#v", panicValue)
 	}
 	if panicValue != "cannot register a nil Codec" {
 		t.Fatalf("panic error got %s want cannot register a nil Codec", panicValue)
@@ -52,7 +51,7 @@ func TestRegisterCodec(t *testing.T) {
 	}
 	funcDidPanic, panicValue, _ = didPanic(f)
 	if !funcDidPanic {
-		t.Fatalf(fmt.Sprintf("func should panic\n\tPanic value:\t%#v", panicValue))
+		t.Fatalf("func should panic\n\tPanic value:\t%#v", panicValue)
 	}
 	if panicValue != "cannot register Codec with empty string result for Name()" {
 		t.Fatalf("panic error got %s want cannot register Codec with empty string result for Name()", panicValue)
