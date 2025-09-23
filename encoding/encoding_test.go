@@ -1,10 +1,11 @@
-package encoding
+package encoding_test
 
 import (
 	"encoding/xml"
-	"fmt"
 	"runtime/debug"
 	"testing"
+
+	"github.com/go-jimu/components/encoding"
 )
 
 type codec struct{}
@@ -37,27 +38,27 @@ func (codec2) Name() string {
 }
 
 func TestRegisterCodec(t *testing.T) {
-	f := func() { RegisterCodec(nil) }
+	f := func() { encoding.RegisterCodec(nil) }
 	funcDidPanic, panicValue, _ := didPanic(f)
 	if !funcDidPanic {
-		t.Fatalf(fmt.Sprintf("func should panic\n\tPanic value:\t%#v", panicValue))
+		t.Fatalf("func should panic\n\tPanic value:\t%#v", panicValue)
 	}
 	if panicValue != "cannot register a nil Codec" {
 		t.Fatalf("panic error got %s want cannot register a nil Codec", panicValue)
 	}
 	f = func() {
-		RegisterCodec(codec{})
+		encoding.RegisterCodec(codec{})
 	}
 	funcDidPanic, panicValue, _ = didPanic(f)
 	if !funcDidPanic {
-		t.Fatalf(fmt.Sprintf("func should panic\n\tPanic value:\t%#v", panicValue))
+		t.Fatalf("func should panic\n\tPanic value:\t%#v", panicValue)
 	}
 	if panicValue != "cannot register Codec with empty string result for Name()" {
 		t.Fatalf("panic error got %s want cannot register Codec with empty string result for Name()", panicValue)
 	}
 	codec := codec2{}
-	RegisterCodec(codec)
-	got := GetCodec("xml")
+	encoding.RegisterCodec(codec)
+	got := encoding.GetCodec("xml")
 	if got != codec {
 		t.Fatalf("RegisterCodec(%v) want %v got %v", codec, codec, got)
 	}
