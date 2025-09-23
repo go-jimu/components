@@ -2,8 +2,7 @@
 // https://github.com/microsoft/vscode-dev-containers/tree/v0.163.1/containers/go
 {
 	"name": "Go",
-	"image": "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
-	"runArgs": [ "--cap-add=SYS_PTRACE", "--security-opt", "seccomp=unconfined" ],
+	"image": "mcr.microsoft.com/devcontainers/go:1.25-bookworm",
 
 	"customizations": {
 		"vscode": {
