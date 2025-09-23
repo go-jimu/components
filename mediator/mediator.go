@@ -2,6 +2,7 @@ package mediator
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"runtime/debug"
 	"sync"
@@ -12,7 +13,7 @@ import (
 type (
 	// Mediator is the interface that wraps the methods of a mediator.
 	Mediator interface {
-		Dispatch(Event)
+		Dispatch(Event) error
 		Subscribe(EventHandler)
 	}
 
@@ -21,7 +22,7 @@ type (
 		timeout            time.Duration
 		handlers           map[EventKind][]EventHandler
 		concurrent         chan struct{}
-		orphanEventHandler func(Event)
+		orphanEventHandler func(Event) error
 		genContextFn       func(ctx context.Context, ev Event) context.Context
 		logger             *slog.Logger
 		closed             int32
@@ -36,7 +37,11 @@ type (
 	}
 )
 
-var _ Mediator = (*InMemMediator)(nil)
+var (
+	_                   Mediator = (*InMemMediator)(nil)
+	ErrMediatorClosed            = errors.New("mediator is closed")
+	ErrNoHandlerMatched          = errors.New("no matching event handler found")
+)
 
 func NewInMemMediator(opt Options) Mediator {
 	if opt.Concurrent < 1 {
@@ -72,19 +77,18 @@ func (m *InMemMediator) Subscribe(hdl EventHandler) {
 }
 
 // Dispatch dispatches an event to the mediator.
-func (m *InMemMediator) Dispatch(ev Event) {
+func (m *InMemMediator) Dispatch(ev Event) error {
 	if atomic.LoadInt32(&m.closed) == 1 {
 		m.logger.Error("mediator is closed, drop the event", slog.Any("event", ev))
-		return
+		return ErrMediatorClosed
 	}
 
 	if _, ok := m.handlers[ev.Kind()]; !ok {
 		if m.orphanEventHandler != nil {
-			m.orphanEventHandler(ev)
-			return
+			return m.orphanEventHandler(ev)
 		}
 		m.logger.Error("no handler found for event", slog.Any("event", ev))
-		return
+		return ErrNoHandlerMatched
 	}
 
 	m.concurrent <- struct{}{}
@@ -118,6 +122,7 @@ func (m *InMemMediator) Dispatch(ev Event) {
 			handler.Handle(ctx, ev)
 		}
 	}(ev, m.handlers[ev.Kind()]...)
+	return nil
 }
 
 // GracefulShutdown waits for all the events to be processed and then closes the mediator.
@@ -139,7 +144,7 @@ func (m *InMemMediator) GracefulShutdown(ctx context.Context) error {
 }
 
 // WithOrphanEventHandler present a function to handle the event when no handler is found.
-func (m *InMemMediator) WithOrphanEventHandler(fn func(Event)) {
+func (m *InMemMediator) WithOrphanEventHandler(fn func(Event) error) {
 	m.orphanEventHandler = fn
 }
 
