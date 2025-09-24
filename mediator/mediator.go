@@ -28,6 +28,8 @@ type (
 		closed             int32
 		wg                 sync.WaitGroup
 		delayClose         time.Duration
+		rootCtx            context.Context
+		rootCancel         context.CancelFunc
 	}
 
 	// Options is the options for the mediator.
@@ -56,12 +58,16 @@ func NewInMemMediator(opt Options) Mediator {
 		d = 0
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	m := &InMemMediator{
 		handlers:   make(map[EventKind][]EventHandler),
 		concurrent: make(chan struct{}, opt.Concurrent),
 		timeout:    d,
 		logger:     slog.Default(),
 		delayClose: 5 * time.Second,
+		rootCtx:    ctx,
+		rootCancel: cancel,
 	}
 	return m
 }
@@ -109,12 +115,15 @@ func (m *InMemMediator) Dispatch(ev Event) error {
 			m.wg.Done()
 		}()
 
-		var ctx = context.Background()
+		var ctx context.Context
 		var cancel context.CancelFunc
 		if m.timeout > 0 {
-			ctx, cancel = context.WithTimeout(context.Background(), m.timeout)
-			defer cancel()
+			ctx, cancel = context.WithTimeout(m.rootCtx, m.timeout)
+		} else {
+			ctx, cancel = context.WithCancel(m.rootCtx)
 		}
+		defer cancel()
+
 		if m.genContextFn != nil {
 			ctx = m.genContextFn(ctx, ev)
 		}
@@ -135,11 +144,18 @@ func (m *InMemMediator) GracefulShutdown(ctx context.Context) error {
 		close(waitCh)
 	}()
 
+	t := time.NewTimer(15 * time.Second)
+	defer t.Stop()
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-waitCh:
 		return nil
+	case <-t.C:
+		m.logger.Error("canceled unfinished event handlers")
+		m.rootCancel()
+		return context.Canceled
 	}
 }
 
