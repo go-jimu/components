@@ -6,6 +6,11 @@ import (
 	"sync/atomic"
 )
 
+// NOTE: EventCollection is NOT safe for concurrent use.
+// Callers must ensure that Add and Raise/AsyncRaise are not called concurrently.
+// This aligns with the typical DDD usage where events are collected within
+// a single aggregate method call.
+
 type (
 	// EventKind 事件类型描述.
 	EventKind string
@@ -22,7 +27,7 @@ type (
 
 	eventCollection struct {
 		events []Event
-		raised int32
+		raised atomic.Bool
 	}
 
 	EventCollection interface {
@@ -39,22 +44,21 @@ func NewEventCollection() EventCollection {
 }
 
 func (es *eventCollection) Add(ev Event) {
-	if atomic.LoadInt32(&es.raised) == 0 {
-		es.events = append(es.events, ev)
+	if es.raised.Load() {
+		slog.Error("failed to add event, already raised", slog.Any("dropped_event", ev))
 		return
 	}
-	slog.Error("failed to add event, already raised", slog.Any("dropped_event", ev))
+	es.events = append(es.events, ev)
 }
 
 // Raise raises the event collection synchronously.
 func (es *eventCollection) Raise(m Mediator) {
-	if atomic.CompareAndSwapInt32(&es.raised, 0, 1) {
+	if es.raised.CompareAndSwap(false, true) {
 		for _, event := range es.events {
 			m.Dispatch(event)
 		}
 		return
 	}
-
 	slog.Error("failed to raise event, already raised", slog.Any("events", es.events))
 }
 
