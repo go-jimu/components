@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -25,7 +24,8 @@ type (
 		orphanEventHandler func(Event) error
 		genContextFn       func(ctx context.Context, ev Event) context.Context
 		logger             *slog.Logger
-		closed             int32
+		mu                 sync.RWMutex
+		closed             bool
 		wg                 sync.WaitGroup
 		delayClose         time.Duration
 		rootCtx            context.Context
@@ -45,7 +45,7 @@ var (
 	ErrNoHandlerMatched          = errors.New("no matching event handler found")
 )
 
-func NewInMemMediator(opt Options) Mediator {
+func NewInMemMediator(opt Options, opts ...Option) Mediator {
 	if opt.Concurrent < 1 {
 		opt.Concurrent = 1
 	}
@@ -69,27 +69,39 @@ func NewInMemMediator(opt Options) Mediator {
 		rootCtx:    ctx,
 		rootCancel: cancel,
 	}
+	for _, o := range opts {
+		o(m)
+	}
 	return m
 }
 
 // Subscribe registers an event handler to the mediator.
 func (m *InMemMediator) Subscribe(hdl EventHandler) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, kind := range hdl.Listening() {
-		if _, ok := m.handlers[kind]; !ok {
-			m.handlers[kind] = make([]EventHandler, 0)
-		}
 		m.handlers[kind] = append(m.handlers[kind], hdl)
 	}
 }
 
 // Dispatch dispatches an event to the mediator.
 func (m *InMemMediator) Dispatch(ev Event) error {
-	if atomic.LoadInt32(&m.closed) == 1 {
+	// RLock guarantees that closed check, handlers lookup, and wg.Add(1)
+	// are atomic with respect to GracefulShutdown's write-lock + wg.Wait()
+	// and Subscribe's write-lock + map write.
+	m.mu.RLock()
+	if m.closed {
+		m.mu.RUnlock()
 		m.logger.Error("mediator is closed, drop the event", slog.Any("event", ev))
 		return ErrMediatorClosed
 	}
+	handlers, ok := m.handlers[ev.Kind()]
+	if ok {
+		m.wg.Add(1)
+	}
+	m.mu.RUnlock()
 
-	if _, ok := m.handlers[ev.Kind()]; !ok {
+	if !ok {
 		if m.orphanEventHandler != nil {
 			return m.orphanEventHandler(ev)
 		}
@@ -98,8 +110,7 @@ func (m *InMemMediator) Dispatch(ev Event) error {
 	}
 
 	m.concurrent <- struct{}{}
-	m.wg.Add(1)
-	go func(ev Event, handlers ...EventHandler) { // make sure the order of event's multiple handlers and the timeliness
+	go func(ev Event, handlers ...EventHandler) {
 		defer func() {
 			if recv := recover(); recv != nil {
 				logger := slog.Default()
@@ -130,50 +141,68 @@ func (m *InMemMediator) Dispatch(ev Event) error {
 		for _, handler := range handlers {
 			handler.Handle(ctx, ev)
 		}
-	}(ev, m.handlers[ev.Kind()]...)
+	}(ev, handlers...)
 	return nil
 }
 
 // GracefulShutdown waits for all the events to be processed and then closes the mediator.
+// The caller controls the maximum wait time via ctx.
 func (m *InMemMediator) GracefulShutdown(ctx context.Context) error {
-	<-time.After(m.delayClose)
-	atomic.CompareAndSwapInt32(&m.closed, 0, 1)
+	defer m.rootCancel()
+
+	// Respect external context during the delay phase.
+	if m.delayClose > 0 {
+		select {
+		case <-time.After(m.delayClose):
+		case <-ctx.Done():
+		}
+	}
+
+	// Stop accepting new events under exclusive lock, so that no Dispatch
+	// can sneak in a wg.Add(1) after we call wg.Wait().
+	m.mu.Lock()
+	m.closed = true
+	m.mu.Unlock()
+
+	// Wait for all in-flight handlers to finish.
 	waitCh := make(chan struct{})
 	go func() {
 		m.wg.Wait()
 		close(waitCh)
 	}()
 
-	t := time.NewTimer(15 * time.Second)
-	defer t.Stop()
-
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-waitCh:
 		return nil
-	case <-t.C:
-		m.logger.Error("canceled unfinished event handlers")
-		m.rootCancel()
-		return context.Canceled
 	}
 }
 
-// WithOrphanEventHandler present a function to handle the event when no handler is found.
+// Deprecated: Use WithOrphanEventHandler Option in NewInMemMediator instead.
 func (m *InMemMediator) WithOrphanEventHandler(fn func(Event) error) {
 	m.orphanEventHandler = fn
 }
 
-// WithGenContext present a function to generate a new context for each handler.
+// Deprecated: Use WithGenContext Option in NewInMemMediator instead.
 func (m *InMemMediator) WithGenContext(fn func(ctx context.Context, ev Event) context.Context) {
 	m.genContextFn = fn
 }
 
-// WithTimeout present a timeout for each handler.
+// Deprecated: Use WithTimeout Option in NewInMemMediator instead.
 func (m *InMemMediator) WithTimeout(timeout time.Duration) {
 	m.timeout = timeout
 }
 
+// Deprecated: Use WithDelayClose Option in NewInMemMediator instead.
+func (m *InMemMediator) WithDelayClose(d time.Duration) {
+	if d < 0 {
+		d = 0
+	}
+	m.delayClose = d
+}
+
+// Deprecated: Use WithLogger Option in NewInMemMediator instead.
 func (m *InMemMediator) WithLogger(logger *slog.Logger) {
 	if logger == nil {
 		return

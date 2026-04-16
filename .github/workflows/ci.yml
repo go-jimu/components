@@ -8,11 +8,16 @@ on:
   pull_request:
     branches:
     - master
+permissions:
+  contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   unittest:
+    permissions:
+      contents: read
+      checks: write
     strategy:
       matrix:
         go-version: [ 1.23.x, 1.24.x, 1.25.x ]
@@ -64,6 +69,8 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
 
   auto-tag:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     needs: unittest
     # https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability

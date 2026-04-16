@@ -1,8 +1,17 @@
 package mediator
 
-var defaultMediator Mediator
+var defaultMediator Mediator = nopMediator{}
 
+type nopMediator struct{}
+
+func (nopMediator) Dispatch(Event) error   { return ErrMediatorClosed }
+func (nopMediator) Subscribe(EventHandler) {}
+
+// SetDefault sets the default global mediator.
 func SetDefault(m Mediator) {
+	if m == nil {
+		return
+	}
 	defaultMediator = m
 }
 
