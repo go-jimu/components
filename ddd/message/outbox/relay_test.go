@@ -152,7 +152,7 @@ func TestRelayRunAlreadyCanceledDoesNoWork(t *testing.T) {
 	require.Zero(t, results)
 }
 
-// Run must call RunOnce repeatedly and stop when the context is canceled.
+// Run must stop after an iteration when the context is canceled from OnResult.
 func TestRelayRunStopsOnContextCancellation(t *testing.T) {
 	store := &relayStore{}
 	relay, err := outbox.NewRelay(store, registeredCodec(t), &relayPublisher{}, outbox.WithClock(fixedClock))
