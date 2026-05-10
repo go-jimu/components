@@ -90,13 +90,15 @@ type PanicContext struct {
     Stack   []byte
 }
 
+type PendingBatch struct {
+    BatchID uint64
+    Events  []Event
+}
+
 type CloseInterruptedContext struct {
-    Error             error
-    PendingBatchCount int
-    PendingEventCount int
-    InFlightBatchID   uint64
-    PendingBatchIDs   []uint64
-    PendingEventKinds []Kind
+    Error           error
+    InFlightBatchID uint64
+    PendingBatches  []PendingBatch
 }
 
 type Collection interface {
@@ -320,8 +322,11 @@ or unhandled events when a user-provided unhandled hook is configured.
 
 When `Close(ctx)` is interrupted, an optional close interrupted hook may observe
 a `CloseInterruptedContext`. The context is a diagnostic snapshot, not a replay
-contract. It may include pending counts, in-flight batch ID, pending batch IDs,
-and pending event kinds. It must not include full event values by default.
+contract. It includes the in-flight batch ID and queued pending batches with
+their original events so callers can persist best-effort offline compensation
+clues. It does not include in-flight events because their handler state is
+unknown. Warning logs still include derived counts, batch IDs, and event kinds,
+but these summaries are not duplicated in the hook context API.
 
 ## Panic And Unhandled Events
 

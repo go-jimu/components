@@ -24,15 +24,19 @@ type PanicContext struct {
 	Stack   []byte
 }
 
+// PendingBatch describes an accepted event batch that was not started before
+// Close was interrupted.
+type PendingBatch struct {
+	BatchID uint64
+	Events  []Event
+}
+
 // CloseInterruptedContext describes accepted work that was not confirmed as
 // handled before Close was interrupted.
 type CloseInterruptedContext struct {
-	Error             error
-	PendingBatchCount int
-	PendingEventCount int
-	InFlightBatchID   uint64
-	PendingBatchIDs   []uint64
-	PendingEventKinds []Kind
+	Error           error
+	InFlightBatchID uint64
+	PendingBatches  []PendingBatch
 }
 
 // Collection stores domain events raised by an aggregate until the application

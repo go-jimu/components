@@ -187,37 +187,54 @@ func (d *dispatcher) interruptClose(err error) (CloseInterruptedContext, bool) {
 
 func (d *dispatcher) closeInterruptedSnapshotLocked(err error) CloseInterruptedContext {
 	snapshot := CloseInterruptedContext{
-		Error:             err,
-		PendingBatchCount: len(d.queue),
-		InFlightBatchID:   d.inFlightBatchID,
-	}
-	if len(d.queue) > 0 {
-		snapshot.PendingBatchIDs = make([]uint64, 0, len(d.queue))
+		Error:           err,
+		InFlightBatchID: d.inFlightBatchID,
 	}
 	for _, queued := range d.queue {
-		snapshot.PendingBatchIDs = append(snapshot.PendingBatchIDs, queued.id)
-		snapshot.PendingEventCount += len(queued.events)
-		for _, event := range queued.events {
-			if event == nil {
-				continue
-			}
-			snapshot.PendingEventKinds = append(snapshot.PendingEventKinds, event.Kind())
-		}
+		events := make([]Event, len(queued.events))
+		copy(events, queued.events)
+		snapshot.PendingBatches = append(snapshot.PendingBatches, PendingBatch{
+			BatchID: queued.id,
+			Events:  events,
+		})
 	}
 	return snapshot
 }
 
 func (d *dispatcher) reportCloseInterrupted(snapshot CloseInterruptedContext) {
+	pendingBatchIDs, pendingEventKinds, pendingEventCount := closeInterruptedSummary(snapshot)
 	d.logger.Warn("domain event dispatcher close interrupted",
 		slog.Any("error", snapshot.Error),
-		slog.Int("pending_batch_count", snapshot.PendingBatchCount),
-		slog.Int("pending_event_count", snapshot.PendingEventCount),
+		slog.Int("pending_batch_count", len(snapshot.PendingBatches)),
+		slog.Int("pending_event_count", pendingEventCount),
 		slog.Uint64("in_flight_batch_id", snapshot.InFlightBatchID),
-		slog.Any("pending_batch_ids", snapshot.PendingBatchIDs),
-		slog.Any("pending_event_kinds", snapshot.PendingEventKinds))
+		slog.Any("pending_batch_ids", pendingBatchIDs),
+		slog.Any("pending_event_kinds", pendingEventKinds))
 	if d.closeInterruptedHandler != nil {
 		d.closeInterruptedHandler(snapshot)
 	}
+}
+
+func closeInterruptedSummary(snapshot CloseInterruptedContext) ([]uint64, []Kind, int) {
+	var (
+		batchIDs   []uint64
+		eventKinds []Kind
+		eventCount int
+	)
+	if len(snapshot.PendingBatches) > 0 {
+		batchIDs = make([]uint64, 0, len(snapshot.PendingBatches))
+	}
+	for _, pending := range snapshot.PendingBatches {
+		batchIDs = append(batchIDs, pending.BatchID)
+		eventCount += len(pending.Events)
+		for _, event := range pending.Events {
+			if event == nil {
+				continue
+			}
+			eventKinds = append(eventKinds, event.Kind())
+		}
+	}
+	return batchIDs, eventKinds, eventCount
 }
 
 func (d *dispatcher) run() {

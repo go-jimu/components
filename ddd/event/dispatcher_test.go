@@ -508,11 +508,11 @@ func TestDispatcherCloseInterruptedHookReportsAbandonedWork(t *testing.T) {
 
 	snapshot := receiveWithin(t, "close interrupted hook", interrupted)
 	require.ErrorIs(t, snapshot.Error, context.DeadlineExceeded)
-	require.Equal(t, 1, snapshot.PendingBatchCount)
-	require.Equal(t, 1, snapshot.PendingEventCount)
 	require.Equal(t, uint64(1), snapshot.InFlightBatchID)
-	require.Equal(t, []uint64{2}, snapshot.PendingBatchIDs)
-	require.Equal(t, []event.Kind{"order.event"}, snapshot.PendingEventKinds)
+	require.Len(t, snapshot.PendingBatches, 1)
+	require.Equal(t, uint64(2), snapshot.PendingBatches[0].BatchID)
+	require.Len(t, snapshot.PendingBatches[0].Events, 1)
+	require.Equal(t, "third", snapshot.PendingBatches[0].Events[0].(testEvent).name)
 }
 
 // Intent: after Close times out during process shutdown, queued batches should
