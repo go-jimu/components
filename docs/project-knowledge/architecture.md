@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
 updated_by: superpowers-memory:update
-triggered_by_plan: 2026-05-10-integration-message.md
+triggered_by_plan: 2026-05-10-message-outbox.md
 ---
 
 # Architecture
@@ -30,6 +30,7 @@ compatible and adds DDD concept packages under `ddd/`.
 - `mediator/` — existing in-process event mediator with global default, event collection, subscription, dispatch, and graceful shutdown.
 - `ddd/event/` — DDD-oriented domain event collection, batch dispatch, and handler subscription. Key abstractions: `Event`, `Collection`, `Dispatcher`, `Subscriber`, `InMemoryDispatcher`, `Handler`.
 - `ddd/message/` — protobuf-first integration message DTO construction and deterministic handler routing for cross-context messaging. Key abstractions: `Message`, `Kind`, `Publisher`, `Subscriber`, `Handler`, `Router`.
+- `ddd/message/outbox/` — transactional outbox contracts and relay runtime for reliable integration message publishing. Key abstractions: `Record`, `Store`, `Recorder`, `Codec`, `RetryPolicy`, `Relay`.
 - `validation/` — notification and specification validation helpers.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — design and implementation records for planned or recently completed work.
 
@@ -74,6 +75,20 @@ sequenceDiagram
     App->>Collection: Drain()
     App->>Dispatcher: DispatchAll(events batch)
     Dispatcher-->>App: dispatch error or nil
+```
+
+```mermaid
+sequenceDiagram
+    participant App as Application service
+    participant Recorder as ddd/message/outbox.Recorder
+    participant Store as outbox.Store
+    participant Relay as outbox.Relay
+    participant Publisher as message.Publisher
+    App->>Recorder: record integration message in business transaction
+    Recorder->>Store: append outbox record
+    Relay->>Store: claim due records
+    Relay->>Publisher: publish decoded message
+    Relay->>Store: mark published or failed
 ```
 
 ## Key Object FSMs
