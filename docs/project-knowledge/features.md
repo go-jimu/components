@@ -62,6 +62,13 @@ triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 - Capability Boundary: single-process domain events only; no integration message bus, broker, retry, or outbox.
 - References: `ddd/event/`, `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 
+#### Dispatcher runtime diagnostics
+
+- Enables: dispatcher owners trace batch admission, lifecycle, rejected dispatches, unhandled events, nil contexts, and handler panics.
+- Actors / Entry Points: application services configure `ddd/event.Dispatcher` options and consume logs or runtime hooks.
+- Capability Boundary: diagnostics for in-process domain event dispatch only; no durable event audit log.
+- References: `ddd/event/`, `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
+
 ### Validation
 
 #### Notification and specification helpers
