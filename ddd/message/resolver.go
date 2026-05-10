@@ -10,6 +10,8 @@ import (
 //
 // Broker and storage adapters use the returned message as the target for
 // unmarshalling bytes into the protobuf DTO contract identified by Kind.
+// Returning nil or a typed-nil protobuf message is a resolver configuration
+// error reported as ErrNilPayloadFactory.
 type PayloadResolver interface {
 	Resolve(Kind) (proto.Message, error)
 }
