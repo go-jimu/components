@@ -112,6 +112,7 @@ func TestRelayRunOnceReportsInvalidClaimOptions(t *testing.T) {
 	result := relay.RunOnce(context.Background(), outbox.ClaimOptions{})
 
 	require.Len(t, result.Errors, 1)
+	require.Contains(t, result.Errors[0].Error(), "normalize claim options")
 	require.ErrorIs(t, result.Errors[0], outbox.ErrInvalidClaimOptions)
 }
 
