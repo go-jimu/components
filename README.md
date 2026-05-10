@@ -5,3 +5,11 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-jimu/components.svg)](https://pkg.go.dev/github.com/go-jimu/components)
 [![CI](https://github.com/go-jimu/components/actions/workflows/ci.yml/badge.svg)](https://github.com/go-jimu/components/actions/workflows/ci.yml)
 
+## Domain events
+
+For new domain event code, use `github.com/go-jimu/components/ddd/event`.
+
+The legacy `mediator` package remains source-compatible for existing users and
+will only receive compatibility fixes. See
+[`docs/mediator-migration.md`](docs/mediator-migration.md) for the semantic
+differences and migration guidance.

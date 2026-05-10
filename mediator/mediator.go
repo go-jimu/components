@@ -11,12 +11,18 @@ import (
 
 type (
 	// Mediator is the interface that wraps the methods of a mediator.
+	//
+	// Deprecated: use github.com/go-jimu/components/ddd/event.Dispatcher for new
+	// domain event code.
 	Mediator interface {
 		Dispatch(Event) error
 		Subscribe(EventHandler)
 	}
 
 	// InMemMediator is a simple in-memory mediator implementation.
+	//
+	// Deprecated: use github.com/go-jimu/components/ddd/event.NewDispatcher for
+	// new domain event code.
 	InMemMediator struct {
 		timeout            time.Duration
 		handlers           map[EventKind][]EventHandler
@@ -33,6 +39,9 @@ type (
 	}
 
 	// Options is the options for the mediator.
+	//
+	// Deprecated: use github.com/go-jimu/components/ddd/event options for new
+	// domain event code.
 	Options struct {
 		Timeout    string `json:"timeout" yaml:"timeout" toml:"timeout"`
 		Concurrent int    `json:"concurrent" yaml:"concurrent" toml:"concurrent"`
@@ -40,11 +49,17 @@ type (
 )
 
 var (
-	_                   Mediator = (*InMemMediator)(nil)
-	ErrMediatorClosed            = errors.New("mediator is closed")
-	ErrNoHandlerMatched          = errors.New("no matching event handler found")
+	_ Mediator = (*InMemMediator)(nil)
+	// Deprecated: use github.com/go-jimu/components/ddd/event.Dispatcher return
+	// values for new domain event code.
+	ErrMediatorClosed = errors.New("mediator is closed")
+	// Deprecated: use github.com/go-jimu/components/ddd/event.WithUnhandledEventHandler
+	// for new domain event code.
+	ErrNoHandlerMatched = errors.New("no matching event handler found")
 )
 
+// Deprecated: use github.com/go-jimu/components/ddd/event.NewDispatcher for new
+// domain event code.
 func NewInMemMediator(opt Options, opts ...Option) Mediator {
 	if opt.Concurrent < 1 {
 		opt.Concurrent = 1

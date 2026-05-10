@@ -13,14 +13,22 @@ import (
 
 type (
 	// EventKind 事件类型描述.
+	//
+	// Deprecated: use github.com/go-jimu/components/ddd/event.Kind for new
+	// domain event code.
 	EventKind string
 
+	// Deprecated: use github.com/go-jimu/components/ddd/event.Handler for new
+	// domain event code.
 	EventHandler interface {
 		Listening() []EventKind
 		Handle(context.Context, Event)
 	}
 
 	// Event 事件接口.
+	//
+	// Deprecated: use github.com/go-jimu/components/ddd/event.Event for new
+	// domain event code.
 	Event interface {
 		Kind() EventKind
 	}
@@ -30,6 +38,8 @@ type (
 		raised atomic.Bool
 	}
 
+	// Deprecated: use github.com/go-jimu/components/ddd/event.Collection for new
+	// domain event code.
 	EventCollection interface {
 		Add(Event)
 		Raise(Mediator)
@@ -39,6 +49,8 @@ type (
 
 var _ EventCollection = (*eventCollection)(nil)
 
+// Deprecated: use github.com/go-jimu/components/ddd/event.NewCollection for new
+// domain event code.
 func NewEventCollection() EventCollection {
 	return &eventCollection{events: make([]Event, 0)}
 }
