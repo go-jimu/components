@@ -14,7 +14,7 @@ Pointer: `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 
 ## Use `ddd/` as a DDD concept namespace
 
-Decision: reserve `ddd/event`, future `ddd/message`, and future `ddd/message/outbox`.
+Decision: reserve `ddd/event` and `ddd/message` as DDD concept packages, with `ddd/message/outbox` left for future reliability work.
 Trade-off: improves naming consistency, but package documentation must clarify that `ddd/` is not an application Domain Layer directory.
 Pointer: `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 

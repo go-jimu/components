@@ -390,4 +390,3 @@ These are explicitly outside this implementation:
 - cross-language schema governance beyond protobuf message naming
 - generic typed handlers
 - replacing or modifying `ddd/event`
-
