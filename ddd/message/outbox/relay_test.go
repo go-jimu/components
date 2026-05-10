@@ -116,6 +116,38 @@ func TestRelayRunOnceReportsInvalidClaimOptions(t *testing.T) {
 	require.ErrorIs(t, result.Errors[0], outbox.ErrInvalidClaimOptions)
 }
 
+// Run must reject non-positive intervals so callers do not accidentally create
+// tight loops.
+func TestRelayRunRejectsInvalidInterval(t *testing.T) {
+	relay, err := outbox.NewRelay(&relayStore{}, registeredCodec(t), &relayPublisher{})
+	require.NoError(t, err)
+
+	err = relay.Run(context.Background(), outbox.RunOptions{})
+
+	require.True(t, errors.Is(err, outbox.ErrInvalidRunOptions))
+}
+
+// Run must call RunOnce repeatedly and stop when the context is canceled.
+func TestRelayRunStopsOnContextCancellation(t *testing.T) {
+	store := &relayStore{}
+	relay, err := outbox.NewRelay(store, registeredCodec(t), &relayPublisher{}, outbox.WithClock(fixedClock))
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+
+	err = relay.Run(ctx, outbox.RunOptions{
+		Claim:    validClaimOptions(),
+		Interval: time.Millisecond,
+		OnResult: func(outbox.RunResult) {
+			calls++
+			cancel()
+		},
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, calls)
+}
+
 // Failed count means the original decode or publish failure was successfully
 // persisted through MarkFailed; MarkFailed persistence errors must preserve both
 // the original cause and the mark failure.

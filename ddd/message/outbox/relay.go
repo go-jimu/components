@@ -68,6 +68,36 @@ type RunResult struct {
 	Errors []error
 }
 
+type RunOptions struct {
+	Claim    ClaimOptions
+	Interval time.Duration
+	OnResult func(RunResult)
+}
+
+func (r *Relay) Run(ctx context.Context, opts RunOptions) error {
+	if opts.Interval <= 0 {
+		return ErrInvalidRunOptions
+	}
+	for {
+		result := r.RunOnce(ctx, opts.Claim)
+		if opts.OnResult != nil {
+			opts.OnResult(result)
+		}
+		timer := time.NewTimer(opts.Interval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 func (r *Relay) RunOnce(ctx context.Context, opts ClaimOptions) RunResult {
 	opts, err := opts.normalize(r.now)
 	if err != nil {
