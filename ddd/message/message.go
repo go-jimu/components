@@ -3,6 +3,7 @@ package message
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"reflect"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -23,13 +24,15 @@ func New(kind Kind, payload proto.Message, opts ...Option) (Message, error) {
 	if kind == "" {
 		return Message{}, ErrEmptyKind
 	}
-	if payload == nil {
+	if isNilPayload(payload) {
 		return Message{}, ErrNilPayload
 	}
 
 	cfg := messageConfig{}
 	for _, opt := range opts {
-		opt(&cfg)
+		if opt != nil {
+			opt(&cfg)
+		}
 	}
 	if cfg.idSet && cfg.id == "" {
 		return Message{}, ErrEmptyID
@@ -84,10 +87,24 @@ func (m Message) Headers() map[string]string {
 }
 
 func KindOf(payload proto.Message) Kind {
-	if payload == nil {
+	if isNilPayload(payload) {
 		return ""
 	}
 	return Kind(payload.ProtoReflect().Descriptor().FullName())
+}
+
+func isNilPayload(payload proto.Message) bool {
+	if payload == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(payload)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func generateID() (string, error) {

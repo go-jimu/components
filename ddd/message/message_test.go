@@ -26,6 +26,16 @@ func TestNewRejectsNilPayload(t *testing.T) {
 	require.Equal(t, message.Message{}, msg)
 }
 
+// Typed-nil protobuf payloads must be rejected so nil pointers cannot masquerade as valid message contracts.
+func TestNewRejectsTypedNilPayload(t *testing.T) {
+	var payload *testdata.TestModel
+
+	msg, err := message.New("test.TestModel", payload)
+
+	require.True(t, errors.Is(err, message.ErrNilPayload))
+	require.Equal(t, message.Message{}, msg)
+}
+
 // Required inputs should produce a valid message with generated metadata and the original protobuf payload.
 func TestNewDefaultsIDAndOccurredAt(t *testing.T) {
 	payload := &testdata.TestModel{}
@@ -42,6 +52,14 @@ func TestNewDefaultsIDAndOccurredAt(t *testing.T) {
 	require.False(t, msg.OccurredAt().Before(before))
 	require.False(t, msg.OccurredAt().After(after))
 	require.Empty(t, msg.Headers())
+}
+
+// Nil options should be ignored so callers can pass optional construction hooks without panicking.
+func TestNewIgnoresNilOption(t *testing.T) {
+	msg, err := message.New("test.TestModel", &testdata.TestModel{}, nil)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, msg.ID())
 }
 
 // Explicit metadata options should be reflected by accessors so publishers can preserve routing and tracing context.
