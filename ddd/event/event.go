@@ -10,6 +10,20 @@ type Event interface {
 	Kind() Kind
 }
 
+// UnhandledContext describes an event that has no registered handler.
+type UnhandledContext struct {
+	BatchID uint64
+	Event   Event
+}
+
+// PanicContext describes a recovered handler panic.
+type PanicContext struct {
+	BatchID uint64
+	Event   Event
+	Panic   any
+	Stack   []byte
+}
+
 // Collection stores domain events raised by an aggregate until the application
 // layer drains them after persistence succeeds.
 type Collection interface {

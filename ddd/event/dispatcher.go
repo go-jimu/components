@@ -14,6 +14,7 @@ const (
 )
 
 type batch struct {
+	id     uint64
 	events []Event
 }
 
@@ -23,14 +24,15 @@ type dispatcher struct {
 	notFull               *sync.Cond
 	queue                 []batch
 	closed                bool
+	nextBatchID           uint64
 	done                  chan struct{}
 	handlers              map[Kind][]Handler
 	logger                *slog.Logger
 	delayClose            time.Duration
 	handlerTimeout        time.Duration
 	contextFactory        func(context.Context, Event) context.Context
-	unhandledEventHandler func(Event)
-	panicHandler          func(Event, any, []byte)
+	unhandledEventHandler func(UnhandledContext)
+	panicHandler          func(PanicContext)
 	bufferSize            int
 	rootCtx               context.Context
 	rootCancel            context.CancelFunc
@@ -93,17 +95,19 @@ func (d *dispatcher) DispatchAll(events []Event) bool {
 	copy(copied, events)
 
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	for len(d.queue) >= d.bufferSize && !d.closed {
 		d.notFull.Wait()
 	}
 	if d.closed {
+		d.mu.Unlock()
+		d.logger.Warn("domain event dispatch rejected", slog.Int("event_count", len(copied)))
 		return false
 	}
 
-	d.queue = append(d.queue, batch{events: copied})
+	d.nextBatchID++
+	d.queue = append(d.queue, batch{id: d.nextBatchID, events: copied})
 	d.notEmpty.Signal()
+	d.mu.Unlock()
 	return true
 }
 
@@ -124,31 +128,43 @@ func (d *dispatcher) Close(ctx context.Context) error {
 				default:
 				}
 			}
-			d.beginClose()
+			closed := d.beginClose()
+			if closed {
+				d.logger.Info("domain event dispatcher closing started")
+			}
+			d.logger.Warn("domain event dispatcher close interrupted", slog.Any("error", ctx.Err()))
 			return ctx.Err()
 		}
 	}
 
-	d.beginClose()
+	closed := d.beginClose()
+	if closed {
+		d.logger.Info("domain event dispatcher closing started")
+	}
 
 	select {
 	case <-d.done:
+		if closed {
+			d.logger.Info("domain event dispatcher closed")
+		}
 		return nil
 	case <-ctx.Done():
+		d.logger.Warn("domain event dispatcher close interrupted", slog.Any("error", ctx.Err()))
 		return ctx.Err()
 	}
 }
 
-func (d *dispatcher) beginClose() {
+func (d *dispatcher) beginClose() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if d.closed {
-		return
+		return false
 	}
 	d.closed = true
 	d.notEmpty.Broadcast()
 	d.notFull.Broadcast()
+	return true
 }
 
 func (d *dispatcher) run() {
@@ -184,11 +200,11 @@ func (d *dispatcher) nextBatch() (batch, bool) {
 
 func (d *dispatcher) handleBatch(next batch) {
 	for _, event := range next.events {
-		d.handleEvent(event)
+		d.handleEvent(next.id, event)
 	}
 }
 
-func (d *dispatcher) handleEvent(event Event) {
+func (d *dispatcher) handleEvent(batchID uint64, event Event) {
 	if event == nil {
 		return
 	}
@@ -199,37 +215,48 @@ func (d *dispatcher) handleEvent(event Event) {
 
 	if len(handlers) == 0 {
 		if d.unhandledEventHandler != nil {
-			d.unhandledEventHandler(event)
+			d.unhandledEventHandler(UnhandledContext{BatchID: batchID, Event: event})
+		} else {
+			d.logger.Warn("domain event has no handler",
+				slog.Uint64("batch_id", batchID),
+				slog.Any("event_kind", event.Kind()))
 		}
 		return
 	}
 
 	for _, handler := range handlers {
-		d.handleOne(handler, event)
+		d.handleOne(batchID, handler, event)
 	}
 }
 
-func (d *dispatcher) handleOne(handler Handler, event Event) {
+func (d *dispatcher) handleOne(batchID uint64, handler Handler, event Event) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			stack := debug.Stack()
 			if d.panicHandler != nil {
-				d.panicHandler(event, recovered, stack)
+				d.panicHandler(PanicContext{
+					BatchID: batchID,
+					Event:   event,
+					Panic:   recovered,
+					Stack:   stack,
+				})
 				return
 			}
 			d.logger.Error("panic occurred while handling event",
+				slog.Uint64("batch_id", batchID),
+				slog.Any("event_kind", event.Kind()),
 				slog.Any("event", event),
 				slog.Any("panic", recovered),
 				slog.Any("stack_trace", string(stack)))
 		}
 	}()
 
-	ctx, cancel := d.handlerContext(event)
+	ctx, cancel := d.handlerContext(batchID, event)
 	defer cancel()
 	handler.Handle(ctx, event)
 }
 
-func (d *dispatcher) handlerContext(event Event) (context.Context, context.CancelFunc) {
+func (d *dispatcher) handlerContext(batchID uint64, event Event) (context.Context, context.CancelFunc) {
 	var (
 		ctx    context.Context
 		cancel context.CancelFunc
@@ -243,6 +270,10 @@ func (d *dispatcher) handlerContext(event Event) (context.Context, context.Cance
 	if d.contextFactory != nil {
 		if derived := d.contextFactory(ctx, event); derived != nil {
 			ctx = derived
+		} else {
+			d.logger.Warn("domain event context factory returned nil",
+				slog.Uint64("batch_id", batchID),
+				slog.Any("event_kind", event.Kind()))
 		}
 	}
 	return ctx, cancel

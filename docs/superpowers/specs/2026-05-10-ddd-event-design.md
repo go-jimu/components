@@ -78,6 +78,18 @@ type Event interface {
     Kind() Kind
 }
 
+type UnhandledContext struct {
+    BatchID uint64
+    Event   Event
+}
+
+type PanicContext struct {
+    BatchID uint64
+    Event   Event
+    Panic   any
+    Stack   []byte
+}
+
 type Collection interface {
     Add(Event) bool
     Drain() []Event
@@ -211,8 +223,8 @@ func WithLogger(logger *slog.Logger) Option
 func WithDelayClose(d time.Duration) Option
 func WithHandlerTimeout(timeout time.Duration) Option
 func WithContextFactory(fn func(context.Context, Event) context.Context) Option
-func WithUnhandledEventHandler(fn func(Event)) Option
-func WithPanicHandler(fn func(Event, any, []byte)) Option
+func WithUnhandledEventHandler(fn func(UnhandledContext)) Option
+func WithPanicHandler(fn func(PanicContext)) Option
 func WithBufferSize(n int) Option
 ```
 
@@ -235,6 +247,7 @@ The dispatcher queue stores batches:
 
 ```go
 type batch struct {
+    id     uint64
     events []Event
 }
 ```
@@ -253,6 +266,32 @@ When closing or closed:
 `WithDelayClose` delays the transition into closing, matching the existing
 `mediator` shutdown style where useful.
 
+## Observability
+
+Each accepted non-empty batch receives a dispatcher-local `BatchID`. The ID is
+monotonic within one dispatcher instance and is only for diagnostics. It is not a
+business identifier and is not stable across process restarts.
+
+`BatchID` is included in:
+
+- unhandled event hook context
+- panic hook context
+- unhandled event warning logs
+- recovered panic error logs
+- context factory warning logs
+
+The dispatcher logs its autonomous runtime behavior:
+
+- `Info`: close started and close completed
+- `Warn`: non-empty dispatch rejected because the dispatcher is closing/closed
+- `Warn`: event has no handler and no unhandled hook is configured
+- `Warn`: context factory returns `nil`
+- `Warn`: close is interrupted by caller context cancellation or timeout
+- `Error`: handler panic when no panic hook is configured
+
+The dispatcher does not log accepted batches, handler start/end, empty batches,
+or unhandled events when a user-provided unhandled hook is configured.
+
 ## Panic And Unhandled Events
 
 Handler panics are recovered by the dispatcher. A panic in one handler must not
@@ -262,6 +301,7 @@ If no handler subscribes to an event:
 
 - default behavior is no-op
 - an optional unhandled event hook may observe it
+- if no hook is configured, the dispatcher logs a warning
 
 No handler is not an error. Domain events can be raised for optional reactions.
 
@@ -296,10 +336,13 @@ Runtime tests:
 - handler panic is recovered
 - panic does not block later handlers/events/batches
 - unhandled event hook is called when configured
+- unhandled events without a hook are logged as warnings
 - handler timeout is applied when configured
 - context factory is applied when configured
+- nil context factory results are logged as warnings
 - `Close(ctx)` drains accepted batches
 - `Close(ctx)` returns `ctx.Err()` on timeout
+- close lifecycle and close context errors are logged
 
 ## Documentation Requirements
 

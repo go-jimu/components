@@ -16,6 +16,21 @@
 - Project knowledge: `docs/project-knowledge/architecture.md`, `docs/project-knowledge/conventions.md`
 - Existing runtime reference: `mediator/option.go`, `mediator/mediator.go`
 
+## Post-Implementation Amendment
+
+After the original plan was executed, dispatcher observability was expanded from
+the approved design discussion:
+
+- accepted batches now receive a dispatcher-local `BatchID`
+- unhandled and panic hooks receive context structs that include `BatchID`
+- dispatcher lifecycle, rejected dispatches, unhandled events, nil context
+  factory results, close context errors, and recovered panics are logged at
+  explicit levels
+
+The canonical API and behavior are recorded in the spec and implementation. Some
+earlier task snippets below show the pre-amendment hook signatures and should be
+read as historical execution steps, not the final API.
+
 ## Architecture Gate
 
 - Gate level: Level 3, new DDD concept package and dispatch boundary.

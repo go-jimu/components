@@ -9,7 +9,7 @@ import (
 // Option configures a Dispatcher during construction.
 type Option func(*dispatcher)
 
-// WithLogger sets the logger for the dispatcher.
+// WithLogger sets the logger for dispatcher lifecycle and runtime diagnostics.
 func WithLogger(logger *slog.Logger) Option {
 	return func(d *dispatcher) {
 		if logger != nil {
@@ -44,14 +44,14 @@ func WithContextFactory(fn func(context.Context, Event) context.Context) Option 
 }
 
 // WithUnhandledEventHandler sets a hook for events with no registered handler.
-func WithUnhandledEventHandler(fn func(Event)) Option {
+func WithUnhandledEventHandler(fn func(UnhandledContext)) Option {
 	return func(d *dispatcher) {
 		d.unhandledEventHandler = fn
 	}
 }
 
 // WithPanicHandler sets a hook for recovered handler panics.
-func WithPanicHandler(fn func(Event, any, []byte)) Option {
+func WithPanicHandler(fn func(PanicContext)) Option {
 	return func(d *dispatcher) {
 		d.panicHandler = fn
 	}

@@ -2,6 +2,7 @@ package event_test
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,42 @@ func (h handlerFunc) Handle(ctx context.Context, ev event.Event) {
 	}
 }
 
+type logRecord struct {
+	level   slog.Level
+	message string
+	attrs   map[string]any
+}
+
+type recordingHandler struct {
+	records chan logRecord
+}
+
+func (h recordingHandler) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (h recordingHandler) Handle(_ context.Context, record slog.Record) error {
+	attrs := make(map[string]any)
+	record.Attrs(func(attr slog.Attr) bool {
+		attrs[attr.Key] = attr.Value.Any()
+		return true
+	})
+	h.records <- logRecord{
+		level:   record.Level,
+		message: record.Message,
+		attrs:   attrs,
+	}
+	return nil
+}
+
+func (h recordingHandler) WithAttrs([]slog.Attr) slog.Handler {
+	return h
+}
+
+func (h recordingHandler) WithGroup(string) slog.Handler {
+	return h
+}
+
 func receiveWithin[T any](t *testing.T, name string, ch <-chan T) T {
 	t.Helper()
 
@@ -34,6 +71,11 @@ func receiveWithin[T any](t *testing.T, name string, ch <-chan T) T {
 
 	var zero T
 	return zero
+}
+
+func receiveLogWithin(t *testing.T, name string, ch <-chan logRecord) logRecord {
+	t.Helper()
+	return receiveWithin(t, name, ch)
 }
 
 // Intent: dispatch reports admission acceptance, not handler success.
@@ -71,6 +113,26 @@ func TestDispatcherRejectsAfterClose(t *testing.T) {
 
 	require.False(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 	require.False(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}))
+}
+
+// Intent: rejected dispatches happen in a background component, so they should
+// be logged as warnings with enough context to diagnose dropped batches.
+func TestDispatcherLogsRejectedDispatch(t *testing.T) {
+	records := make(chan logRecord, 4)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithLogger(slog.New(recordingHandler{records: records})),
+	)
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	require.False(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}))
+
+	record := receiveLogWithin(t, "rejected dispatch log", records)
+	for record.message != "domain event dispatch rejected" {
+		record = receiveLogWithin(t, "rejected dispatch log", records)
+	}
+	require.Equal(t, slog.LevelWarn, record.level)
+	require.Equal(t, int64(1), record.attrs["event_count"])
 }
 
 // Intent: canceling close during the delay phase still starts shutdown so
@@ -120,6 +182,25 @@ func TestDispatcherCloseDrainsAcceptedBatches(t *testing.T) {
 	close(release)
 	wg.Wait()
 	<-done
+}
+
+// Intent: dispatcher lifecycle is autonomous background work, so close start
+// and completion should be visible without relying on caller-side logs.
+func TestDispatcherLogsCloseLifecycle(t *testing.T) {
+	records := make(chan logRecord, 2)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithLogger(slog.New(recordingHandler{records: records})),
+	)
+
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	started := receiveLogWithin(t, "close started log", records)
+	completed := receiveLogWithin(t, "close completed log", records)
+	require.Equal(t, slog.LevelInfo, started.level)
+	require.Equal(t, "domain event dispatcher closing started", started.message)
+	require.Equal(t, slog.LevelInfo, completed.level)
+	require.Equal(t, "domain event dispatcher closed", completed.message)
 }
 
 // Intent: DispatchAll submits one batch, so its events must be processed
@@ -175,28 +256,49 @@ func TestDispatcherHandlersRunInSubscriptionOrder(t *testing.T) {
 // Intent: no-handler events are allowed, but applications can observe them
 // through an explicit hook when useful.
 func TestDispatcherUnhandledEventHook(t *testing.T) {
-	unhandled := make(chan event.Event, 1)
+	unhandled := make(chan event.UnhandledContext, 1)
 	dispatcher := event.NewDispatcher(
 		event.WithDelayClose(0),
-		event.WithUnhandledEventHandler(func(ev event.Event) {
-			unhandled <- ev
+		event.WithUnhandledEventHandler(func(ctx event.UnhandledContext) {
+			unhandled <- ctx
 		}),
 	)
 	defer dispatcher.Close(context.Background())
 
 	require.True(t, dispatcher.Dispatch(testEvent{kind: "unknown"}))
-	require.Equal(t, event.Kind("unknown"), (<-unhandled).Kind())
+	ctx := receiveWithin(t, "unhandled event", unhandled)
+	require.Equal(t, uint64(1), ctx.BatchID)
+	require.Equal(t, event.Kind("unknown"), ctx.Event.Kind())
+}
+
+// Intent: unhandled events without a user hook should still be visible in
+// warning logs because they often indicate a subscription configuration issue.
+func TestDispatcherLogsUnhandledEventWithoutHook(t *testing.T) {
+	records := make(chan logRecord, 4)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithLogger(slog.New(recordingHandler{records: records})),
+	)
+	defer dispatcher.Close(context.Background())
+
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "unknown"}))
+
+	record := receiveLogWithin(t, "unhandled event log", records)
+	require.Equal(t, slog.LevelWarn, record.level)
+	require.Equal(t, "domain event has no handler", record.message)
+	require.Equal(t, uint64(1), record.attrs["batch_id"])
+	require.Equal(t, event.Kind("unknown"), record.attrs["event_kind"])
 }
 
 // Intent: a panic in one handler must not stop later handlers or later events
 // in the same accepted batch.
 func TestDispatcherRecoversPanicAndContinues(t *testing.T) {
-	panicked := make(chan any, 1)
+	panicked := make(chan event.PanicContext, 2)
 	seen := make(chan string, 2)
 	dispatcher := event.NewDispatcher(
 		event.WithDelayClose(0),
-		event.WithPanicHandler(func(_ event.Event, recovered any, _ []byte) {
-			panicked <- recovered
+		event.WithPanicHandler(func(ctx event.PanicContext) {
+			panicked <- ctx
 		}),
 	)
 	defer dispatcher.Close(context.Background())
@@ -218,9 +320,13 @@ func TestDispatcherRecoversPanicAndContinues(t *testing.T) {
 		testEvent{kind: "order.event", name: "first"},
 		testEvent{kind: "order.event", name: "second"},
 	}))
-	require.Equal(t, "handler failed", receiveWithin(t, "panic recovery", panicked))
+	firstPanic := receiveWithin(t, "panic recovery", panicked)
+	require.Equal(t, uint64(1), firstPanic.BatchID)
+	require.Equal(t, "handler failed", firstPanic.Panic)
 	require.Equal(t, "first", receiveWithin(t, "first continued handler", seen))
-	require.Equal(t, "handler failed", receiveWithin(t, "second panic recovery", panicked))
+	secondPanic := receiveWithin(t, "second panic recovery", panicked)
+	require.Equal(t, uint64(1), secondPanic.BatchID)
+	require.Equal(t, "handler failed", secondPanic.Panic)
 	require.Equal(t, "second", receiveWithin(t, "second continued handler", seen))
 }
 
@@ -247,6 +353,37 @@ func TestDispatcherContextFactory(t *testing.T) {
 
 	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 	require.Equal(t, "dispatcher-context", <-valueCh)
+}
+
+// Intent: a nil context from a user-provided factory is abnormal runtime
+// behavior and should be logged as a warning while preserving the base context.
+func TestDispatcherLogsNilContextFactory(t *testing.T) {
+	records := make(chan logRecord, 4)
+	handled := make(chan struct{}, 1)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithLogger(slog.New(recordingHandler{records: records})),
+		event.WithContextFactory(func(context.Context, event.Event) context.Context {
+			return nil
+		}),
+	)
+	defer dispatcher.Close(context.Background())
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.paid"},
+		handle: func(ctx context.Context, _ event.Event) {
+			require.NotNil(t, ctx)
+			handled <- struct{}{}
+		},
+	})
+
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	receiveWithin(t, "handler after nil context factory", handled)
+	record := receiveLogWithin(t, "nil context factory log", records)
+	require.Equal(t, slog.LevelWarn, record.level)
+	require.Equal(t, "domain event context factory returned nil", record.message)
+	require.Equal(t, uint64(1), record.attrs["batch_id"])
+	require.Equal(t, event.Kind("order.paid"), record.attrs["event_kind"])
 }
 
 // Intent: configured handler timeout should cancel long-running handler
@@ -289,4 +426,35 @@ func TestDispatcherCloseReturnsContextErrorOnTimeout(t *testing.T) {
 	defer cancel()
 	require.ErrorIs(t, dispatcher.Close(ctx), context.DeadlineExceeded)
 	close(block)
+}
+
+// Intent: when Close cannot wait for accepted work to drain, the background
+// dispatcher should emit a warning diagnostic for operators.
+func TestDispatcherLogsCloseContextError(t *testing.T) {
+	records := make(chan logRecord, 4)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithLogger(slog.New(recordingHandler{records: records})),
+	)
+	block := make(chan struct{})
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.paid"},
+		handle: func(context.Context, event.Event) {
+			<-block
+		},
+	})
+
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, dispatcher.Close(ctx), context.DeadlineExceeded)
+	close(block)
+
+	record := receiveLogWithin(t, "close context error log", records)
+	for record.message != "domain event dispatcher close interrupted" {
+		record = receiveLogWithin(t, "close context error log", records)
+	}
+	require.Equal(t, slog.LevelWarn, record.level)
+	require.ErrorIs(t, record.attrs["error"].(error), context.DeadlineExceeded)
 }
