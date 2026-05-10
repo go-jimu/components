@@ -124,6 +124,7 @@ func (d *dispatcher) Close(ctx context.Context) error {
 				default:
 				}
 			}
+			d.beginClose()
 			return ctx.Err()
 		}
 	}

@@ -59,6 +59,18 @@ func TestDispatcherRejectsAfterClose(t *testing.T) {
 	require.False(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}))
 }
 
+// Intent: canceling close during the delay phase still starts shutdown so
+// future non-empty batches cannot be admitted after Close returns.
+func TestDispatcherRejectsAfterDelayCloseCancel(t *testing.T) {
+	dispatcher := event.NewDispatcher(event.WithDelayClose(time.Hour))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, dispatcher.Close(ctx), context.Canceled)
+
+	require.False(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}))
+}
+
 // Intent: close waits for already accepted work to finish before returning.
 func TestDispatcherCloseDrainsAcceptedBatches(t *testing.T) {
 	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
