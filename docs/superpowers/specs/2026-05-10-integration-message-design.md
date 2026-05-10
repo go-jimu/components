@@ -143,10 +143,6 @@ type Runner interface {
     Run(context.Context) error
 }
 
-type Closer interface {
-    Close() error
-}
-
 type PayloadResolver interface {
     Resolve(Kind) (proto.Message, error)
 }
@@ -157,8 +153,8 @@ Different publishers and handlers should process the same message type. A
 Kafka-backed message must not become a different public type from a
 RabbitMQ-backed message.
 
-`Publisher`, `Subscriber`, `Handler`, `Runner`, `Closer`, and
-`PayloadResolver` are interfaces because they describe capabilities.
+`Publisher`, `Subscriber`, `Handler`, `Runner`, and `PayloadResolver` are
+interfaces because they describe capabilities.
 
 ## Message Fields
 
@@ -382,6 +378,10 @@ var (
     ErrNilPayloadFactory  = errors.New("message payload factory is nil")
 )
 ```
+
+`ErrNilPayload` applies when constructing a `Message` with an absent protobuf
+payload. `ErrNilPayloadFactory` applies when a resolver or registry factory
+cannot allocate the protobuf target needed to decode consumed bytes.
 
 Concrete publishers and subscribers should wrap transport errors with operation
 context. The core package does not define broker-specific failure categories.

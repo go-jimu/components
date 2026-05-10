@@ -41,11 +41,6 @@ type Runner interface {
 	Run(context.Context) error
 }
 
-// Closer is an optional lifecycle capability for providers that own resources.
-type Closer interface {
-	Close() error
-}
-
 // Router registers handlers by Kind and dispatches messages to them
 // sequentially.
 type Router struct {
