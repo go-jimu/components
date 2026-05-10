@@ -55,18 +55,18 @@ triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 
 ### DDD Event
 
-#### Domain event collection and in-process dispatch
+#### Domain event collection and dispatch
 
-- Enables: DDD-style services collect domain events inside one bounded context and submit event batches after persistence.
-- Actors / Entry Points: domain aggregates use `ddd/event.Collection`; application services use `ddd/event.Dispatcher`.
-- Capability Boundary: single-process domain events only; no integration message bus, broker, retry, or outbox.
+- Enables: services collect and submit domain event batches after persistence.
+- Actors / Entry Points: domain aggregates use `ddd/event.Collection`; application services use `ddd/event.Dispatcher`, `Subscriber`, or `InMemoryDispatcher`.
+- Capability Boundary: domain events inside one bounded context only; dispatch errors mean admission or delivery failure, not handler business failure.
 - References: `ddd/event/`, `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 
 #### Dispatcher runtime diagnostics
 
 - Enables: dispatcher owners trace runtime dispatch health and shutdown interruptions.
 - Actors / Entry Points: application services configure `ddd/event.Dispatcher` options and consume logs or runtime hooks.
-- Capability Boundary: diagnostics for in-process domain event dispatch only; forced shutdown pending events are best-effort offline compensation clues, not a durable event audit log.
+- Capability Boundary: diagnostics for domain event dispatch only; forced shutdown pending events are best-effort offline compensation clues, not a durable event audit log.
 - References: `ddd/event/`, `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 
 ### Validation
