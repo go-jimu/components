@@ -432,6 +432,7 @@ func TestDispatcherCloseReturnsContextErrorOnTimeout(t *testing.T) {
 // dispatcher should emit a warning diagnostic for operators.
 func TestDispatcherLogsCloseContextError(t *testing.T) {
 	records := make(chan logRecord, 4)
+	started := make(chan struct{})
 	dispatcher := event.NewDispatcher(
 		event.WithDelayClose(0),
 		event.WithLogger(slog.New(recordingHandler{records: records})),
@@ -440,10 +441,13 @@ func TestDispatcherLogsCloseContextError(t *testing.T) {
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.paid"},
 		handle: func(context.Context, event.Event) {
+			close(started)
 			<-block
 		},
 	})
 
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	<-started
 	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -457,4 +461,92 @@ func TestDispatcherLogsCloseContextError(t *testing.T) {
 	}
 	require.Equal(t, slog.LevelWarn, record.level)
 	require.ErrorIs(t, record.attrs["error"].(error), context.DeadlineExceeded)
+	require.Equal(t, int64(1), record.attrs["pending_batch_count"])
+	require.Equal(t, int64(1), record.attrs["pending_event_count"])
+	require.Equal(t, uint64(1), record.attrs["in_flight_batch_id"])
+	require.Equal(t, []uint64{2}, record.attrs["pending_batch_ids"])
+	require.Equal(t, []event.Kind{event.Kind("order.paid")}, record.attrs["pending_event_kinds"])
+}
+
+// Intent: when shutdown runs out of time, callers should receive a diagnostic
+// snapshot of accepted work that the dispatcher could not confirm as handled.
+func TestDispatcherCloseInterruptedHookReportsAbandonedWork(t *testing.T) {
+	interrupted := make(chan event.CloseInterruptedContext, 1)
+	firstStarted := make(chan struct{})
+	block := make(chan struct{})
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithCloseInterruptedHandler(func(ctx event.CloseInterruptedContext) {
+			interrupted <- ctx
+		}),
+	)
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(context.Context, event.Event) {
+			select {
+			case <-firstStarted:
+			default:
+				close(firstStarted)
+			}
+			<-block
+		},
+	})
+
+	require.True(t, dispatcher.DispatchAll([]event.Event{
+		testEvent{kind: "order.event", name: "first"},
+		testEvent{kind: "order.event", name: "second"},
+	}))
+	<-firstStarted
+	require.True(t, dispatcher.DispatchAll([]event.Event{
+		testEvent{kind: "order.event", name: "third"},
+	}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, dispatcher.Close(ctx), context.DeadlineExceeded)
+	close(block)
+
+	snapshot := receiveWithin(t, "close interrupted hook", interrupted)
+	require.ErrorIs(t, snapshot.Error, context.DeadlineExceeded)
+	require.Equal(t, 1, snapshot.PendingBatchCount)
+	require.Equal(t, 1, snapshot.PendingEventCount)
+	require.Equal(t, uint64(1), snapshot.InFlightBatchID)
+	require.Equal(t, []uint64{2}, snapshot.PendingBatchIDs)
+	require.Equal(t, []event.Kind{"order.event"}, snapshot.PendingEventKinds)
+}
+
+// Intent: after Close times out during process shutdown, queued batches should
+// be abandoned instead of starting more handler work with canceled contexts.
+func TestDispatcherCloseTimeoutStopsTakingQueuedBatches(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondStarted := make(chan struct{}, 1)
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(_ context.Context, ev event.Event) {
+			switch ev.(testEvent).name {
+			case "first":
+				close(firstStarted)
+				<-releaseFirst
+			case "second":
+				secondStarted <- struct{}{}
+			}
+		},
+	})
+
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.event", name: "first"}))
+	<-firstStarted
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.event", name: "second"}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, dispatcher.Close(ctx), context.DeadlineExceeded)
+	close(releaseFirst)
+
+	select {
+	case <-secondStarted:
+		t.Fatal("queued batch started after close timeout")
+	case <-time.After(30 * time.Millisecond):
+	}
 }

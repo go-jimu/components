@@ -19,23 +19,26 @@ type batch struct {
 }
 
 type dispatcher struct {
-	mu                    sync.Mutex
-	notEmpty              *sync.Cond
-	notFull               *sync.Cond
-	queue                 []batch
-	closed                bool
-	nextBatchID           uint64
-	done                  chan struct{}
-	handlers              map[Kind][]Handler
-	logger                *slog.Logger
-	delayClose            time.Duration
-	handlerTimeout        time.Duration
-	contextFactory        func(context.Context, Event) context.Context
-	unhandledEventHandler func(UnhandledContext)
-	panicHandler          func(PanicContext)
-	bufferSize            int
-	rootCtx               context.Context
-	rootCancel            context.CancelFunc
+	mu                      sync.Mutex
+	notEmpty                *sync.Cond
+	notFull                 *sync.Cond
+	queue                   []batch
+	closed                  bool
+	forced                  bool
+	nextBatchID             uint64
+	inFlightBatchID         uint64
+	done                    chan struct{}
+	handlers                map[Kind][]Handler
+	logger                  *slog.Logger
+	delayClose              time.Duration
+	handlerTimeout          time.Duration
+	contextFactory          func(context.Context, Event) context.Context
+	unhandledEventHandler   func(UnhandledContext)
+	panicHandler            func(PanicContext)
+	closeInterruptedHandler func(CloseInterruptedContext)
+	bufferSize              int
+	rootCtx                 context.Context
+	rootCancel              context.CancelFunc
 }
 
 var _ Dispatcher = (*dispatcher)(nil)
@@ -128,11 +131,11 @@ func (d *dispatcher) Close(ctx context.Context) error {
 				default:
 				}
 			}
-			closed := d.beginClose()
-			if closed {
+			snapshot, started := d.interruptClose(ctx.Err())
+			if started {
 				d.logger.Info("domain event dispatcher closing started")
 			}
-			d.logger.Warn("domain event dispatcher close interrupted", slog.Any("error", ctx.Err()))
+			d.reportCloseInterrupted(snapshot)
 			return ctx.Err()
 		}
 	}
@@ -149,7 +152,8 @@ func (d *dispatcher) Close(ctx context.Context) error {
 		}
 		return nil
 	case <-ctx.Done():
-		d.logger.Warn("domain event dispatcher close interrupted", slog.Any("error", ctx.Err()))
+		snapshot, _ := d.interruptClose(ctx.Err())
+		d.reportCloseInterrupted(snapshot)
 		return ctx.Err()
 	}
 }
@@ -167,6 +171,55 @@ func (d *dispatcher) beginClose() bool {
 	return true
 }
 
+func (d *dispatcher) interruptClose(err error) (CloseInterruptedContext, bool) {
+	d.mu.Lock()
+	started := !d.closed
+	d.closed = true
+	d.forced = true
+	snapshot := d.closeInterruptedSnapshotLocked(err)
+	d.notEmpty.Broadcast()
+	d.notFull.Broadcast()
+	d.mu.Unlock()
+
+	d.rootCancel()
+	return snapshot, started
+}
+
+func (d *dispatcher) closeInterruptedSnapshotLocked(err error) CloseInterruptedContext {
+	snapshot := CloseInterruptedContext{
+		Error:             err,
+		PendingBatchCount: len(d.queue),
+		InFlightBatchID:   d.inFlightBatchID,
+	}
+	if len(d.queue) > 0 {
+		snapshot.PendingBatchIDs = make([]uint64, 0, len(d.queue))
+	}
+	for _, queued := range d.queue {
+		snapshot.PendingBatchIDs = append(snapshot.PendingBatchIDs, queued.id)
+		snapshot.PendingEventCount += len(queued.events)
+		for _, event := range queued.events {
+			if event == nil {
+				continue
+			}
+			snapshot.PendingEventKinds = append(snapshot.PendingEventKinds, event.Kind())
+		}
+	}
+	return snapshot
+}
+
+func (d *dispatcher) reportCloseInterrupted(snapshot CloseInterruptedContext) {
+	d.logger.Warn("domain event dispatcher close interrupted",
+		slog.Any("error", snapshot.Error),
+		slog.Int("pending_batch_count", snapshot.PendingBatchCount),
+		slog.Int("pending_event_count", snapshot.PendingEventCount),
+		slog.Uint64("in_flight_batch_id", snapshot.InFlightBatchID),
+		slog.Any("pending_batch_ids", snapshot.PendingBatchIDs),
+		slog.Any("pending_event_kinds", snapshot.PendingEventKinds))
+	if d.closeInterruptedHandler != nil {
+		d.closeInterruptedHandler(snapshot)
+	}
+}
+
 func (d *dispatcher) run() {
 	defer close(d.done)
 
@@ -175,7 +228,9 @@ func (d *dispatcher) run() {
 		if !ok {
 			return
 		}
+		d.setInFlight(next.id)
 		d.handleBatch(next)
+		d.clearInFlight(next.id)
 	}
 }
 
@@ -185,6 +240,9 @@ func (d *dispatcher) nextBatch() (batch, bool) {
 
 	for len(d.queue) == 0 && !d.closed {
 		d.notEmpty.Wait()
+	}
+	if d.forced {
+		return batch{}, false
 	}
 	if len(d.queue) == 0 && d.closed {
 		return batch{}, false
@@ -196,6 +254,20 @@ func (d *dispatcher) nextBatch() (batch, bool) {
 	d.queue = d.queue[:len(d.queue)-1]
 	d.notFull.Signal()
 	return next, true
+}
+
+func (d *dispatcher) setInFlight(batchID uint64) {
+	d.mu.Lock()
+	d.inFlightBatchID = batchID
+	d.mu.Unlock()
+}
+
+func (d *dispatcher) clearInFlight(batchID uint64) {
+	d.mu.Lock()
+	if d.inFlightBatchID == batchID {
+		d.inFlightBatchID = 0
+	}
+	d.mu.Unlock()
 }
 
 func (d *dispatcher) handleBatch(next batch) {

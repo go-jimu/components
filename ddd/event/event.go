@@ -24,6 +24,17 @@ type PanicContext struct {
 	Stack   []byte
 }
 
+// CloseInterruptedContext describes accepted work that was not confirmed as
+// handled before Close was interrupted.
+type CloseInterruptedContext struct {
+	Error             error
+	PendingBatchCount int
+	PendingEventCount int
+	InFlightBatchID   uint64
+	PendingBatchIDs   []uint64
+	PendingEventKinds []Kind
+}
+
 // Collection stores domain events raised by an aggregate until the application
 // layer drains them after persistence succeeds.
 type Collection interface {

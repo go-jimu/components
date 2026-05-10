@@ -57,6 +57,14 @@ func WithPanicHandler(fn func(PanicContext)) Option {
 	}
 }
 
+// WithCloseInterruptedHandler sets a hook for close interruptions that leave
+// accepted work unconfirmed.
+func WithCloseInterruptedHandler(fn func(CloseInterruptedContext)) Option {
+	return func(d *dispatcher) {
+		d.closeInterruptedHandler = fn
+	}
+}
+
 // WithBufferSize sets the maximum number of queued event batches.
 func WithBufferSize(size int) Option {
 	return func(d *dispatcher) {
