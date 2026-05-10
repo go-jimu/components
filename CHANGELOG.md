@@ -1,5 +1,10 @@
 # Change log
 
+## Unreleased
+
+- Deprecated: `mediator` is now a legacy package for existing users. New domain
+  event code should use `ddd/event`; see `docs/mediator-migration.md`.
+
 ## v0.3.1
 
 - added support for `golang.org/x/exp/slog`
