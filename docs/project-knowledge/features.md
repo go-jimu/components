@@ -64,9 +64,9 @@ triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 
 #### Dispatcher runtime diagnostics
 
-- Enables: dispatcher owners trace batch admission, lifecycle, shutdown interruptions, rejected dispatches, unhandled events, nil contexts, and handler panics.
+- Enables: dispatcher owners trace runtime dispatch health and shutdown interruptions.
 - Actors / Entry Points: application services configure `ddd/event.Dispatcher` options and consume logs or runtime hooks.
-- Capability Boundary: diagnostics for in-process domain event dispatch only; no durable event audit log.
+- Capability Boundary: diagnostics for in-process domain event dispatch only; forced shutdown pending events are best-effort offline compensation clues, not a durable event audit log.
 - References: `ddd/event/`, `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 
 ### Validation

@@ -2,7 +2,7 @@
 last_updated: 2026-05-10
 updated_by: superpowers-memory:update
 triggered_by_plan: 2026-05-10-ddd-event-implementation.md
-covers_branch: hotfix/eventbus@ca94b34
+covers_branch: hotfix/eventbus@65cc3a2
 ---
 
 # Project Knowledge Index
