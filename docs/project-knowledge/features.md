@@ -48,10 +48,10 @@ triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 
 #### Existing in-process mediator
 
-- Enables: consumers subscribe handlers and dispatch events with graceful shutdown behavior.
+- Enables: existing consumers subscribe handlers and dispatch events with graceful shutdown behavior.
 - Actors / Entry Points: consumers use `mediator.NewInMemMediator`, `Dispatch`, `Subscribe`, and `EventCollection`.
-- Capability Boundary: compatibility package; separate from the DDD event module.
-- References: `mediator/`
+- Capability Boundary: legacy compatibility package; new domain event code should use `ddd/event`.
+- References: `mediator/`, `docs/mediator-migration.md`
 
 ### DDD Event
 

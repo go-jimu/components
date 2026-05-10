@@ -6,7 +6,7 @@ triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 
 # Glossary
 
-**Mediator** — Existing in-process event dispatch package kept for compatibility. → `mediator/`
+**Mediator** — Legacy in-process event dispatch package kept for compatibility. → `mediator/`
 
 **Domain Event** — A fact raised inside one bounded context by domain behavior. → `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 
