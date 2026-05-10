@@ -107,3 +107,53 @@ func TestDispatcherCloseDrainsAcceptedBatches(t *testing.T) {
 	wg.Wait()
 	<-done
 }
+
+// Intent: DispatchAll submits one batch, so its events must be processed
+// contiguously without another batch interleaving between them.
+func TestDispatcherDispatchAllBatchDoesNotInterleave(t *testing.T) {
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	defer dispatcher.Close(context.Background())
+
+	seen := make(chan string, 4)
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(_ context.Context, ev event.Event) {
+			seen <- ev.(testEvent).name
+		},
+	})
+
+	require.True(t, dispatcher.DispatchAll([]event.Event{
+		testEvent{kind: "order.event", name: "a1"},
+		testEvent{kind: "order.event", name: "a2"},
+	}))
+	require.True(t, dispatcher.DispatchAll([]event.Event{
+		testEvent{kind: "order.event", name: "b1"},
+		testEvent{kind: "order.event", name: "b2"},
+	}))
+
+	require.Equal(t, "a1", <-seen)
+	require.Equal(t, "a2", <-seen)
+	require.Equal(t, "b1", <-seen)
+	require.Equal(t, "b2", <-seen)
+}
+
+// Intent: handlers for one event run in subscription order, which makes
+// in-process reactions deterministic.
+func TestDispatcherHandlersRunInSubscriptionOrder(t *testing.T) {
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	defer dispatcher.Close(context.Background())
+
+	seen := make(chan string, 2)
+	dispatcher.Subscribe(handlerFunc{
+		kinds:  []event.Kind{"order.paid"},
+		handle: func(context.Context, event.Event) { seen <- "first" },
+	})
+	dispatcher.Subscribe(handlerFunc{
+		kinds:  []event.Kind{"order.paid"},
+		handle: func(context.Context, event.Event) { seen <- "second" },
+	})
+
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.Equal(t, "first", <-seen)
+	require.Equal(t, "second", <-seen)
+}
