@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
 updated_by: superpowers-memory:update
-triggered_by_plan: 2026-05-10-integration-message.md
+triggered_by_plan: 2026-05-10-message-outbox.md
 ---
 
 # Glossary
@@ -30,4 +30,12 @@ triggered_by_plan: 2026-05-10-integration-message.md
 
 **Router** — In-process integration message handler router keyed by message kind. → `ddd/message/`
 
-**Outbox** — Future reliability mechanism for integration messages, not a domain event dispatcher. → `docs/superpowers/specs/2026-05-10-integration-message-design.md`
+**Outbox** — Integration-message reliability mechanism that stores records for relay after commit. → `ddd/message/outbox/`
+
+**Outbox Record** — Durable lifecycle record for one integration message. → `ddd/message/outbox/`
+
+**Recorder** — Transaction-time component that encodes messages and appends outbox records without publishing. → `ddd/message/outbox/`
+
+**Relay** — Runtime worker that claims outbox records, publishes messages, and marks lifecycle state. → `ddd/message/outbox/`
+
+**Retry Policy** — Rule deciding whether a failed outbox record gets another attempt and when. → `ddd/message/outbox/`
