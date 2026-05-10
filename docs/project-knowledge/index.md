@@ -2,7 +2,7 @@
 last_updated: 2026-05-10
 updated_by: superpowers-memory:update
 triggered_by_plan: 2026-05-10-integration-message.md
-covers_branch: hotfix/message-api@be00b6c
+covers_branch: hotfix/enhance@fc2ec99
 ---
 
 # Project Knowledge Index
