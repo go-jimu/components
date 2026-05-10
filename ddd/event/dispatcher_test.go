@@ -157,3 +157,122 @@ func TestDispatcherHandlersRunInSubscriptionOrder(t *testing.T) {
 	require.Equal(t, "first", <-seen)
 	require.Equal(t, "second", <-seen)
 }
+
+// Intent: no-handler events are allowed, but applications can observe them
+// through an explicit hook when useful.
+func TestDispatcherUnhandledEventHook(t *testing.T) {
+	unhandled := make(chan event.Event, 1)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithUnhandledEventHandler(func(ev event.Event) {
+			unhandled <- ev
+		}),
+	)
+	defer dispatcher.Close(context.Background())
+
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "unknown"}))
+	require.Equal(t, event.Kind("unknown"), (<-unhandled).Kind())
+}
+
+// Intent: a panic in one handler must not stop later handlers or later events
+// in the same accepted batch.
+func TestDispatcherRecoversPanicAndContinues(t *testing.T) {
+	panicked := make(chan any, 1)
+	seen := make(chan string, 2)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithPanicHandler(func(_ event.Event, recovered any, _ []byte) {
+			panicked <- recovered
+		}),
+	)
+	defer dispatcher.Close(context.Background())
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(context.Context, event.Event) {
+			panic("handler failed")
+		},
+	})
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(_ context.Context, ev event.Event) {
+			seen <- ev.(testEvent).name
+		},
+	})
+
+	require.True(t, dispatcher.DispatchAll([]event.Event{
+		testEvent{kind: "order.event", name: "first"},
+		testEvent{kind: "order.event", name: "second"},
+	}))
+	require.Equal(t, "handler failed", <-panicked)
+	require.Equal(t, "first", <-seen)
+	require.Equal(t, "handler failed", <-panicked)
+	require.Equal(t, "second", <-seen)
+}
+
+type contextKey string
+
+// Intent: handler context is owned by the dispatcher, so configured context
+// values should be available without passing caller request context to Dispatch.
+func TestDispatcherContextFactory(t *testing.T) {
+	valueCh := make(chan string, 1)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithContextFactory(func(ctx context.Context, _ event.Event) context.Context {
+			return context.WithValue(ctx, contextKey("trace"), "dispatcher-context")
+		}),
+	)
+	defer dispatcher.Close(context.Background())
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.paid"},
+		handle: func(ctx context.Context, _ event.Event) {
+			valueCh <- ctx.Value(contextKey("trace")).(string)
+		},
+	})
+
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.Equal(t, "dispatcher-context", <-valueCh)
+}
+
+// Intent: configured handler timeout should cancel long-running handler
+// contexts independently of the caller request lifecycle.
+func TestDispatcherHandlerTimeout(t *testing.T) {
+	done := make(chan error, 1)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithHandlerTimeout(10*time.Millisecond),
+	)
+	defer dispatcher.Close(context.Background())
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.paid"},
+		handle: func(ctx context.Context, _ event.Event) {
+			<-ctx.Done()
+			done <- ctx.Err()
+		},
+	})
+
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.ErrorIs(t, <-done, context.DeadlineExceeded)
+}
+
+// Intent: Close should return the caller's timeout when accepted work does not
+// finish within the close deadline.
+func TestDispatcherCloseReturnsContextErrorOnTimeout(t *testing.T) {
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	block := make(chan struct{})
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.paid"},
+		handle: func(context.Context, event.Event) {
+			<-block
+		},
+	})
+
+	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, dispatcher.Close(ctx), context.DeadlineExceeded)
+	close(block)
+}
