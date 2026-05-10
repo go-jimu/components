@@ -35,6 +35,17 @@ func TestDispatcherInterfaceDoesNotRequireSubscription(t *testing.T) {
 	var _ event.Dispatcher = dispatchOnly{}
 }
 
+// Intent: the default constructor should return the concrete in-memory
+// component, not a generic bus abstraction.
+func TestNewDispatcherReturnsInMemoryDispatcher(t *testing.T) {
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	defer dispatcher.Close(context.Background())
+
+	var _ *event.InMemoryDispatcher = dispatcher
+	var _ event.Dispatcher = dispatcher
+	var _ event.Subscriber = dispatcher
+}
+
 type logRecord struct {
 	level   slog.Level
 	message string

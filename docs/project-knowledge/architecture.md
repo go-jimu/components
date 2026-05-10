@@ -28,7 +28,7 @@ adds a DDD concept namespace under `ddd/`.
 - `fsm/` — finite state machine primitives and transition checks. Key abstractions: `State`, `StateContext`, `StateMachine`.
 - `logger/` and `sloghelper/` — logger adapters and helpers for `log/slog`.
 - `mediator/` — existing in-process event mediator with global default, event collection, subscription, dispatch, and graceful shutdown.
-- `ddd/event/` — DDD-oriented domain event collection, batch dispatch, and handler subscription. Key abstractions: `Event`, `Collection`, `Dispatcher`, `Subscriber`, `Bus`, `Handler`.
+- `ddd/event/` — DDD-oriented domain event collection, batch dispatch, and handler subscription. Key abstractions: `Event`, `Collection`, `Dispatcher`, `Subscriber`, `InMemoryDispatcher`, `Handler`.
 - `validation/` — notification and specification validation helpers.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — design and implementation records for planned or recently completed work.
 

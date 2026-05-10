@@ -18,7 +18,7 @@ type batch struct {
 	events []Event
 }
 
-type dispatcher struct {
+type InMemoryDispatcher struct {
 	mu                      sync.Mutex
 	notEmpty                *sync.Cond
 	notFull                 *sync.Cond
@@ -42,15 +42,14 @@ type dispatcher struct {
 }
 
 var (
-	_ Dispatcher = (*dispatcher)(nil)
-	_ Subscriber = (*dispatcher)(nil)
-	_ Bus        = (*dispatcher)(nil)
+	_ Dispatcher = (*InMemoryDispatcher)(nil)
+	_ Subscriber = (*InMemoryDispatcher)(nil)
 )
 
 // NewDispatcher creates an in-process dispatcher with one background worker.
-func NewDispatcher(opts ...Option) Bus {
+func NewDispatcher(opts ...Option) *InMemoryDispatcher {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
-	d := &dispatcher{
+	d := &InMemoryDispatcher{
 		done:       make(chan struct{}),
 		handlers:   make(map[Kind][]Handler),
 		logger:     slog.Default(),
@@ -70,7 +69,7 @@ func NewDispatcher(opts ...Option) Bus {
 	return d
 }
 
-func (d *dispatcher) Subscribe(handler Handler) {
+func (d *InMemoryDispatcher) Subscribe(handler Handler) {
 	if handler == nil {
 		return
 	}
@@ -86,14 +85,14 @@ func (d *dispatcher) Subscribe(handler Handler) {
 	}
 }
 
-func (d *dispatcher) Dispatch(event Event) error {
+func (d *InMemoryDispatcher) Dispatch(event Event) error {
 	if event == nil {
 		return nil
 	}
 	return d.DispatchAll([]Event{event})
 }
 
-func (d *dispatcher) DispatchAll(events []Event) error {
+func (d *InMemoryDispatcher) DispatchAll(events []Event) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -118,7 +117,7 @@ func (d *dispatcher) DispatchAll(events []Event) error {
 	return nil
 }
 
-func (d *dispatcher) Close(ctx context.Context) error {
+func (d *InMemoryDispatcher) Close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -162,7 +161,7 @@ func (d *dispatcher) Close(ctx context.Context) error {
 	}
 }
 
-func (d *dispatcher) beginClose() bool {
+func (d *InMemoryDispatcher) beginClose() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -175,7 +174,7 @@ func (d *dispatcher) beginClose() bool {
 	return true
 }
 
-func (d *dispatcher) interruptClose(err error) (CloseInterruptedContext, bool) {
+func (d *InMemoryDispatcher) interruptClose(err error) (CloseInterruptedContext, bool) {
 	d.mu.Lock()
 	started := !d.closed
 	d.closed = true
@@ -189,7 +188,7 @@ func (d *dispatcher) interruptClose(err error) (CloseInterruptedContext, bool) {
 	return snapshot, started
 }
 
-func (d *dispatcher) closeInterruptedSnapshotLocked(err error) CloseInterruptedContext {
+func (d *InMemoryDispatcher) closeInterruptedSnapshotLocked(err error) CloseInterruptedContext {
 	snapshot := CloseInterruptedContext{
 		Error:           err,
 		InFlightBatchID: d.inFlightBatchID,
@@ -205,7 +204,7 @@ func (d *dispatcher) closeInterruptedSnapshotLocked(err error) CloseInterruptedC
 	return snapshot
 }
 
-func (d *dispatcher) reportCloseInterrupted(snapshot CloseInterruptedContext) {
+func (d *InMemoryDispatcher) reportCloseInterrupted(snapshot CloseInterruptedContext) {
 	pendingBatchIDs, pendingEventKinds, pendingEventCount := closeInterruptedSummary(snapshot)
 	d.logger.Warn("domain event dispatcher close interrupted",
 		slog.Any("error", snapshot.Error),
@@ -241,7 +240,7 @@ func closeInterruptedSummary(snapshot CloseInterruptedContext) ([]uint64, []Kind
 	return batchIDs, eventKinds, eventCount
 }
 
-func (d *dispatcher) run() {
+func (d *InMemoryDispatcher) run() {
 	defer close(d.done)
 
 	for {
@@ -255,7 +254,7 @@ func (d *dispatcher) run() {
 	}
 }
 
-func (d *dispatcher) nextBatch() (batch, bool) {
+func (d *InMemoryDispatcher) nextBatch() (batch, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -277,13 +276,13 @@ func (d *dispatcher) nextBatch() (batch, bool) {
 	return next, true
 }
 
-func (d *dispatcher) setInFlight(batchID uint64) {
+func (d *InMemoryDispatcher) setInFlight(batchID uint64) {
 	d.mu.Lock()
 	d.inFlightBatchID = batchID
 	d.mu.Unlock()
 }
 
-func (d *dispatcher) clearInFlight(batchID uint64) {
+func (d *InMemoryDispatcher) clearInFlight(batchID uint64) {
 	d.mu.Lock()
 	if d.inFlightBatchID == batchID {
 		d.inFlightBatchID = 0
@@ -291,13 +290,13 @@ func (d *dispatcher) clearInFlight(batchID uint64) {
 	d.mu.Unlock()
 }
 
-func (d *dispatcher) handleBatch(next batch) {
+func (d *InMemoryDispatcher) handleBatch(next batch) {
 	for _, event := range next.events {
 		d.handleEvent(next.id, event)
 	}
 }
 
-func (d *dispatcher) handleEvent(batchID uint64, event Event) {
+func (d *InMemoryDispatcher) handleEvent(batchID uint64, event Event) {
 	if event == nil {
 		return
 	}
@@ -322,7 +321,7 @@ func (d *dispatcher) handleEvent(batchID uint64, event Event) {
 	}
 }
 
-func (d *dispatcher) handleOne(batchID uint64, handler Handler, event Event) {
+func (d *InMemoryDispatcher) handleOne(batchID uint64, handler Handler, event Event) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			stack := debug.Stack()
@@ -349,7 +348,7 @@ func (d *dispatcher) handleOne(batchID uint64, handler Handler, event Event) {
 	handler.Handle(ctx, event)
 }
 
-func (d *dispatcher) handlerContext(batchID uint64, event Event) (context.Context, context.CancelFunc) {
+func (d *InMemoryDispatcher) handlerContext(batchID uint64, event Event) (context.Context, context.CancelFunc) {
 	var (
 		ctx    context.Context
 		cancel context.CancelFunc

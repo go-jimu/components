@@ -133,13 +133,12 @@ type Subscriber interface {
     Subscribe(Handler)
 }
 
-type Bus interface {
-    Dispatcher
-    Subscriber
+type InMemoryDispatcher struct {
+    // unexported fields
 }
 
 func NewCollection() Collection
-func NewDispatcher(opts ...Option) Bus
+func NewDispatcher(opts ...Option) *InMemoryDispatcher
 ```
 
 `Handler.Handle` does not return an error. A handler represents a follow-up
@@ -148,8 +147,10 @@ the handler's result through `Dispatch`.
 
 `Dispatcher` and `Subscriber` are separate interfaces so producer-only
 implementations, such as an MQ-backed dispatcher, do not need to expose handler
-registration. The default in-memory component is a `Bus`, which combines both
-interfaces.
+registration. `Bus` is intentionally not a shared API concept because dispatch
+and subscription often belong to different processes once a third-party MQ is
+involved. The default in-memory component is a concrete `InMemoryDispatcher`
+that implements both interfaces.
 
 `Dispatch` does not accept caller context. The caller's context usually belongs
 to the current synchronous request or command. Event handling is a later

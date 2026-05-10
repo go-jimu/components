@@ -58,7 +58,7 @@ triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 #### Domain event collection and dispatch
 
 - Enables: services collect and submit domain event batches after persistence.
-- Actors / Entry Points: domain aggregates use `ddd/event.Collection`; application services use `ddd/event.Dispatcher`, `Subscriber`, or `Bus`.
+- Actors / Entry Points: domain aggregates use `ddd/event.Collection`; application services use `ddd/event.Dispatcher`, `Subscriber`, or `InMemoryDispatcher`.
 - Capability Boundary: domain events inside one bounded context only; dispatch errors mean admission or delivery failure, not handler business failure.
 - References: `ddd/event/`, `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 

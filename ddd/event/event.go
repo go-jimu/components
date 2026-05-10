@@ -71,9 +71,3 @@ type Dispatcher interface {
 type Subscriber interface {
 	Subscribe(Handler)
 }
-
-// Bus combines dispatching and subscribing in one in-process component.
-type Bus interface {
-	Dispatcher
-	Subscriber
-}
