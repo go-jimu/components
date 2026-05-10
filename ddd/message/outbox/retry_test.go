@@ -43,3 +43,56 @@ func TestFixedBackoffPolicyStopsAtMaxAttempts(t *testing.T) {
 	require.True(t, decision.NextAttemptAt.IsZero())
 	require.Equal(t, "still failing", decision.Reason)
 }
+
+// FixedBackoffPolicy must treat zero max attempts as unlimited so callers can
+// opt out of terminal attempt counting without changing the backoff policy.
+func TestFixedBackoffPolicyWithZeroMaxAttemptsRetriesAsUnlimited(t *testing.T) {
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	policy := outbox.FixedBackoffPolicy{MaxAttempts: 0, Backoff: time.Minute}
+
+	decision := policy.NextAttempt(outbox.Record{Attempts: 100}, errors.New("temporary"), now)
+
+	require.True(t, decision.Retry)
+	require.Equal(t, now.Add(time.Minute), decision.NextAttemptAt)
+	require.Equal(t, "temporary", decision.Reason)
+}
+
+// FixedBackoffPolicy must treat negative max attempts as unlimited so invalid
+// non-positive limits do not make high-attempt records terminal.
+func TestFixedBackoffPolicyWithNegativeMaxAttemptsRetriesAsUnlimited(t *testing.T) {
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	policy := outbox.FixedBackoffPolicy{MaxAttempts: -1, Backoff: time.Minute}
+
+	decision := policy.NextAttempt(outbox.Record{Attempts: 100}, errors.New("temporary"), now)
+
+	require.True(t, decision.Retry)
+	require.Equal(t, now.Add(time.Minute), decision.NextAttemptAt)
+	require.Equal(t, "temporary", decision.Reason)
+}
+
+// FixedBackoffPolicy must allow zero backoff so callers can request immediate
+// retry scheduling at the relay clock time.
+func TestFixedBackoffPolicyWithZeroBackoffSchedulesAtNow(t *testing.T) {
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	policy := outbox.FixedBackoffPolicy{MaxAttempts: 3, Backoff: 0}
+
+	decision := policy.NextAttempt(outbox.Record{Attempts: 1}, errors.New("temporary"), now)
+
+	require.True(t, decision.Retry)
+	require.Equal(t, now, decision.NextAttemptAt)
+	require.Equal(t, "temporary", decision.Reason)
+}
+
+// FixedBackoffPolicy must preserve negative backoff durations so callers can
+// intentionally schedule retries before the relay clock time.
+func TestFixedBackoffPolicyWithNegativeBackoffSchedulesFromNow(t *testing.T) {
+	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	backoff := -time.Minute
+	policy := outbox.FixedBackoffPolicy{MaxAttempts: 3, Backoff: backoff}
+
+	decision := policy.NextAttempt(outbox.Record{Attempts: 1}, errors.New("temporary"), now)
+
+	require.True(t, decision.Retry)
+	require.Equal(t, now.Add(backoff), decision.NextAttemptAt)
+	require.Equal(t, "temporary", decision.Reason)
+}
