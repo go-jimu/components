@@ -12,7 +12,7 @@ This repository is a public Go component library. Packages are organized as
 small top-level capabilities instead of an application with service entry
 points, deployment manifests, or bounded-context folders.
 
-The current eventbus branch keeps the existing `mediator` package compatible and
+The current event branch keeps the existing `mediator` package compatible and
 adds a DDD concept namespace under `ddd/`.
 
 ## System Context
@@ -28,7 +28,7 @@ adds a DDD concept namespace under `ddd/`.
 - `fsm/` — finite state machine primitives and transition checks. Key abstractions: `State`, `StateContext`, `StateMachine`.
 - `logger/` and `sloghelper/` — logger adapters and helpers for `log/slog`.
 - `mediator/` — existing in-process event mediator with global default, event collection, subscription, dispatch, and graceful shutdown.
-- `ddd/event/` — DDD-oriented domain event collection and in-process batch dispatch. Key abstractions: `Event`, `Collection`, `Dispatcher`, `Handler`.
+- `ddd/event/` — DDD-oriented domain event collection and batch dispatch. Key abstractions: `Event`, `Collection`, `Dispatcher`, `Handler`.
 - `validation/` — notification and specification validation helpers.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — design and implementation records for planned or recently completed work.
 
@@ -72,7 +72,7 @@ sequenceDiagram
     App->>App: Save aggregate
     App->>Collection: Drain()
     App->>Dispatcher: DispatchAll(events batch)
-    Dispatcher-->>App: accepted bool
+    Dispatcher-->>App: dispatch error or nil
 ```
 
 ## Key Object FSMs

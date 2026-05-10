@@ -12,7 +12,7 @@ triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 
 **Event Collection** — A per-aggregate holder for undrained domain events. → `ddd/event/`
 
-**Dispatcher** — In-process batch admission and handler execution component for `ddd/event`. → `ddd/event/`
+**Dispatcher** — Domain event batch admission and handler execution component for `ddd/event`. → `ddd/event/`
 
 **BatchID** — Dispatcher-local diagnostic identifier assigned to each accepted `ddd/event` batch. → `ddd/event/`
 
