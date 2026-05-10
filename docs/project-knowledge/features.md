@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
 updated_by: superpowers-memory:update
-triggered_by_plan: 2026-05-10-message-outbox.md
+triggered_by_plan: 2026-05-10-integration-message.md
 ---
 
 # Features
@@ -83,6 +83,13 @@ triggered_by_plan: 2026-05-10-message-outbox.md
 **Enables** — Consumers route received integration messages to handlers by message kind.
 **Actors / Entry Points** — Consumers register `message.Handler` values through `message.Router` or a `Subscriber`.
 **Capability Boundary** — Router handles in-process handler matching and first-error stop; acknowledgement, offset commit, and broker envelope mapping belong to adapters.
+**References** — `ddd/message/`, `docs/superpowers/specs/2026-05-10-integration-message-design.md`
+
+#### Integration message payload resolution
+
+**Enables** — Consumers and adapters map a semantic message kind to a fresh protobuf DTO target when decoding bytes.
+**Actors / Entry Points** — Provider/application setup code uses `message.PayloadResolver` or `message.PayloadRegistry`.
+**Capability Boundary** — Resolver owns only Kind-to-payload allocation; broker topic/subject mapping, retry, DLQ, acknowledgement, commit, and envelope header encoding stay in provider/application code.
 **References** — `ddd/message/`, `docs/superpowers/specs/2026-05-10-integration-message-design.md`
 
 #### Transactional outbox primitives

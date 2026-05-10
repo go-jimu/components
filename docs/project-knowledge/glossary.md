@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
 updated_by: superpowers-memory:update
-triggered_by_plan: 2026-05-10-message-outbox.md
+triggered_by_plan: 2026-05-10-integration-message.md
 ---
 
 # Glossary
@@ -23,6 +23,8 @@ triggered_by_plan: 2026-05-10-message-outbox.md
 **Message Kind** — Integration message contract identifier used for routing and handler matching. → `ddd/message/`
 
 **Message Key** — Transport-neutral ordering or routing group for an integration message. → `ddd/message/`
+
+**Payload Resolver** — Transport-neutral mapping from `message.Kind` to a fresh protobuf message target for decoding consumed bytes. → `ddd/message/`
 
 **Publisher** — Capability interface that directly hands off an integration message to a messaging runtime. → `ddd/message/`
 
