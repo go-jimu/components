@@ -81,3 +81,61 @@ func TestProtoCodecRejectsNilPayload(t *testing.T) {
 
 	require.True(t, errors.Is(err, message.ErrNilPayload))
 }
+
+// A registered factory that returns nil must fail before protobuf decoding so
+// relay startup mistakes surface as outbox configuration errors.
+func TestProtoCodecRejectsNilFactoryOutput(t *testing.T) {
+	codec := outbox.NewProtoCodec()
+	require.NoError(t, codec.Register("test.test_model", func() proto.Message {
+		return nil
+	}))
+
+	_, err := codec.Decode(outbox.Record{
+		ID:        "record-1",
+		MessageID: "message-1",
+		Kind:      "test.test_model",
+		Payload:   []byte{},
+	})
+
+	require.True(t, errors.Is(err, outbox.ErrNilFactory))
+}
+
+// A typed-nil protobuf factory output must be rejected as a nil factory result
+// rather than reaching proto.Unmarshal and risking an adapter panic.
+func TestProtoCodecRejectsTypedNilFactoryOutput(t *testing.T) {
+	codec := outbox.NewProtoCodec()
+	require.NoError(t, codec.Register("test.test_model", func() proto.Message {
+		var payload *testdata.TestModel
+		return payload
+	}))
+
+	require.NotPanics(t, func() {
+		_, err := codec.Decode(outbox.Record{
+			ID:        "record-1",
+			MessageID: "message-1",
+			Kind:      "test.test_model",
+			Payload:   []byte{},
+		})
+		require.True(t, errors.Is(err, outbox.ErrNilFactory))
+	})
+}
+
+// Corrupt bytes for a registered kind must return the protobuf unmarshal error
+// so callers can distinguish schema or storage corruption from registration.
+func TestProtoCodecRejectsCorruptPayload(t *testing.T) {
+	codec := outbox.NewProtoCodec()
+	require.NoError(t, codec.Register("test.test_model", func() proto.Message {
+		return &testdata.TestModel{}
+	}))
+
+	_, err := codec.Decode(outbox.Record{
+		ID:        "record-1",
+		MessageID: "message-1",
+		Kind:      "test.test_model",
+		Payload:   []byte{0xff},
+	})
+
+	require.Error(t, err)
+	require.False(t, errors.Is(err, outbox.ErrNilFactory))
+	require.False(t, errors.Is(err, outbox.ErrUnknownKind))
+}

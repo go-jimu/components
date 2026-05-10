@@ -1,6 +1,7 @@
 package outbox
 
 import (
+	"reflect"
 	"sync"
 	"time"
 
@@ -36,7 +37,7 @@ func (c *ProtoCodec) Register(kind message.Kind, factory func() proto.Message) e
 }
 
 func (c *ProtoCodec) Encode(msg message.Message) (Record, error) {
-	if msg.Payload() == nil {
+	if isNilProtoMessage(msg.Payload()) {
 		return Record{}, message.ErrNilPayload
 	}
 	if msg.Kind() == "" {
@@ -73,7 +74,7 @@ func (c *ProtoCodec) Decode(record Record) (message.Message, error) {
 		return message.Message{}, ErrUnknownKind
 	}
 	payload := factory()
-	if payload == nil {
+	if isNilProtoMessage(payload) {
 		return message.Message{}, ErrNilFactory
 	}
 	if err := proto.Unmarshal(record.Payload, payload); err != nil {
@@ -87,4 +88,18 @@ func (c *ProtoCodec) Decode(record Record) (message.Message, error) {
 		message.WithOccurredAt(record.OccurredAt),
 		message.WithHeaders(record.Headers),
 	)
+}
+
+func isNilProtoMessage(payload proto.Message) bool {
+	if payload == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(payload)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
