@@ -2,6 +2,8 @@ package outbox
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-jimu/components/ddd/message"
@@ -60,18 +62,20 @@ func NewRelay(store Store, codec Codec, publisher message.Publisher, opts ...Rel
 type RunResult struct {
 	Claimed   int
 	Published int
-	Failed    int
-	Errors    []error
+	// Failed counts decode or publish failures that were successfully persisted
+	// through Store.MarkFailed.
+	Failed int
+	Errors []error
 }
 
 func (r *Relay) RunOnce(ctx context.Context, opts ClaimOptions) RunResult {
 	opts, err := opts.normalize(r.now)
 	if err != nil {
-		return RunResult{Errors: []error{err}}
+		return RunResult{Errors: []error{fmt.Errorf("normalize claim options: %w", err)}}
 	}
 	records, err := r.store.Claim(ctx, opts)
 	if err != nil {
-		return RunResult{Errors: []error{err}}
+		return RunResult{Errors: []error{fmt.Errorf("claim outbox records: %w", err)}}
 	}
 	result := RunResult{Claimed: len(records)}
 	for _, record := range records {
@@ -85,7 +89,7 @@ func (r *Relay) RunOnce(ctx context.Context, opts ClaimOptions) RunResult {
 			continue
 		}
 		if err := r.store.MarkPublished(ctx, record.ID); err != nil {
-			result.Errors = append(result.Errors, err)
+			result.Errors = append(result.Errors, fmt.Errorf("mark published record %s: %w", record.ID, err))
 			continue
 		}
 		result.Published++
@@ -100,7 +104,12 @@ func (r *Relay) markFailed(ctx context.Context, result *RunResult, record Record
 		nextAttemptAt = decision.NextAttemptAt
 	}
 	if err := r.store.MarkFailed(ctx, record.ID, decision.Reason, nextAttemptAt); err != nil {
-		result.Errors = append(result.Errors, err)
+		result.Errors = append(result.Errors, fmt.Errorf(
+			"mark failed record %s after processing error %q: %w",
+			record.ID,
+			cause.Error(),
+			errors.Join(cause, err),
+		))
 		return
 	}
 	result.Failed++

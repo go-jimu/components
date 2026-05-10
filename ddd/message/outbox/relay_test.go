@@ -62,7 +62,10 @@ func TestRelayRunOnceRetriesPublishFailure(t *testing.T) {
 
 	result := relay.RunOnce(context.Background(), validClaimOptions())
 
+	require.Equal(t, 1, result.Claimed)
+	require.Zero(t, result.Published)
 	require.Equal(t, 1, result.Failed)
+	require.Empty(t, result.Errors)
 	require.Equal(t, fixedClock().Add(time.Minute), store.failed[0].nextAttemptAt)
 	require.Equal(t, "broker unavailable", store.failed[0].reason)
 }
@@ -79,7 +82,130 @@ func TestRelayRunOnceReportsMarkPublishedFailure(t *testing.T) {
 	require.Equal(t, 1, result.Claimed)
 	require.Zero(t, result.Published)
 	require.Len(t, result.Errors, 1)
+	require.Contains(t, result.Errors[0].Error(), "mark published record record-1")
 	require.Contains(t, result.Errors[0].Error(), "db down")
+}
+
+// Claim failures must include operation context and stop before any record-level
+// work is attempted.
+func TestRelayRunOnceReportsClaimFailure(t *testing.T) {
+	store := &relayStore{claimErr: errors.New("database timeout")}
+	relay, err := outbox.NewRelay(store, registeredCodec(t), &relayPublisher{}, outbox.WithClock(fixedClock))
+	require.NoError(t, err)
+
+	result := relay.RunOnce(context.Background(), validClaimOptions())
+
+	require.Zero(t, result.Claimed)
+	require.Zero(t, result.Published)
+	require.Zero(t, result.Failed)
+	require.Len(t, result.Errors, 1)
+	require.Contains(t, result.Errors[0].Error(), "claim outbox records")
+	require.Contains(t, result.Errors[0].Error(), "database timeout")
+}
+
+// Invalid claim options must preserve the sentinel error so callers can detect
+// caller-side configuration mistakes.
+func TestRelayRunOnceReportsInvalidClaimOptions(t *testing.T) {
+	relay, err := outbox.NewRelay(&relayStore{}, registeredCodec(t), &relayPublisher{}, outbox.WithClock(fixedClock))
+	require.NoError(t, err)
+
+	result := relay.RunOnce(context.Background(), outbox.ClaimOptions{})
+
+	require.Len(t, result.Errors, 1)
+	require.ErrorIs(t, result.Errors[0], outbox.ErrInvalidClaimOptions)
+}
+
+// Failed count means the original decode or publish failure was successfully
+// persisted through MarkFailed; MarkFailed persistence errors must preserve both
+// the original cause and the mark failure.
+func TestRelayRunOnceReportsMarkFailedFailureWithCause(t *testing.T) {
+	publishErr := errors.New("broker unavailable")
+	markFailedErr := errors.New("write failed")
+	store := &relayStore{claimed: []outbox.Record{validRecord(t)}, markFailedErr: markFailedErr}
+	publisher := &relayPublisher{err: publishErr}
+	relay, err := outbox.NewRelay(store, registeredCodec(t), publisher, outbox.WithClock(fixedClock))
+	require.NoError(t, err)
+
+	result := relay.RunOnce(context.Background(), validClaimOptions())
+
+	require.Equal(t, 1, result.Claimed)
+	require.Zero(t, result.Published)
+	require.Zero(t, result.Failed)
+	require.Len(t, result.Errors, 1)
+	require.Contains(t, result.Errors[0].Error(), "mark failed record record-1")
+	require.Contains(t, result.Errors[0].Error(), "broker unavailable")
+	require.Contains(t, result.Errors[0].Error(), "write failed")
+	require.ErrorIs(t, result.Errors[0], publishErr)
+	require.ErrorIs(t, result.Errors[0], markFailedErr)
+}
+
+// NewRelay must reject missing collaborators so RunOnce never panics on nil
+// store, codec, or publisher dependencies.
+func TestNewRelayRejectsNilDependencies(t *testing.T) {
+	store := &relayStore{}
+	codec := registeredCodec(t)
+	publisher := &relayPublisher{}
+
+	_, err := outbox.NewRelay(nil, codec, publisher)
+	require.ErrorIs(t, err, outbox.ErrNilStore)
+
+	_, err = outbox.NewRelay(store, nil, publisher)
+	require.ErrorIs(t, err, outbox.ErrNilCodec)
+
+	_, err = outbox.NewRelay(store, codec, nil)
+	require.ErrorIs(t, err, outbox.ErrNilPublisher)
+}
+
+// Nil relay options must be ignored so callers can compose optional
+// configuration without changing default relay behavior.
+func TestNewRelayIgnoresNilOption(t *testing.T) {
+	store := &relayStore{claimed: []outbox.Record{validRecord(t)}}
+	relay, err := outbox.NewRelay(store, registeredCodec(t), &relayPublisher{}, nil, outbox.WithClock(fixedClock))
+	require.NoError(t, err)
+
+	result := relay.RunOnce(context.Background(), validClaimOptions())
+
+	require.Equal(t, 1, result.Published)
+	require.Empty(t, result.Errors)
+}
+
+// A nil retry policy option must keep the default no-retry behavior so failure
+// records are persisted without a next-attempt timestamp.
+func TestNewRelayNilRetryPolicyKeepsDefaultNoRetryPolicy(t *testing.T) {
+	store := &relayStore{claimed: []outbox.Record{validRecord(t)}}
+	publisher := &relayPublisher{err: errors.New("broker unavailable")}
+	relay, err := outbox.NewRelay(
+		store,
+		registeredCodec(t),
+		publisher,
+		outbox.WithClock(fixedClock),
+		outbox.WithRetryPolicy(nil),
+	)
+	require.NoError(t, err)
+
+	result := relay.RunOnce(context.Background(), validClaimOptions())
+
+	require.Equal(t, 1, result.Failed)
+	require.True(t, store.failed[0].nextAttemptAt.IsZero())
+}
+
+// A nil clock option must keep the default clock instead of replacing it with
+// nil and breaking claim normalization or retry decisions.
+func TestNewRelayNilClockKeepsDefaultClock(t *testing.T) {
+	now := time.Now().UTC()
+	store := &relayStore{claimed: []outbox.Record{validRecord(t)}}
+	relay, err := outbox.NewRelay(store, registeredCodec(t), &relayPublisher{}, outbox.WithClock(nil))
+	require.NoError(t, err)
+
+	result := relay.RunOnce(context.Background(), outbox.ClaimOptions{
+		Limit:       10,
+		Now:         now,
+		LockedUntil: now.Add(time.Minute),
+		ClaimedBy:   "worker-1",
+	})
+
+	require.Equal(t, 1, result.Published)
+	require.Empty(t, result.Errors)
 }
 
 type relayStore struct {
