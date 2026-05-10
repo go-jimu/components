@@ -90,6 +90,15 @@ type PanicContext struct {
     Stack   []byte
 }
 
+type CloseInterruptedContext struct {
+    Error             error
+    PendingBatchCount int
+    PendingEventCount int
+    InFlightBatchID   uint64
+    PendingBatchIDs   []uint64
+    PendingEventKinds []Kind
+}
+
 type Collection interface {
     Add(Event) bool
     Drain() []Event
@@ -225,6 +234,7 @@ func WithHandlerTimeout(timeout time.Duration) Option
 func WithContextFactory(fn func(context.Context, Event) context.Context) Option
 func WithUnhandledEventHandler(fn func(UnhandledContext)) Option
 func WithPanicHandler(fn func(PanicContext)) Option
+func WithCloseInterruptedHandler(fn func(CloseInterruptedContext)) Option
 func WithBufferSize(n int) Option
 ```
 
@@ -236,6 +246,7 @@ Default values:
 - buffer size: `1024`
 - unhandled event handler: none
 - panic handler: none; panic is logged by default
+- close interrupted handler: none; interruption is logged by default
 
 The option set intentionally resembles `mediator` where the semantics still
 match. The new module does not expose `Concurrent` in the default dispatcher
@@ -263,6 +274,19 @@ When closing or closed:
 - already accepted batches continue to drain.
 - `Close(ctx)` waits for accepted batches to finish or returns `ctx.Err()`.
 
+If `Close(ctx)` is interrupted before accepted batches finish, the dispatcher
+enters a forced shutdown state:
+
+- new dispatch calls still return `false`.
+- the current handler context is canceled through the dispatcher root context.
+- the worker stops taking additional queued batches.
+- remaining queued batches are considered abandoned in memory.
+- `Close(ctx)` returns the caller context error.
+
+This does not provide reliability. It makes the failure explicit: a non-nil
+`Close` error means the dispatcher did not confirm all accepted batches were
+handled before the process shutdown window expired.
+
 `WithDelayClose` delays the transition into closing, matching the existing
 `mediator` shutdown style where useful.
 
@@ -279,6 +303,7 @@ business identifier and is not stable across process restarts.
 - unhandled event warning logs
 - recovered panic error logs
 - context factory warning logs
+- close interruption diagnostics
 
 The dispatcher logs its autonomous runtime behavior:
 
@@ -286,11 +311,17 @@ The dispatcher logs its autonomous runtime behavior:
 - `Warn`: non-empty dispatch rejected because the dispatcher is closing/closed
 - `Warn`: event has no handler and no unhandled hook is configured
 - `Warn`: context factory returns `nil`
-- `Warn`: close is interrupted by caller context cancellation or timeout
+- `Warn`: close is interrupted by caller context cancellation or timeout,
+  including pending batch/event summary
 - `Error`: handler panic when no panic hook is configured
 
 The dispatcher does not log accepted batches, handler start/end, empty batches,
 or unhandled events when a user-provided unhandled hook is configured.
+
+When `Close(ctx)` is interrupted, an optional close interrupted hook may observe
+a `CloseInterruptedContext`. The context is a diagnostic snapshot, not a replay
+contract. It may include pending counts, in-flight batch ID, pending batch IDs,
+and pending event kinds. It must not include full event values by default.
 
 ## Panic And Unhandled Events
 
@@ -342,6 +373,8 @@ Runtime tests:
 - nil context factory results are logged as warnings
 - `Close(ctx)` drains accepted batches
 - `Close(ctx)` returns `ctx.Err()` on timeout
+- `Close(ctx)` interruption reports pending batch/event diagnostics
+- `Close(ctx)` interruption stops the worker from taking more queued batches
 - close lifecycle and close context errors are logged
 
 ## Documentation Requirements
