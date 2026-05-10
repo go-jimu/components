@@ -29,7 +29,11 @@ func (p FixedBackoffPolicy) NextAttempt(record Record, err error, now time.Time)
 		return decision
 	}
 	decision.Retry = true
-	decision.NextAttemptAt = now.Add(p.Backoff)
+	if p.Backoff <= 0 {
+		decision.NextAttemptAt = now
+	} else {
+		decision.NextAttemptAt = now.Add(p.Backoff)
+	}
 	return decision
 }
 

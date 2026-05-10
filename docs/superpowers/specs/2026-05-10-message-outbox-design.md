@@ -239,8 +239,8 @@ business write + Store.Append(outbox records) commit together
 type Store interface {
     Append(ctx context.Context, records ...Record) error
     Claim(ctx context.Context, opts ClaimOptions) ([]Record, error)
-    MarkPublished(ctx context.Context, ids ...string) error
-    MarkFailed(ctx context.Context, id string, reason string, nextAttemptAt time.Time) error
+    MarkPublished(ctx context.Context, records ...Record) error
+    MarkFailed(ctx context.Context, record Record, reason string, nextAttemptAt time.Time) error
 }
 
 type ClaimOptions struct {
@@ -249,6 +249,8 @@ type ClaimOptions struct {
     LockedUntil time.Time
     ClaimedBy   string
 }
+
+func NormalizeClaimOptions(opts ClaimOptions, now func() time.Time) (ClaimOptions, error)
 ```
 
 `ClaimOptions` validation rules:
@@ -260,6 +262,10 @@ type ClaimOptions struct {
 
 The caller chooses `LockedUntil`, commonly as `now + lock duration`. This first
 version does not add a separate lock-duration option.
+
+`NormalizeClaimOptions` is exported so concrete store implementations and relay
+code can share the same validation and defaulting rules instead of duplicating
+claim-option behavior.
 
 ### Append Semantics
 
@@ -310,11 +316,15 @@ strategy.
 
 ### Mark Semantics
 
-`MarkPublished` marks claimed records as `published`. It accepts multiple record
-IDs so a relay can batch state updates when an implementation supports it.
+`MarkPublished` marks claimed records as `published`. It accepts multiple
+records so a relay can batch state updates when an implementation supports it.
+The full record is passed instead of only the record ID so concrete stores can
+verify claim ownership fields such as `ClaimedBy`, `LockedUntil`, or `Attempts`
+before changing lifecycle state.
 
-`MarkFailed` marks one record as `failed`, stores the reason, and sets the retry
-schedule:
+`MarkFailed` marks one claimed record as `failed`, stores the reason, and sets
+the retry schedule. It also receives the full record so concrete stores can
+reject stale workers after lock expiry or reclaim:
 
 - non-zero `nextAttemptAt` means the record can be retried after that time
 - zero `nextAttemptAt` means terminal failure

@@ -8,8 +8,8 @@ import (
 type Store interface {
 	Append(ctx context.Context, records ...Record) error
 	Claim(ctx context.Context, opts ClaimOptions) ([]Record, error)
-	MarkPublished(ctx context.Context, ids ...string) error
-	MarkFailed(ctx context.Context, id string, reason string, nextAttemptAt time.Time) error
+	MarkPublished(ctx context.Context, records ...Record) error
+	MarkFailed(ctx context.Context, record Record, reason string, nextAttemptAt time.Time) error
 }
 
 type ClaimOptions struct {
@@ -17,6 +17,12 @@ type ClaimOptions struct {
 	Now         time.Time
 	LockedUntil time.Time
 	ClaimedBy   string
+}
+
+// NormalizeClaimOptions fills default claim timestamps and validates the claim
+// window before a store attempts to lock records.
+func NormalizeClaimOptions(opts ClaimOptions, now func() time.Time) (ClaimOptions, error) {
+	return opts.normalize(now)
 }
 
 func (o ClaimOptions) normalize(now func() time.Time) (ClaimOptions, error) {

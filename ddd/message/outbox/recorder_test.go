@@ -123,11 +123,11 @@ func (s *fakeStore) Claim(context.Context, outbox.ClaimOptions) ([]outbox.Record
 	return nil, nil
 }
 
-func (s *fakeStore) MarkPublished(context.Context, ...string) error {
+func (s *fakeStore) MarkPublished(context.Context, ...outbox.Record) error {
 	return nil
 }
 
-func (s *fakeStore) MarkFailed(context.Context, string, string, time.Time) error {
+func (s *fakeStore) MarkFailed(context.Context, outbox.Record, string, time.Time) error {
 	return nil
 }
 

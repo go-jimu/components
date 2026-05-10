@@ -102,7 +102,7 @@ func (r *Relay) Run(ctx context.Context, opts RunOptions) error {
 }
 
 func (r *Relay) RunOnce(ctx context.Context, opts ClaimOptions) RunResult {
-	opts, err := opts.normalize(r.now)
+	opts, err := NormalizeClaimOptions(opts, r.now)
 	if err != nil {
 		return RunResult{Errors: []error{fmt.Errorf("normalize claim options: %w", err)}}
 	}
@@ -121,7 +121,7 @@ func (r *Relay) RunOnce(ctx context.Context, opts ClaimOptions) RunResult {
 			r.markFailed(ctx, &result, record, err)
 			continue
 		}
-		if err := r.store.MarkPublished(ctx, record.ID); err != nil {
+		if err := r.store.MarkPublished(ctx, record); err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("mark published record %s: %w", record.ID, err))
 			continue
 		}
@@ -136,7 +136,7 @@ func (r *Relay) markFailed(ctx context.Context, result *RunResult, record Record
 	if decision.Retry {
 		nextAttemptAt = decision.NextAttemptAt
 	}
-	if err := r.store.MarkFailed(ctx, record.ID, decision.Reason, nextAttemptAt); err != nil {
+	if err := r.store.MarkFailed(ctx, record, decision.Reason, nextAttemptAt); err != nil {
 		result.Errors = append(result.Errors, fmt.Errorf(
 			"mark failed record %s after processing error %q: %w",
 			record.ID,

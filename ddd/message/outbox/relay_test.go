@@ -29,6 +29,7 @@ func TestRelayRunOncePublishesAndMarksPublished(t *testing.T) {
 	require.Empty(t, result.Errors)
 	require.Len(t, publisher.messages, 1)
 	require.Equal(t, []string{"record-1"}, store.published)
+	require.Equal(t, fixedClock(), store.claimOptions[0].Now)
 }
 
 // Decode failures must be persisted through MarkFailed so corrupted records do
@@ -269,6 +270,7 @@ func TestNewRelayNilClockKeepsDefaultClock(t *testing.T) {
 type relayStore struct {
 	claimed          []outbox.Record
 	claimCalls       int
+	claimOptions     []outbox.ClaimOptions
 	claimErr         error
 	markPublishedErr error
 	markFailedErr    error
@@ -283,25 +285,28 @@ type failedRecord struct {
 }
 
 func (s *relayStore) Append(context.Context, ...outbox.Record) error { return nil }
-func (s *relayStore) Claim(context.Context, outbox.ClaimOptions) ([]outbox.Record, error) {
+func (s *relayStore) Claim(_ context.Context, opts outbox.ClaimOptions) ([]outbox.Record, error) {
 	s.claimCalls++
+	s.claimOptions = append(s.claimOptions, opts)
 	if s.claimErr != nil {
 		return nil, s.claimErr
 	}
 	return s.claimed, nil
 }
-func (s *relayStore) MarkPublished(_ context.Context, ids ...string) error {
+func (s *relayStore) MarkPublished(_ context.Context, records ...outbox.Record) error {
 	if s.markPublishedErr != nil {
 		return s.markPublishedErr
 	}
-	s.published = append(s.published, ids...)
+	for _, record := range records {
+		s.published = append(s.published, record.ID)
+	}
 	return nil
 }
-func (s *relayStore) MarkFailed(_ context.Context, id string, reason string, nextAttemptAt time.Time) error {
+func (s *relayStore) MarkFailed(_ context.Context, record outbox.Record, reason string, nextAttemptAt time.Time) error {
 	if s.markFailedErr != nil {
 		return s.markFailedErr
 	}
-	s.failed = append(s.failed, failedRecord{id: id, reason: reason, nextAttemptAt: nextAttemptAt})
+	s.failed = append(s.failed, failedRecord{id: record.ID, reason: reason, nextAttemptAt: nextAttemptAt})
 	return nil
 }
 
