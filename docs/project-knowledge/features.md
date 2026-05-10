@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
 updated_by: superpowers-memory:update
-triggered_by_plan: 2026-05-10-ddd-event-implementation.md
+triggered_by_plan: 2026-05-10-integration-message.md
 ---
 
 # Features
@@ -68,6 +68,22 @@ triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 - Actors / Entry Points: application services configure `ddd/event.Dispatcher` options and consume logs or runtime hooks.
 - Capability Boundary: diagnostics for domain event dispatch only; forced shutdown pending events are best-effort offline compensation clues, not a durable event audit log.
 - References: `ddd/event/`, `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
+
+### DDD Message
+
+#### Protobuf integration message DTOs
+
+- Enables: consumers create transport-neutral integration messages for cross bounded-context or service communication.
+- Actors / Entry Points: application or infrastructure mapping code calls `message.New`, `KindOf`, and message option helpers.
+- Capability Boundary: direct non-transactional integration messaging only; outbox, retry, DLQ, and concrete broker adapters remain outside the core package.
+- References: `ddd/message/`, `docs/superpowers/specs/2026-05-10-integration-message-design.md`
+
+#### Integration message routing
+
+- Enables: consumers route received integration messages to handlers by message kind.
+- Actors / Entry Points: consumers register `message.Handler` values through `message.Router` or a `Subscriber`.
+- Capability Boundary: router handles in-process handler matching and first-error stop; acknowledgement, offset commit, and broker envelope mapping belong to adapters.
+- References: `ddd/message/`, `docs/superpowers/specs/2026-05-10-integration-message-design.md`
 
 ### Validation
 

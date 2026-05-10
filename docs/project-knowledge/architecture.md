@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
 updated_by: superpowers-memory:update
-triggered_by_plan: 2026-05-10-ddd-event-implementation.md
+triggered_by_plan: 2026-05-10-integration-message.md
 ---
 
 # Architecture
@@ -12,8 +12,8 @@ This repository is a public Go component library. Packages are organized as
 small top-level capabilities instead of an application with service entry
 points, deployment manifests, or bounded-context folders.
 
-The current event branch keeps the existing `mediator` package compatible and
-adds a DDD concept namespace under `ddd/`.
+The current event and message work keeps the existing `mediator` package
+compatible and adds DDD concept packages under `ddd/`.
 
 ## System Context
 
@@ -29,6 +29,7 @@ adds a DDD concept namespace under `ddd/`.
 - `logger/` and `sloghelper/` — logger adapters and helpers for `log/slog`.
 - `mediator/` — existing in-process event mediator with global default, event collection, subscription, dispatch, and graceful shutdown.
 - `ddd/event/` — DDD-oriented domain event collection, batch dispatch, and handler subscription. Key abstractions: `Event`, `Collection`, `Dispatcher`, `Subscriber`, `InMemoryDispatcher`, `Handler`.
+- `ddd/message/` — protobuf-first integration message DTO construction and deterministic handler routing for cross-context messaging. Key abstractions: `Message`, `Kind`, `Publisher`, `Subscriber`, `Handler`, `Router`.
 - `validation/` — notification and specification validation helpers.
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — design and implementation records for planned or recently completed work.
 
@@ -88,4 +89,4 @@ stateDiagram-v2
 ## Key Design Decisions
 
 - Preserve existing `mediator` API compatibility; add new DDD event module separately. See `decisions.md`.
-- Place DDD concept packages under `ddd/`, with `ddd/event` first and future `ddd/message` / `ddd/message/outbox` reserved. See `docs/superpowers/specs/2026-05-10-ddd-event-design.md`.
+- Place DDD concept packages under `ddd/`, with `ddd/event` for internal domain events and `ddd/message` for integration DTOs. See `decisions.md`.

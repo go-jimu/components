@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
-updated_by: superpowers-memory:rebuild
-triggered_by_plan: null
+updated_by: superpowers-memory:update
+triggered_by_plan: 2026-05-10-integration-message.md
 ---
 
 # Conventions
@@ -23,6 +23,8 @@ triggered_by_plan: null
 - `mediator` remains the compatibility package for existing users.
 - `ddd/event` should document that it is for domain events inside one bounded context.
 - Domain event handlers in the planned module are follow-up reactions and do not report success back to the previous transaction.
+- `ddd/message` is for protobuf integration DTOs crossing bounded-context or service boundaries; it must remain separate from `ddd/event`.
+- Broker-specific envelope, acknowledgement, retry, DLQ, and outbox behavior should live outside the `ddd/message` core package.
 
 ## Git And CI
 
