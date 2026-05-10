@@ -79,6 +79,9 @@ func (r *Relay) Run(ctx context.Context, opts RunOptions) error {
 		return ErrInvalidRunOptions
 	}
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		result := r.RunOnce(ctx, opts.Claim)
 		if opts.OnResult != nil {
 			opts.OnResult(result)

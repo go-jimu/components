@@ -122,9 +122,34 @@ func TestRelayRunRejectsInvalidInterval(t *testing.T) {
 	relay, err := outbox.NewRelay(&relayStore{}, registeredCodec(t), &relayPublisher{})
 	require.NoError(t, err)
 
-	err = relay.Run(context.Background(), outbox.RunOptions{})
+	for _, interval := range []time.Duration{0, -time.Millisecond} {
+		err = relay.Run(context.Background(), outbox.RunOptions{Interval: interval})
 
-	require.True(t, errors.Is(err, outbox.ErrInvalidRunOptions))
+		require.True(t, errors.Is(err, outbox.ErrInvalidRunOptions))
+	}
+}
+
+// Run must stop before claiming records when the context is already canceled
+// so shutdown does not perform delivery side effects.
+func TestRelayRunAlreadyCanceledDoesNoWork(t *testing.T) {
+	store := &relayStore{claimed: []outbox.Record{validRecord(t)}}
+	relay, err := outbox.NewRelay(store, registeredCodec(t), &relayPublisher{}, outbox.WithClock(fixedClock))
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	results := 0
+
+	err = relay.Run(ctx, outbox.RunOptions{
+		Claim:    validClaimOptions(),
+		Interval: time.Millisecond,
+		OnResult: func(outbox.RunResult) {
+			results++
+		},
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, store.claimCalls)
+	require.Zero(t, results)
 }
 
 // Run must call RunOnce repeatedly and stop when the context is canceled.
@@ -243,6 +268,7 @@ func TestNewRelayNilClockKeepsDefaultClock(t *testing.T) {
 
 type relayStore struct {
 	claimed          []outbox.Record
+	claimCalls       int
 	claimErr         error
 	markPublishedErr error
 	markFailedErr    error
@@ -258,6 +284,7 @@ type failedRecord struct {
 
 func (s *relayStore) Append(context.Context, ...outbox.Record) error { return nil }
 func (s *relayStore) Claim(context.Context, outbox.ClaimOptions) ([]outbox.Record, error) {
+	s.claimCalls++
 	if s.claimErr != nil {
 		return nil, s.claimErr
 	}
