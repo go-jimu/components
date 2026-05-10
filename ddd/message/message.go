@@ -9,8 +9,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// Kind is the semantic integration message contract type.
+//
+// Kind is used for handler matching and payload resolution. It is not a broker
+// topic, queue, subject, exchange, partition, or routing-key contract. Provider
+// adapters may map a Kind to their own envelope address.
 type Kind string
 
+// Message is a protobuf integration DTO plus transport-neutral metadata.
 type Message struct {
 	id         string
 	kind       Kind
@@ -20,6 +26,7 @@ type Message struct {
 	headers    map[string]string
 }
 
+// New constructs a message with a non-empty kind and protobuf payload.
 func New(kind Kind, payload proto.Message, opts ...Option) (Message, error) {
 	if kind == "" {
 		return Message{}, ErrEmptyKind
@@ -62,30 +69,37 @@ func New(kind Kind, payload proto.Message, opts ...Option) (Message, error) {
 	}, nil
 }
 
+// ID returns the unique message instance identifier.
 func (m Message) ID() string {
 	return m.id
 }
 
+// Kind returns the semantic message contract type.
 func (m Message) Kind() Kind {
 	return m.kind
 }
 
+// Key returns the transport-neutral ordering or routing group.
 func (m Message) Key() string {
 	return m.key
 }
 
+// OccurredAt returns the time the represented business fact occurred.
 func (m Message) OccurredAt() time.Time {
 	return m.occurredAt
 }
 
+// Payload returns the protobuf DTO payload.
 func (m Message) Payload() proto.Message {
 	return m.payload
 }
 
+// Headers returns a copy of extension metadata headers.
 func (m Message) Headers() map[string]string {
 	return cloneHeaders(m.headers)
 }
 
+// KindOf derives the protobuf full name for payload.
 func KindOf(payload proto.Message) Kind {
 	if isNilPayload(payload) {
 		return ""

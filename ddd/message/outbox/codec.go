@@ -1,8 +1,9 @@
 package outbox
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
-	"sync"
 	"time"
 
 	"github.com/go-jimu/components/ddd/message"
@@ -15,24 +16,46 @@ type Codec interface {
 }
 
 type ProtoCodec struct {
-	mu        sync.RWMutex
-	factories map[message.Kind]func() proto.Message
+	registry *message.PayloadRegistry
+	resolver message.PayloadResolver
 }
 
-func NewProtoCodec() *ProtoCodec {
-	return &ProtoCodec{factories: make(map[message.Kind]func() proto.Message)}
+// ProtoCodecOption configures a protobuf outbox codec.
+type ProtoCodecOption func(*ProtoCodec)
+
+// NewProtoCodec creates a protobuf-backed outbox codec.
+func NewProtoCodec(opts ...ProtoCodecOption) *ProtoCodec {
+	registry := message.NewPayloadRegistry()
+	codec := &ProtoCodec{
+		registry: registry,
+		resolver: registry,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(codec)
+		}
+	}
+	return codec
 }
 
+// WithPayloadResolver makes the codec use resolver when decoding records.
+//
+// The default resolver is the codec's internal registry populated through
+// Register. Supplying a shared resolver lets outbox and broker adapters reuse
+// the same Kind-to-protobuf mapping.
+func WithPayloadResolver(resolver message.PayloadResolver) ProtoCodecOption {
+	return func(codec *ProtoCodec) {
+		if resolver != nil {
+			codec.resolver = resolver
+		}
+	}
+}
+
+// Register adds a protobuf factory to the codec's default payload registry.
 func (c *ProtoCodec) Register(kind message.Kind, factory func() proto.Message) error {
-	if kind == "" {
-		return message.ErrEmptyKind
+	if err := c.registry.Register(kind, factory); err != nil {
+		return mapPayloadResolverError(err)
 	}
-	if factory == nil {
-		return ErrNilFactory
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.factories[kind] = factory
 	return nil
 }
 
@@ -67,15 +90,9 @@ func (c *ProtoCodec) Encode(msg message.Message) (Record, error) {
 }
 
 func (c *ProtoCodec) Decode(record Record) (message.Message, error) {
-	c.mu.RLock()
-	factory := c.factories[record.Kind]
-	c.mu.RUnlock()
-	if factory == nil {
-		return message.Message{}, ErrUnknownKind
-	}
-	payload := factory()
-	if isNilProtoMessage(payload) {
-		return message.Message{}, ErrNilFactory
+	payload, err := c.resolver.Resolve(record.Kind)
+	if err != nil {
+		return message.Message{}, mapPayloadResolverError(err)
 	}
 	if err := proto.Unmarshal(record.Payload, payload); err != nil {
 		return message.Message{}, err
@@ -88,6 +105,17 @@ func (c *ProtoCodec) Decode(record Record) (message.Message, error) {
 		message.WithOccurredAt(record.OccurredAt),
 		message.WithHeaders(record.Headers),
 	)
+}
+
+func mapPayloadResolverError(err error) error {
+	switch {
+	case errors.Is(err, message.ErrUnknownKind):
+		return fmt.Errorf("%w: %w", ErrUnknownKind, err)
+	case errors.Is(err, message.ErrNilPayloadFactory):
+		return fmt.Errorf("%w: %w", ErrNilFactory, err)
+	default:
+		return err
+	}
 }
 
 func isNilProtoMessage(payload proto.Message) bool {

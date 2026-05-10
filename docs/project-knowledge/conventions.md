@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
 updated_by: superpowers-memory:update
-triggered_by_plan: 2026-05-10-message-outbox.md
+triggered_by_plan: 2026-05-10-integration-message.md
 ---
 
 # Conventions
@@ -26,6 +26,8 @@ triggered_by_plan: 2026-05-10-message-outbox.md
 - `ddd/message` is for protobuf integration DTOs crossing bounded-context or service boundaries; it must remain separate from `ddd/event`.
 - `ddd/message/outbox` is the reliability subpackage for integration-message outbox contracts and relay runtime; keep it separate from `ddd/message` core DTO/routing APIs and from `ddd/event`.
 - Broker-specific envelope, acknowledgement, DLQ, concrete store, and concrete broker adapter behavior should live outside both `ddd/message` and `ddd/message/outbox`.
+- `message.Kind` is a semantic message contract identifier, not a broker topic/subject/routing-key.
+- `message.Handler.Handle` returning `nil` means provider code may ack/commit; returning an error leaves retry, DLQ, redelivery, or stop policy to the provider/application.
 
 ## Git And CI
 
