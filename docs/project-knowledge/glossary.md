@@ -16,6 +16,8 @@ triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 
 **BatchID** — Dispatcher-local diagnostic identifier assigned to each accepted `ddd/event` batch. → `ddd/event/`
 
+**Abandoned Batch** — Accepted `ddd/event` batch not confirmed as handled before forced close interruption. → `ddd/event/`
+
 **Integration Message** — Future cross bounded-context/service contract, separate from domain events. → `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 
 **Outbox** — Future reliability mechanism for integration messages, not a domain event dispatcher. → `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
