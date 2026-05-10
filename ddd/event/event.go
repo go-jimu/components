@@ -62,8 +62,18 @@ type Handler interface {
 
 // Dispatcher accepts domain event batches for handling.
 type Dispatcher interface {
-	Subscribe(Handler)
 	Dispatch(Event) error
 	DispatchAll([]Event) error
 	Close(context.Context) error
+}
+
+// Subscriber registers handlers for domain events.
+type Subscriber interface {
+	Subscribe(Handler)
+}
+
+// Bus combines dispatching and subscribing in one in-process component.
+type Bus interface {
+	Dispatcher
+	Subscriber
 }

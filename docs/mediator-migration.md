@@ -12,6 +12,9 @@ be added to `ddd/event`.
   returns only dispatcher admission or delivery errors.
 - `ddd/event.Dispatch` does not accept caller context. Handler context is owned
   by the dispatcher because event handling is a follow-up transaction.
+- `ddd/event.Dispatcher` only covers dispatching. `ddd/event.Subscriber` covers
+  handler registration, and `event.NewDispatcher` returns a `Bus` that combines
+  both for the default in-memory implementation.
 - `ddd/event.Handler.Handle` does not return an error. Handlers own their own
   error policy.
 - `ddd/event.DispatchAll` preserves one aggregate transaction as one batch.

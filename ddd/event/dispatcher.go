@@ -41,10 +41,14 @@ type dispatcher struct {
 	rootCancel              context.CancelFunc
 }
 
-var _ Dispatcher = (*dispatcher)(nil)
+var (
+	_ Dispatcher = (*dispatcher)(nil)
+	_ Subscriber = (*dispatcher)(nil)
+	_ Bus        = (*dispatcher)(nil)
+)
 
 // NewDispatcher creates an in-process dispatcher with one background worker.
-func NewDispatcher(opts ...Option) Dispatcher {
+func NewDispatcher(opts ...Option) Bus {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	d := &dispatcher{
 		done:       make(chan struct{}),

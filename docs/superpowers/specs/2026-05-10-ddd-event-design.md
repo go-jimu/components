@@ -124,19 +124,32 @@ type Handler interface {
 }
 
 type Dispatcher interface {
-    Subscribe(Handler)
     Dispatch(Event) error
     DispatchAll([]Event) error
     Close(context.Context) error
 }
 
+type Subscriber interface {
+    Subscribe(Handler)
+}
+
+type Bus interface {
+    Dispatcher
+    Subscriber
+}
+
 func NewCollection() Collection
-func NewDispatcher(opts ...Option) Dispatcher
+func NewDispatcher(opts ...Option) Bus
 ```
 
 `Handler.Handle` does not return an error. A handler represents a follow-up
 transaction or reaction. The previous application transaction does not observe
 the handler's result through `Dispatch`.
+
+`Dispatcher` and `Subscriber` are separate interfaces so producer-only
+implementations, such as an MQ-backed dispatcher, do not need to expose handler
+registration. The default in-memory component is a `Bus`, which combines both
+interfaces.
 
 `Dispatch` does not accept caller context. The caller's context usually belongs
 to the current synchronous request or command. Event handling is a later

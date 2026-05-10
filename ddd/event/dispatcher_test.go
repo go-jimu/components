@@ -23,6 +23,18 @@ func (h handlerFunc) Handle(ctx context.Context, ev event.Event) {
 	}
 }
 
+type dispatchOnly struct{}
+
+func (dispatchOnly) Dispatch(event.Event) error      { return nil }
+func (dispatchOnly) DispatchAll([]event.Event) error { return nil }
+func (dispatchOnly) Close(context.Context) error     { return nil }
+
+// Intent: producer-only implementations should satisfy Dispatcher without
+// supporting subscriptions.
+func TestDispatcherInterfaceDoesNotRequireSubscription(t *testing.T) {
+	var _ event.Dispatcher = dispatchOnly{}
+}
+
 type logRecord struct {
 	level   slog.Level
 	message string
