@@ -52,7 +52,7 @@ func cloneBytes(src []byte) []byte {
 }
 
 func cloneHeaders(headers map[string]string) map[string]string {
-	if len(headers) == 0 {
+	if headers == nil {
 		return nil
 	}
 	copied := make(map[string]string, len(headers))

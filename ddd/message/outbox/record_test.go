@@ -31,3 +31,17 @@ func TestRecordCloneCopiesMutableFields(t *testing.T) {
 	require.Equal(t, map[string]string{"tenant": "tenant-a"}, original.Headers)
 	require.Equal(t, "record-1", cloned.ID)
 }
+
+// Clone must preserve a non-nil empty headers map so callers can add headers to
+// the clone without mutating the source record or panicking on assignment.
+func TestRecordClonePreservesEmptyHeadersMap(t *testing.T) {
+	original := outbox.Record{
+		Headers: map[string]string{},
+	}
+
+	cloned := original.Clone()
+	cloned.Headers["tenant"] = "tenant-a"
+
+	require.Empty(t, original.Headers)
+	require.Equal(t, map[string]string{"tenant": "tenant-a"}, cloned.Headers)
+}
