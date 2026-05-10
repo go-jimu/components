@@ -56,6 +56,17 @@ func TestRouterSubscribeRejectsNoListening(t *testing.T) {
 	require.ErrorIs(t, router.Subscribe(handlerFunc{}), message.ErrNoListening)
 }
 
+// Intent: a handler with an empty listened kind should be rejected before it
+// can register an unroutable subscription.
+func TestRouterSubscribeRejectsEmptyKind(t *testing.T) {
+	router := message.NewRouter()
+
+	require.ErrorIs(t, router.Subscribe(handlerFunc{
+		kinds: []message.Kind{""},
+	}), message.ErrEmptyKind)
+	require.ErrorIs(t, router.Handle(context.Background(), message.Message{}), message.ErrUnhandledKind)
+}
+
 // Intent: an integration message without a matching handler should surface as
 // an error so the broker adapter can choose nack, retry, or failure recording.
 func TestRouterHandleUnhandledKind(t *testing.T) {
@@ -88,6 +99,24 @@ func TestRouterHandleCallsMatchingHandlersInSubscriptionOrder(t *testing.T) {
 
 	require.NoError(t, router.Handle(context.Background(), newTestMessage(t, "test.TestModel")))
 	require.Equal(t, []string{"first", "second"}, seen)
+}
+
+// Intent: repeated listened kinds from one handler should preserve one
+// deterministic delivery for a matching message.
+func TestRouterSubscribeDeduplicatesHandlerKinds(t *testing.T) {
+	router := message.NewRouter()
+	calls := 0
+
+	require.NoError(t, router.Subscribe(handlerFunc{
+		kinds: []message.Kind{"test.TestModel", "test.TestModel"},
+		handle: func(context.Context, message.Message) error {
+			calls++
+			return nil
+		},
+	}))
+
+	require.NoError(t, router.Handle(context.Background(), newTestMessage(t, "test.TestModel")))
+	require.Equal(t, 1, calls)
 }
 
 // Intent: handlers for unrelated integration message kinds must not receive a

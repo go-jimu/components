@@ -41,10 +41,23 @@ func (r *Router) Subscribe(handler Handler) error {
 		return ErrNoListening
 	}
 
+	seen := make(map[Kind]struct{}, len(kinds))
+	deduped := make([]Kind, 0, len(kinds))
+	for _, kind := range kinds {
+		if kind == "" {
+			return ErrEmptyKind
+		}
+		if _, ok := seen[kind]; ok {
+			continue
+		}
+		seen[kind] = struct{}{}
+		deduped = append(deduped, kind)
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for _, kind := range kinds {
+	for _, kind := range deduped {
 		r.handlers[kind] = append(r.handlers[kind], handler)
 	}
 	return nil
