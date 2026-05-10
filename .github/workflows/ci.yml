@@ -20,7 +20,7 @@ jobs:
       checks: write
     strategy:
       matrix:
-        go-version: [ 1.23.x, 1.24.x, 1.25.x ]
+        go-version: [ 1.24.x, 1.25.x ]
         os: [ ubuntu-latest ]
       fail-fast: true
     runs-on: ${{matrix.os}}
