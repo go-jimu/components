@@ -1,6 +1,9 @@
 package event
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Kind identifies the kind of a domain event inside one bounded context.
 type Kind string
@@ -9,6 +12,10 @@ type Kind string
 type Event interface {
 	Kind() Kind
 }
+
+// ErrDispatcherClosed reports that a dispatcher cannot accept new events
+// because it is closing or closed.
+var ErrDispatcherClosed = errors.New("domain event dispatcher is closed")
 
 // UnhandledContext describes an event that has no registered handler.
 type UnhandledContext struct {
@@ -53,10 +60,10 @@ type Handler interface {
 	Handle(context.Context, Event)
 }
 
-// Dispatcher accepts domain event batches for in-process handling.
+// Dispatcher accepts domain event batches for handling.
 type Dispatcher interface {
 	Subscribe(Handler)
-	Dispatch(Event) bool
-	DispatchAll([]Event) bool
+	Dispatch(Event) error
+	DispatchAll([]Event) error
 	Close(context.Context) error
 }

@@ -82,16 +82,16 @@ func (d *dispatcher) Subscribe(handler Handler) {
 	}
 }
 
-func (d *dispatcher) Dispatch(event Event) bool {
+func (d *dispatcher) Dispatch(event Event) error {
 	if event == nil {
-		return true
+		return nil
 	}
 	return d.DispatchAll([]Event{event})
 }
 
-func (d *dispatcher) DispatchAll(events []Event) bool {
+func (d *dispatcher) DispatchAll(events []Event) error {
 	if len(events) == 0 {
-		return true
+		return nil
 	}
 
 	copied := make([]Event, len(events))
@@ -104,14 +104,14 @@ func (d *dispatcher) DispatchAll(events []Event) bool {
 	if d.closed {
 		d.mu.Unlock()
 		d.logger.Warn("domain event dispatch rejected", slog.Int("event_count", len(copied)))
-		return false
+		return ErrDispatcherClosed
 	}
 
 	d.nextBatchID++
 	d.queue = append(d.queue, batch{id: d.nextBatchID, events: copied})
 	d.notEmpty.Signal()
 	d.mu.Unlock()
-	return true
+	return nil
 }
 
 func (d *dispatcher) Close(ctx context.Context) error {

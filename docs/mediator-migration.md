@@ -8,8 +8,8 @@ be added to `ddd/event`.
 
 ## Key differences
 
-- `mediator.Dispatch` returns an `error`; `ddd/event.Dispatch` returns `bool`
-  and only reports whether a batch was accepted.
+- `mediator.Dispatch` returns legacy mediator errors; `ddd/event.Dispatch`
+  returns only dispatcher admission or delivery errors.
 - `ddd/event.Dispatch` does not accept caller context. Handler context is owned
   by the dispatcher because event handling is a follow-up transaction.
 - `ddd/event.Handler.Handle` does not return an error. Handlers own their own
@@ -17,9 +17,10 @@ be added to `ddd/event`.
 - `ddd/event.DispatchAll` preserves one aggregate transaction as one batch.
 - `ddd/event.Close` reports shutdown interruption through logs and an optional
   close-interrupted hook with pending batches.
-- `ddd/event` is only for in-process domain events inside one bounded context.
-  It is not an integration message bus, broker abstraction, outbox, retry
-  system, or reliable delivery mechanism across process restarts.
+- `ddd/event` is only for domain events inside one bounded context. Concrete
+  dispatchers may be in-memory or backed by external middleware, but the API
+  does not expose broker concepts and is not an integration message bus, outbox,
+  retry system, or reliable delivery mechanism across process restarts.
 
 ## Replacement guide
 

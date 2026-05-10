@@ -8,7 +8,9 @@ Status: Draft for review
 Add a new DDD-oriented domain event module without changing the existing
 `mediator` package. The existing `mediator` API remains compatible for current
 users. The new module provides a cleaner boundary for domain event collection
-and in-process dispatch inside one bounded context.
+and dispatch inside one bounded context. The default dispatcher is in-process,
+but the interface may also be implemented with an external backing mechanism
+without exposing broker-specific concepts.
 
 The first module is:
 
@@ -40,15 +42,19 @@ It is not:
 Cross bounded-context or cross-service contracts belong in a future
 `ddd/message` package. Outbox reliability belongs under `ddd/message/outbox`.
 
+A concrete `Dispatcher` may use a third-party MQ as its backing mechanism while
+preserving domain-event semantics. The API must not expose Kafka topics,
+partitions, offsets, acknowledgements, or broker-specific retry policy.
+
 ## Architecture Gate
 
 - Gate level: Level 3, because this introduces a new DDD concept package and a
   new event dispatch boundary.
 - Bounded context / business capability: shared component library capability for
-  domain event collection and in-process dispatch.
+  domain event collection and dispatch inside one bounded context.
 - Stable language / data authority: `Event` is an internal domain fact in one
   bounded context. `Collection` records facts raised by an aggregate.
-  `Dispatcher` accepts event batches for in-process handling.
+  `Dispatcher` accepts event batches for domain event handling.
 - Affected aggregate, policy, or service: no business aggregate. Affects shared
   event collection, event dispatch, handler subscription, and shutdown policy.
 - Invariants and rules: domain methods collect events only; application drains
@@ -70,13 +76,18 @@ Proposed package:
 ```go
 package event
 
-import "context"
+import (
+    "context"
+    "errors"
+)
 
 type Kind string
 
 type Event interface {
     Kind() Kind
 }
+
+var ErrDispatcherClosed = errors.New("domain event dispatcher is closed")
 
 type UnhandledContext struct {
     BatchID uint64
@@ -114,8 +125,8 @@ type Handler interface {
 
 type Dispatcher interface {
     Subscribe(Handler)
-    Dispatch(Event) bool
-    DispatchAll([]Event) bool
+    Dispatch(Event) error
+    DispatchAll([]Event) error
     Close(context.Context) error
 }
 
@@ -192,10 +203,10 @@ explicit application service step or domain rule, not a domain event handler.
 
 `Dispatch` and `DispatchAll` are admission APIs.
 
-- `true` means the dispatcher accepted the event batch.
-- `false` means the dispatcher is closing or closed and did not accept the
-  batch.
-- The return value does not report handler success or failure.
+- `nil` means the dispatcher accepted the event batch.
+- a non-nil error means the dispatcher did not accept the batch because of an
+  admission or delivery failure.
+- Dispatch errors do not report handler success or failure.
 
 `Dispatch(event)` is equivalent to submitting one batch containing one event.
 
@@ -203,7 +214,21 @@ explicit application service step or domain rule, not a domain event handler.
 independent `Dispatch` calls because other batches could interleave between
 events from the same aggregate transaction.
 
-Empty batches return `true` and do not enqueue work.
+Empty batches return `nil` and do not enqueue work.
+
+Dispatch errors are limited to dispatcher/backing-mechanism failures, for
+example a closed dispatcher, forced shutdown, internal admission failure,
+serialization failure in a concrete implementation, or third-party MQ
+communication failure in an MQ-backed implementation. Handler business failures
+are not returned by `Dispatch`; handlers own their own failure recording, retry,
+compensation, and alerting policy.
+
+For MQ-backed implementations, a broker publish or communication failure is a
+dispatch error and should be returned to the caller. Handler business failures
+are different: they happen after the event has been handed to the handling
+mechanism, and the handler owns its own compensation or retry record. MQ commit
+or acknowledgement semantics in such an implementation must mean successful
+handoff to the domain event handling mechanism, not business success.
 
 ## Ordering
 
@@ -267,19 +292,19 @@ type batch struct {
 
 When open:
 
-- `Dispatch` and `DispatchAll` enqueue a batch and return `true`.
+- `Dispatch` and `DispatchAll` enqueue a batch and return `nil`.
 - If the buffer is full, dispatch waits for space.
 
 When closing or closed:
 
-- new dispatch calls return `false`.
+- new dispatch calls return `ErrDispatcherClosed`.
 - already accepted batches continue to drain.
 - `Close(ctx)` waits for accepted batches to finish or returns `ctx.Err()`.
 
 If `Close(ctx)` is interrupted before accepted batches finish, the dispatcher
 enters a forced shutdown state:
 
-- new dispatch calls still return `false`.
+- new dispatch calls still return `ErrDispatcherClosed`.
 - the current handler context is canceled through the dispatcher root context.
 - the worker stops taking additional queued batches.
 - remaining queued batches are considered abandoned in memory.
@@ -355,9 +380,9 @@ Collection tests:
 
 Dispatcher admission tests:
 
-- `Dispatch` and `DispatchAll` return `true` while open
-- `Dispatch` and `DispatchAll` return `false` after close starts
-- empty batch returns `true`
+- `Dispatch` and `DispatchAll` return `nil` while open
+- `Dispatch` and `DispatchAll` return `ErrDispatcherClosed` after close starts
+- empty batch returns `nil`
 - `Dispatch` behaves as a single-event batch
 
 Ordering tests:
@@ -393,8 +418,8 @@ It does not provide reliable delivery across process restarts.
 ```
 
 ```text
-Dispatch only reports whether a batch was accepted.
-It does not report handler success or failure.
+Dispatch errors report only dispatcher admission or delivery failures.
+They do not report handler success or failure.
 Handlers represent follow-up transactions and own their own error policy.
 ```
 

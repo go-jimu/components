@@ -91,7 +91,7 @@ func TestDispatcherDispatchAcceptedWhileOpen(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 	require.Equal(t, event.Kind("order.paid"), (<-called).Kind())
 }
 
@@ -101,18 +101,18 @@ func TestDispatcherDispatchAllEmptyBatchAccepted(t *testing.T) {
 	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
 	defer dispatcher.Close(context.Background())
 
-	require.True(t, dispatcher.DispatchAll(nil))
-	require.True(t, dispatcher.DispatchAll([]event.Event{}))
+	require.NoError(t, dispatcher.DispatchAll(nil))
+	require.NoError(t, dispatcher.DispatchAll([]event.Event{}))
 }
 
-// Intent: once the dispatcher is closed, new event batches are rejected with
-// false instead of reporting handler errors.
+// Intent: once the dispatcher is closed, new event batches are rejected with a
+// dispatch error instead of reporting handler errors.
 func TestDispatcherRejectsAfterClose(t *testing.T) {
 	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
 	require.NoError(t, dispatcher.Close(context.Background()))
 
-	require.False(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
-	require.False(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}))
+	require.ErrorIs(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}), event.ErrDispatcherClosed)
+	require.ErrorIs(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}), event.ErrDispatcherClosed)
 }
 
 // Intent: rejected dispatches happen in a background component, so they should
@@ -125,7 +125,7 @@ func TestDispatcherLogsRejectedDispatch(t *testing.T) {
 	)
 	require.NoError(t, dispatcher.Close(context.Background()))
 
-	require.False(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}))
+	require.ErrorIs(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}), event.ErrDispatcherClosed)
 
 	record := receiveLogWithin(t, "rejected dispatch log", records)
 	for record.message != "domain event dispatch rejected" {
@@ -144,7 +144,7 @@ func TestDispatcherRejectsAfterDelayCloseCancel(t *testing.T) {
 	cancel()
 	require.ErrorIs(t, dispatcher.Close(ctx), context.Canceled)
 
-	require.False(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}))
+	require.ErrorIs(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}), event.ErrDispatcherClosed)
 }
 
 // Intent: close waits for already accepted work to finish before returning.
@@ -163,7 +163,7 @@ func TestDispatcherCloseDrainsAcceptedBatches(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 	<-started
 
 	var wg sync.WaitGroup
@@ -217,11 +217,11 @@ func TestDispatcherDispatchAllBatchDoesNotInterleave(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll([]event.Event{
 		testEvent{kind: "order.event", name: "a1"},
 		testEvent{kind: "order.event", name: "a2"},
 	}))
-	require.True(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll([]event.Event{
 		testEvent{kind: "order.event", name: "b1"},
 		testEvent{kind: "order.event", name: "b2"},
 	}))
@@ -248,7 +248,7 @@ func TestDispatcherHandlersRunInSubscriptionOrder(t *testing.T) {
 		handle: func(context.Context, event.Event) { seen <- "second" },
 	})
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 	require.Equal(t, "first", <-seen)
 	require.Equal(t, "second", <-seen)
 }
@@ -265,7 +265,7 @@ func TestDispatcherUnhandledEventHook(t *testing.T) {
 	)
 	defer dispatcher.Close(context.Background())
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "unknown"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "unknown"}))
 	ctx := receiveWithin(t, "unhandled event", unhandled)
 	require.Equal(t, uint64(1), ctx.BatchID)
 	require.Equal(t, event.Kind("unknown"), ctx.Event.Kind())
@@ -281,7 +281,7 @@ func TestDispatcherLogsUnhandledEventWithoutHook(t *testing.T) {
 	)
 	defer dispatcher.Close(context.Background())
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "unknown"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "unknown"}))
 
 	record := receiveLogWithin(t, "unhandled event log", records)
 	require.Equal(t, slog.LevelWarn, record.level)
@@ -316,7 +316,7 @@ func TestDispatcherRecoversPanicAndContinues(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll([]event.Event{
 		testEvent{kind: "order.event", name: "first"},
 		testEvent{kind: "order.event", name: "second"},
 	}))
@@ -351,7 +351,7 @@ func TestDispatcherContextFactory(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 	require.Equal(t, "dispatcher-context", <-valueCh)
 }
 
@@ -377,7 +377,7 @@ func TestDispatcherLogsNilContextFactory(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 	receiveWithin(t, "handler after nil context factory", handled)
 	record := receiveLogWithin(t, "nil context factory log", records)
 	require.Equal(t, slog.LevelWarn, record.level)
@@ -404,7 +404,7 @@ func TestDispatcherHandlerTimeout(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 	require.ErrorIs(t, <-done, context.DeadlineExceeded)
 }
 
@@ -420,7 +420,7 @@ func TestDispatcherCloseReturnsContextErrorOnTimeout(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -446,9 +446,9 @@ func TestDispatcherLogsCloseContextError(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 	<-started
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -492,12 +492,12 @@ func TestDispatcherCloseInterruptedHookReportsAbandonedWork(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll([]event.Event{
 		testEvent{kind: "order.event", name: "first"},
 		testEvent{kind: "order.event", name: "second"},
 	}))
 	<-firstStarted
-	require.True(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll([]event.Event{
 		testEvent{kind: "order.event", name: "third"},
 	}))
 
@@ -535,9 +535,9 @@ func TestDispatcherCloseTimeoutStopsTakingQueuedBatches(t *testing.T) {
 		},
 	})
 
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.event", name: "first"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.event", name: "first"}))
 	<-firstStarted
-	require.True(t, dispatcher.Dispatch(testEvent{kind: "order.event", name: "second"}))
+	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.event", name: "second"}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
