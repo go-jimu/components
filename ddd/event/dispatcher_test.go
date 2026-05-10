@@ -22,6 +22,20 @@ func (h handlerFunc) Handle(ctx context.Context, ev event.Event) {
 	}
 }
 
+func receiveWithin[T any](t *testing.T, name string, ch <-chan T) T {
+	t.Helper()
+
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("timed out waiting for %s", name)
+	}
+
+	var zero T
+	return zero
+}
+
 // Intent: dispatch reports admission acceptance, not handler success.
 func TestDispatcherDispatchAcceptedWhileOpen(t *testing.T) {
 	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
@@ -204,10 +218,10 @@ func TestDispatcherRecoversPanicAndContinues(t *testing.T) {
 		testEvent{kind: "order.event", name: "first"},
 		testEvent{kind: "order.event", name: "second"},
 	}))
-	require.Equal(t, "handler failed", <-panicked)
-	require.Equal(t, "first", <-seen)
-	require.Equal(t, "handler failed", <-panicked)
-	require.Equal(t, "second", <-seen)
+	require.Equal(t, "handler failed", receiveWithin(t, "panic recovery", panicked))
+	require.Equal(t, "first", receiveWithin(t, "first continued handler", seen))
+	require.Equal(t, "handler failed", receiveWithin(t, "second panic recovery", panicked))
+	require.Equal(t, "second", receiveWithin(t, "second continued handler", seen))
 }
 
 type contextKey string
