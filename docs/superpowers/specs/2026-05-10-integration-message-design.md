@@ -51,10 +51,11 @@ The module assumes protobuf is the contract format. It may depend directly on
   infrastructure mapping code may convert selected domain events to integration
   messages; handlers consume stable protobuf DTO contracts, not publisher
   internal domain event structs.
-- Technical capability classification: message construction is an application
-  contract concern; publishing, subscribing, broker envelopes, offset commits,
-  acknowledgements, and transport mapping are infrastructure concerns; handler
-  routing is reusable application/runtime orchestration.
+- Technical capability classification: message construction and payload
+  resolution are application contract concerns; publishing, subscribing, broker
+  envelopes, offset commits, acknowledgements, and transport mapping are
+  infrastructure concerns; handler routing is reusable application/runtime
+  orchestration.
 - Layer ownership: Domain owns domain events. Application owns the decision to
   publish an integration message and the mapping from domain facts to protobuf
   DTOs. Infrastructure owns broker-specific publish/consume mechanics.
@@ -137,6 +138,18 @@ type Handler interface {
 type Subscriber interface {
     Subscribe(Handler) error
 }
+
+type Runner interface {
+    Run(context.Context) error
+}
+
+type Closer interface {
+    Close() error
+}
+
+type PayloadResolver interface {
+    Resolve(Kind) (proto.Message, error)
+}
 ```
 
 `Message` is a struct, not an interface, because it is the standard DTO shape.
@@ -144,8 +157,8 @@ Different publishers and handlers should process the same message type. A
 Kafka-backed message must not become a different public type from a
 RabbitMQ-backed message.
 
-`Publisher`, `Subscriber`, and `Handler` are interfaces because they describe
-capabilities.
+`Publisher`, `Subscriber`, `Handler`, `Runner`, `Closer`, and
+`PayloadResolver` are interfaces because they describe capabilities.
 
 ## Message Fields
 
@@ -170,6 +183,11 @@ Fields intentionally not included as first-class API:
   concerns outside this non-transactional core.
 - `ContentType`: the core is protobuf-first, so payload format is already
   constrained by the API.
+
+Header name constants are also intentionally not included in the core API.
+Message ID, Kind, OccurredAt, Key, and Headers are typed fields on
+`message.Message`; each provider decides how to encode them into Kafka headers,
+AMQP properties, NATS headers, or another envelope protocol.
 
 ## Message Construction
 
@@ -234,6 +252,17 @@ Transactional guarantees belong to a future outbox-backed publisher.
 need the broker adapter to choose acknowledgement, offset commit, negative
 acknowledgement, retry, or failure recording behavior.
 
+Return semantics:
+
+- `nil` means the handler accepted and finished processing the message. After
+  all matching handlers return nil, a provider may ack, commit, or otherwise
+  mark the delivery complete.
+- a non-nil error means the message was not successfully handled. A provider may
+  retry, redeliver, publish to DLQ, stop, or record the failure according to its
+  own policy.
+- business failures that should not cause broker redelivery should be handled
+  inside the handler and then return nil.
+
 Handler matching is based on `Kind`:
 
 ```go
@@ -247,6 +276,11 @@ Unlike `ddd/event`, an unhandled integration message should be treated as an
 error by default. A domain event can be optional inside a bounded context, but an
 integration message received from a broker is an external contract that should
 have an explicit consumer or dead-letter/failure policy.
+
+`Subscriber.Subscribe` is handler registration only. It does not start a broker
+consumer, poll records, reserve partitions, join a consumer group, ack records,
+or commit offsets. Providers that own a runtime loop should expose that
+separately, for example by implementing `Runner`.
 
 ## Router
 
@@ -275,6 +309,32 @@ func (r *Router) Handle(context.Context, Message) error
 The first version should keep routing sequential and deterministic. Concurrent
 handling can be introduced later as a separate implementation or option with
 explicitly documented ordering trade-offs.
+
+## Payload Resolution
+
+Consumers that receive broker bytes need a transport-neutral way to allocate the
+protobuf DTO target for a message kind:
+
+```go
+type PayloadResolver interface {
+    Resolve(Kind) (proto.Message, error)
+}
+
+type PayloadRegistry struct {
+    // unexported fields
+}
+
+func NewPayloadRegistry() *PayloadRegistry
+func (r *PayloadRegistry) Register(Kind, func() proto.Message) error
+func (r *PayloadRegistry) Resolve(Kind) (proto.Message, error)
+```
+
+`PayloadRegistry` maps semantic message kinds to protobuf factories. It does
+not know about Kafka topics, NATS subjects, RabbitMQ routing keys, offsets,
+acknowledgements, retries, or dead-letter behavior.
+
+`Resolve` must return a fresh protobuf message each time because unmarshalling
+mutates the target value.
 
 ## Transport Adapter Mapping
 
@@ -317,6 +377,9 @@ var (
     ErrNilHandler    = errors.New("message handler is nil")
     ErrNoListening   = errors.New("message handler listens to no kinds")
     ErrUnhandledKind = errors.New("message kind has no handler")
+    ErrUnknownKind   = errors.New("unknown message kind")
+    ErrNilPayloadResolver = errors.New("message payload resolver is nil")
+    ErrNilPayloadFactory  = errors.New("message payload factory is nil")
 )
 ```
 
@@ -371,6 +434,14 @@ Router tests:
 - `Handle` calls matching handlers in subscription order.
 - `Handle` does not call handlers for other kinds.
 - `Handle` stops and returns the first handler error.
+
+Payload resolver tests:
+
+- `PayloadRegistry.Resolve` returns a fresh protobuf target for a registered
+  kind.
+- `PayloadRegistry` rejects empty kinds and nil factories.
+- `PayloadRegistry.Resolve` rejects unknown kinds and nil factory output,
+  including typed nil protobuf pointers.
 
 Interface conformance tests:
 

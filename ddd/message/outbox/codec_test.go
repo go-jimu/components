@@ -46,6 +46,30 @@ func TestProtoCodecRoundTrip(t *testing.T) {
 	require.True(t, proto.Equal(&testdata.TestModel{Id: 7, Name: "paid"}, decoded.Payload()))
 }
 
+// ProtoCodec should be able to reuse the core message payload resolver so
+// outbox and broker adapters do not maintain separate Kind-to-protobuf maps.
+func TestProtoCodecRoundTripWithPayloadResolver(t *testing.T) {
+	registry := message.NewPayloadRegistry()
+	require.NoError(t, registry.Register("test.test_model", func() proto.Message {
+		return &testdata.TestModel{}
+	}))
+	codec := outbox.NewProtoCodec(outbox.WithPayloadResolver(registry))
+	msg, err := message.New(
+		"test.test_model",
+		&testdata.TestModel{Id: 9, Name: "shipped"},
+		message.WithID("message-9"),
+	)
+	require.NoError(t, err)
+
+	record, err := codec.Encode(msg)
+	require.NoError(t, err)
+	decoded, err := codec.Decode(record)
+	require.NoError(t, err)
+
+	require.Equal(t, "message-9", decoded.ID())
+	require.True(t, proto.Equal(&testdata.TestModel{Id: 9, Name: "shipped"}, decoded.Payload()))
+}
+
 // Invalid registry entries must fail before decode time so missing published
 // language registrations are caught near application startup.
 func TestProtoCodecRejectsInvalidRegistration(t *testing.T) {

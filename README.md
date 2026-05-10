@@ -13,3 +13,14 @@ The legacy `mediator` package remains source-compatible for existing users and
 will only receive compatibility fixes. See
 [`docs/mediator-migration.md`](docs/mediator-migration.md) for the semantic
 differences and migration guidance.
+
+## Integration messages
+
+Use `github.com/go-jimu/components/ddd/message` for protobuf integration DTOs
+that cross bounded-context or service boundaries.
+
+`message.Kind` is a semantic message type used for handler routing and payload
+resolution. It is not a broker topic, subject, queue, partition, or offset.
+Provider packages map `Kind`, `Message.ID`, `Message.Key`, `OccurredAt`, and
+headers into their own broker envelopes and own retry, DLQ, ack, and commit
+policy.
