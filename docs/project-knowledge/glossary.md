@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
-updated_by: superpowers-memory:rebuild
-triggered_by_plan: null
+updated_by: superpowers-memory:update
+triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 ---
 
 # Glossary
@@ -10,9 +10,9 @@ triggered_by_plan: null
 
 **Domain Event** — A fact raised inside one bounded context by domain behavior. → `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 
-**Event Collection** — A per-aggregate holder for undrained domain events. → `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
+**Event Collection** — A per-aggregate holder for undrained domain events. → `ddd/event/`
 
-**Dispatcher** — Planned in-process batch admission and handler execution component for `ddd/event`. → `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
+**Dispatcher** — In-process batch admission and handler execution component for `ddd/event`. → `ddd/event/`
 
 **Integration Message** — Future cross bounded-context/service contract, separate from domain events. → `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 

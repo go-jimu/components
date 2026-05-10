@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
-updated_by: superpowers-memory:rebuild
-triggered_by_plan: null
+updated_by: superpowers-memory:update
+triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 ---
 
 # Features
@@ -50,8 +50,17 @@ triggered_by_plan: null
 
 - Enables: consumers subscribe handlers and dispatch events with graceful shutdown behavior.
 - Actors / Entry Points: consumers use `mediator.NewInMemMediator`, `Dispatch`, `Subscribe`, and `EventCollection`.
-- Capability Boundary: compatibility package; not changed by the planned DDD event module.
+- Capability Boundary: compatibility package; separate from the DDD event module.
 - References: `mediator/`
+
+### DDD Event
+
+#### Domain event collection and in-process dispatch
+
+- Enables: DDD-style services collect domain events inside one bounded context and submit event batches after persistence.
+- Actors / Entry Points: domain aggregates use `ddd/event.Collection`; application services use `ddd/event.Dispatcher`.
+- Capability Boundary: single-process domain events only; no integration message bus, broker, retry, or outbox.
+- References: `ddd/event/`, `docs/superpowers/specs/2026-05-10-ddd-event-design.md`
 
 ### Validation
 
@@ -61,14 +70,3 @@ triggered_by_plan: null
 - Actors / Entry Points: consumers import `validation`.
 - Capability Boundary: generic validation helpers; no application validation framework.
 - References: `validation/`
-
-## Planned
-
-### DDD Event
-
-#### Domain event collection and in-process dispatch
-
-- Enables: DDD-style services collect domain events inside one bounded context and submit event batches after persistence.
-- Actors / Entry Points: domain aggregates use `ddd/event.Collection`; application services use `ddd/event.Dispatcher`.
-- Capability Boundary: single-process domain events only; no integration message bus, broker, retry, or outbox.
-- References: `docs/superpowers/specs/2026-05-10-ddd-event-design.md`

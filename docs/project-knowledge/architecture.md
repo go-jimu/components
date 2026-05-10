@@ -1,7 +1,7 @@
 ---
 last_updated: 2026-05-10
-updated_by: superpowers-memory:rebuild
-triggered_by_plan: null
+updated_by: superpowers-memory:update
+triggered_by_plan: 2026-05-10-ddd-event-implementation.md
 ---
 
 # Architecture
@@ -13,7 +13,7 @@ small top-level capabilities instead of an application with service entry
 points, deployment manifests, or bounded-context folders.
 
 The current eventbus branch keeps the existing `mediator` package compatible and
-adds a design direction for a new DDD concept namespace under `ddd/`.
+adds a DDD concept namespace under `ddd/`.
 
 ## System Context
 
@@ -28,8 +28,9 @@ adds a design direction for a new DDD concept namespace under `ddd/`.
 - `fsm/` — finite state machine primitives and transition checks. Key abstractions: `State`, `StateContext`, `StateMachine`.
 - `logger/` and `sloghelper/` — logger adapters and helpers for `log/slog`.
 - `mediator/` — existing in-process event mediator with global default, event collection, subscription, dispatch, and graceful shutdown.
+- `ddd/event/` — DDD-oriented domain event collection and in-process batch dispatch. Key abstractions: `Event`, `Collection`, `Dispatcher`, `Handler`.
 - `validation/` — notification and specification validation helpers.
-- `docs/superpowers/specs/` — approved design specs for planned work, including `ddd/event`.
+- `docs/superpowers/specs/` and `docs/superpowers/plans/` — design and implementation records for planned or recently completed work.
 
 There is no application-layer call graph. Consumers compose these packages in
 their own applications.
