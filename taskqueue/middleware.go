@@ -50,6 +50,7 @@ func Logging(logger *slog.Logger) Middleware {
 				"queue", task.Queue(),
 				"key", task.Key(),
 			}
+			attrs = appendExecutionInfoAttrs(ctx, attrs)
 			logger.InfoContext(ctx, "taskqueue processor started", attrs...)
 
 			if next == nil {
@@ -70,6 +71,26 @@ func logTaskFailure(ctx context.Context, logger *slog.Logger, attrs []any, start
 	logger.ErrorContext(ctx, "taskqueue processor failed",
 		append(attrs, "elapsed", time.Since(startedAt).String(), "error", err)...)
 	return err
+}
+
+func appendExecutionInfoAttrs(ctx context.Context, attrs []any) []any {
+	info, ok := ExecutionInfoFromContext(ctx)
+	if !ok {
+		return attrs
+	}
+	if info.TaskID() != "" {
+		attrs = append(attrs, "task_id", info.TaskID())
+	}
+	if info.Queue() != "" {
+		attrs = append(attrs, "execution_queue", info.Queue())
+	}
+	if retryCount, ok := info.RetryCount(); ok {
+		attrs = append(attrs, "retry_count", retryCount)
+	}
+	if maxRetry, ok := info.MaxRetry(); ok {
+		attrs = append(attrs, "max_retry", maxRetry)
+	}
+	return attrs
 }
 
 func panicAsError(recovered any) error {
