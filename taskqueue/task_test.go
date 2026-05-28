@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// Empty task types must be rejected so provider adapters never enqueue
-// tasks that no handler can safely route.
+// Empty task types must be rejected so provider adapters never enqueue tasks
+// that no processor can safely route.
 func TestNewJSONTask_EmptyTypeReturnsError(t *testing.T) {
 	_, err := NewJSONTask(Definition{}, struct{}{})
 	if !errors.Is(err, ErrEmptyType) {
@@ -45,7 +45,7 @@ func TestNewJSONTask_PreservesDefinitionAndCopiesHeaders(t *testing.T) {
 	}
 	headers["trace-id"] = "mutated"
 
-	if task.Type() != "document.review.v1" {
+	if task.Type() != TaskType("document.review.v1") {
 		t.Fatalf("type = %q", task.Type())
 	}
 	if task.Queue() != "reconcile" {
@@ -86,55 +86,52 @@ func TestDecodeJSON_DecodesPayloadAndRejectsNilTarget(t *testing.T) {
 	}
 }
 
-// Router dispatch should call every matching handler in registration order
-// and stop before later handlers when one handler fails.
-func TestRouter_HandleDispatchesInOrderAndStopsOnError(t *testing.T) {
+// Router dispatch should call the single processor registered for a task type
+// so task processing remains command-like rather than event fan-out.
+func TestRouter_ProcessDispatchesSingleProcessor(t *testing.T) {
 	router := NewRouter()
-	var calls []string
-	if err := router.Subscribe(NewHandlerFunc(func(context.Context, Task) error {
-		calls = append(calls, "first")
+	called := false
+	if err := router.Register(NewProcessor("document.review.v1", func(context.Context, Task) error {
+		called = true
 		return nil
-	}, "document.review.v1")); err != nil {
-		t.Fatalf("subscribe first: %v", err)
-	}
-	wantErr := errors.New("stop")
-	if err := router.Subscribe(NewHandlerFunc(func(context.Context, Task) error {
-		calls = append(calls, "second")
-		return wantErr
-	}, "document.review.v1")); err != nil {
-		t.Fatalf("subscribe second: %v", err)
-	}
-	if err := router.Subscribe(NewHandlerFunc(func(context.Context, Task) error {
-		calls = append(calls, "third")
-		return nil
-	}, "document.review.v1")); err != nil {
-		t.Fatalf("subscribe third: %v", err)
+	})); err != nil {
+		t.Fatalf("register: %v", err)
 	}
 
 	task, err := NewJSONTask(Definition{Type: "document.review.v1"}, struct{}{})
 	if err != nil {
 		t.Fatalf("NewJSONTask: %v", err)
 	}
-	err = router.Handle(context.Background(), task)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("handle error = %v, want %v", err, wantErr)
+	if err := router.Process(context.Background(), task); err != nil {
+		t.Fatalf("process: %v", err)
 	}
-	if !reflect.DeepEqual(calls, []string{"first", "second"}) {
-		t.Fatalf("calls = %#v", calls)
+	if !called {
+		t.Fatal("processor was not called")
+	}
+}
+
+// Router registration should reject duplicate processors for the same task
+// type so a task cannot be accidentally processed twice.
+func TestRouter_RegisterRejectsDuplicateProcessor(t *testing.T) {
+	router := NewRouter()
+	if err := router.Register(NewProcessor("document.review.v1", func(context.Context, Task) error { return nil })); err != nil {
+		t.Fatalf("register first: %v", err)
+	}
+
+	err := router.Register(NewProcessor("document.review.v1", func(context.Context, Task) error { return nil }))
+	if !errors.Is(err, ErrDuplicateProcessor) {
+		t.Fatalf("duplicate error = %v, want ErrDuplicateProcessor", err)
 	}
 }
 
 // Router registration and dispatch should surface stable errors for invalid
-// handlers and unhandled task types.
+// processors and unhandled task types.
 func TestRouter_ValidationErrors(t *testing.T) {
 	router := NewRouter()
-	if err := router.Subscribe(nil); !errors.Is(err, ErrNilHandler) {
-		t.Fatalf("nil handler error = %v", err)
+	if err := router.Register(nil); !errors.Is(err, ErrNilProcessor) {
+		t.Fatalf("nil processor error = %v", err)
 	}
-	if err := router.Subscribe(NewHandlerFunc(func(context.Context, Task) error { return nil })); !errors.Is(err, ErrNoListening) {
-		t.Fatalf("no listening error = %v", err)
-	}
-	if err := router.Subscribe(NewHandlerFunc(func(context.Context, Task) error { return nil }, "")); !errors.Is(err, ErrEmptyType) {
+	if err := router.Register(NewProcessor("", func(context.Context, Task) error { return nil })); !errors.Is(err, ErrEmptyType) {
 		t.Fatalf("empty type error = %v", err)
 	}
 
@@ -142,43 +139,43 @@ func TestRouter_ValidationErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJSONTask: %v", err)
 	}
-	if err := router.Handle(context.Background(), task); !errors.Is(err, ErrUnhandledType) {
+	if err := router.Process(context.Background(), task); !errors.Is(err, ErrUnhandledType) {
 		t.Fatalf("unhandled error = %v", err)
 	}
 }
 
-// Router should be usable through the Subscriber capability so provider
-// adapters and modules can register handlers without depending on Router.
-func TestRouter_SubscribeThroughSubscriberInterface(t *testing.T) {
+// Router should be usable through the Registrar capability so provider adapters
+// and modules can register processors without depending on Router.
+func TestRouter_RegisterThroughRegistrarInterface(t *testing.T) {
 	router := NewRouter()
-	var subscriber Subscriber = router
+	var registrar Registrar = router
 	called := false
 
-	if err := subscriber.Subscribe(NewHandlerFunc(func(context.Context, Task) error {
+	if err := registrar.Register(NewProcessor("document.review.v1", func(context.Context, Task) error {
 		called = true
 		return nil
-	}, "document.review.v1")); err != nil {
-		t.Fatalf("subscribe: %v", err)
+	})); err != nil {
+		t.Fatalf("register: %v", err)
 	}
 
 	task, err := NewJSONTask(Definition{Type: "document.review.v1"}, struct{}{})
 	if err != nil {
 		t.Fatalf("NewJSONTask: %v", err)
 	}
-	if err := router.Handle(context.Background(), task); err != nil {
-		t.Fatalf("handle: %v", err)
+	if err := router.Process(context.Background(), task); err != nil {
+		t.Fatalf("process: %v", err)
 	}
 	if !called {
-		t.Fatal("handler was not called")
+		t.Fatal("processor was not called")
 	}
 }
 
 // Middleware should wrap in declaration order so shared logging/recovery
-// behavior can surround business handlers consistently.
+// behavior can surround task processors consistently.
 func TestChain_WrapsInDeclarationOrder(t *testing.T) {
 	var calls []string
 	mw := func(name string) Middleware {
-		return func(next HandlerFunc) HandlerFunc {
+		return func(next ProcessorFunc) ProcessorFunc {
 			return func(ctx context.Context, task Task) error {
 				calls = append(calls, name+":before")
 				err := next(ctx, task)
@@ -187,8 +184,8 @@ func TestChain_WrapsInDeclarationOrder(t *testing.T) {
 			}
 		}
 	}
-	handler := Chain(func(context.Context, Task) error {
-		calls = append(calls, "handler")
+	processor := Chain(func(context.Context, Task) error {
+		calls = append(calls, "processor")
 		return nil
 	}, mw("outer"), mw("inner"))
 
@@ -196,41 +193,41 @@ func TestChain_WrapsInDeclarationOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJSONTask: %v", err)
 	}
-	if err := handler(context.Background(), task); err != nil {
-		t.Fatalf("handler: %v", err)
+	if err := processor(context.Background(), task); err != nil {
+		t.Fatalf("processor: %v", err)
 	}
-	want := []string{"outer:before", "inner:before", "handler", "inner:after", "outer:after"}
+	want := []string{"outer:before", "inner:before", "processor", "inner:after", "outer:after"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %#v, want %#v", calls, want)
 	}
 }
 
-// Recover should convert handler panics into a stable error so worker
+// Recover should convert processor panics into a stable error so worker
 // processes can report task failure without crashing.
 func TestRecover_ConvertsPanicToError(t *testing.T) {
-	handler := Chain(func(context.Context, Task) error {
-		panic("handler crashed")
+	processor := Chain(func(context.Context, Task) error {
+		panic("processor crashed")
 	}, Recover())
 
 	task, err := NewJSONTask(Definition{Type: "document.review.v1"}, struct{}{})
 	if err != nil {
 		t.Fatalf("NewJSONTask: %v", err)
 	}
-	err = handler(context.Background(), task)
+	err = processor(context.Background(), task)
 	if !errors.Is(err, ErrPanic) {
-		t.Fatalf("handler error = %v, want ErrPanic", err)
+		t.Fatalf("processor error = %v, want ErrPanic", err)
 	}
-	if !strings.Contains(err.Error(), "handler crashed") {
-		t.Fatalf("handler error = %q, want panic detail", err)
+	if !strings.Contains(err.Error(), "processor crashed") {
+		t.Fatalf("processor error = %q, want panic detail", err)
 	}
 }
 
 // Logging should emit task identity and outcome fields around a successful
-// handler call so operators can trace background task execution.
+// processor call so operators can trace background task execution.
 func TestLogging_RecordsSuccessfulTask(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
-	handler := Chain(func(context.Context, Task) error {
+	processor := Chain(func(context.Context, Task) error {
 		return nil
 	}, Logging(logger))
 
@@ -238,14 +235,14 @@ func TestLogging_RecordsSuccessfulTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJSONTask: %v", err)
 	}
-	if err := handler(context.Background(), task); err != nil {
-		t.Fatalf("handler: %v", err)
+	if err := processor(context.Background(), task); err != nil {
+		t.Fatalf("processor: %v", err)
 	}
 
 	output := logs.String()
 	for _, want := range []string{
-		`"msg":"taskqueue handler started"`,
-		`"msg":"taskqueue handler completed"`,
+		`"msg":"taskqueue processor started"`,
+		`"msg":"taskqueue processor completed"`,
 		`"task_type":"document.review.v1"`,
 		`"queue":"reconcile"`,
 		`"key":"doc-1"`,
@@ -256,13 +253,13 @@ func TestLogging_RecordsSuccessfulTask(t *testing.T) {
 	}
 }
 
-// Logging should preserve the handler error while recording failure fields
+// Logging should preserve the processor error while recording failure fields
 // so retry decisions stay unchanged and failures remain observable.
 func TestLogging_RecordsFailedTask(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	wantErr := errors.New("retry later")
-	handler := Chain(func(context.Context, Task) error {
+	processor := Chain(func(context.Context, Task) error {
 		return wantErr
 	}, Logging(logger))
 
@@ -270,14 +267,14 @@ func TestLogging_RecordsFailedTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJSONTask: %v", err)
 	}
-	err = handler(context.Background(), task)
+	err = processor(context.Background(), task)
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("handler error = %v, want %v", err, wantErr)
+		t.Fatalf("processor error = %v, want %v", err, wantErr)
 	}
 
 	output := logs.String()
 	for _, want := range []string{
-		`"msg":"taskqueue handler failed"`,
+		`"msg":"taskqueue processor failed"`,
 		`"task_type":"document.review.v1"`,
 		`"error":"retry later"`,
 	} {

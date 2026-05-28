@@ -5,22 +5,22 @@ import (
 	"sync"
 )
 
-// Handler processes tasks for the types returned by Listening.
-type Handler interface {
-	Listening() []string
-	Handle(context.Context, Task) error
+// Processor processes one task type.
+type Processor interface {
+	TaskType() TaskType
+	Process(context.Context, Task) error
 }
 
-// HandlerFunc adapts a function to task handling middleware.
-type HandlerFunc func(context.Context, Task) error
+// ProcessorFunc adapts a function to task processing middleware.
+type ProcessorFunc func(context.Context, Task) error
 
-// Subscriber registers task handlers.
+// Registrar registers task processors.
 //
-// Subscribe is a handler registration operation only. It does not imply that a
+// Register is a processor registration operation only. It does not imply that a
 // provider worker has started polling, acknowledged tasks, scheduled retries,
 // or joined a runtime process.
-type Subscriber interface {
-	Subscribe(Handler) error
+type Registrar interface {
+	Register(Processor) error
 }
 
 // Runner is an optional runtime loop capability for providers that actively
@@ -29,82 +29,66 @@ type Runner interface {
 	Run(context.Context) error
 }
 
-type functionHandler struct {
-	fn    HandlerFunc
-	types []string
+type functionProcessor struct {
+	taskType TaskType
+	fn       ProcessorFunc
 }
 
-// NewHandlerFunc constructs a Handler from fn and listened task types.
-func NewHandlerFunc(fn HandlerFunc, types ...string) Handler {
-	return functionHandler{fn: fn, types: append([]string(nil), types...)}
+// NewProcessor constructs a Processor for one task type.
+func NewProcessor(taskType TaskType, fn ProcessorFunc) Processor {
+	return functionProcessor{taskType: taskType, fn: fn}
 }
 
-func (h functionHandler) Listening() []string {
-	return append([]string(nil), h.types...)
+func (p functionProcessor) TaskType() TaskType {
+	return p.taskType
 }
 
-func (h functionHandler) Handle(ctx context.Context, task Task) error {
-	if h.fn == nil {
-		return ErrNilHandler
+func (p functionProcessor) Process(ctx context.Context, task Task) error {
+	if p.fn == nil {
+		return ErrNilProcessor
 	}
-	return h.fn(ctx, task)
+	return p.fn(ctx, task)
 }
 
-// Router registers handlers by task type and dispatches tasks sequentially.
+// Router registers processors by task type and dispatches tasks.
 type Router struct {
-	mu       sync.RWMutex
-	handlers map[string][]Handler
+	mu         sync.RWMutex
+	processors map[TaskType]Processor
 }
 
-var _ Subscriber = (*Router)(nil)
+var _ Registrar = (*Router)(nil)
 
 // NewRouter constructs an empty task router.
 func NewRouter() *Router {
-	return &Router{handlers: make(map[string][]Handler)}
+	return &Router{processors: make(map[TaskType]Processor)}
 }
 
-// Subscribe registers handler for each non-empty task type returned by Listening.
-func (r *Router) Subscribe(handler Handler) error {
-	if handler == nil {
-		return ErrNilHandler
+// Register registers one processor for its non-empty task type.
+func (r *Router) Register(processor Processor) error {
+	if processor == nil {
+		return ErrNilProcessor
 	}
-	types := handler.Listening()
-	if len(types) == 0 {
-		return ErrNoListening
-	}
-	seen := make(map[string]struct{}, len(types))
-	deduped := make([]string, 0, len(types))
-	for _, taskType := range types {
-		if taskType == "" {
-			return ErrEmptyType
-		}
-		if _, ok := seen[taskType]; ok {
-			continue
-		}
-		seen[taskType] = struct{}{}
-		deduped = append(deduped, taskType)
+	taskType := processor.TaskType()
+	if taskType == "" {
+		return ErrEmptyType
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, taskType := range deduped {
-		r.handlers[taskType] = append(r.handlers[taskType], handler)
+	if _, ok := r.processors[taskType]; ok {
+		return ErrDuplicateProcessor
 	}
+	r.processors[taskType] = processor
 	return nil
 }
 
-// Handle dispatches task to all handlers registered for task.Type().
-func (r *Router) Handle(ctx context.Context, task Task) error {
+// Process dispatches task to the processor registered for task.Type().
+func (r *Router) Process(ctx context.Context, task Task) error {
 	r.mu.RLock()
-	handlers := append([]Handler(nil), r.handlers[task.Type()]...)
+	processor := r.processors[task.Type()]
 	r.mu.RUnlock()
-	if len(handlers) == 0 {
+	if processor == nil {
 		return ErrUnhandledType
 	}
-	for _, handler := range handlers {
-		if err := handler.Handle(ctx, task); err != nil {
-			return err
-		}
-	}
-	return nil
+	return processor.Process(ctx, task)
 }

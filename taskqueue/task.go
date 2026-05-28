@@ -5,9 +5,12 @@ import (
 	"fmt"
 )
 
+// TaskType is the semantic contract identifier for a task schema.
+type TaskType string
+
 // Definition identifies a semantic task type and optional queue lane.
 type Definition struct {
-	Type  string
+	Type  TaskType
 	Queue string
 }
 
@@ -65,7 +68,7 @@ func DecodeJSON(task Task, target any) error {
 }
 
 // Type returns the semantic task contract type.
-func (t Task) Type() string {
+func (t Task) Type() TaskType {
 	return t.def.Type
 }
 
