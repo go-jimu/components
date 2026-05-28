@@ -23,12 +23,6 @@ type Registrar interface {
 	Register(Processor) error
 }
 
-// Runner is an optional runtime loop capability for providers that actively
-// consume tasks.
-type Runner interface {
-	Run(context.Context) error
-}
-
 type functionProcessor struct {
 	taskType TaskType
 	fn       ProcessorFunc
