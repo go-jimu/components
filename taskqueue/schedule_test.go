@@ -1,6 +1,7 @@
 package taskqueue
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -29,6 +30,67 @@ func TestCronScheduleCapturesSpecAndLocation(t *testing.T) {
 	if err := schedule.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
+}
+
+// Intent: PeriodicTaskScheduler should be a provider-neutral capability
+// composition for runtimes that both register periodic producers and expose a
+// lifecycle managed by application hooks.
+func TestPeriodicTaskSchedulerCombinesRegistrationAndLifecycle(t *testing.T) {
+	scheduler := &recordingPeriodicTaskScheduler{}
+	var contract PeriodicTaskScheduler = scheduler
+	task, err := New(Definition{Type: "billing.generate_invoices.v1"}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	schedule, err := IntervalSchedule(time.Hour)
+	if err != nil {
+		t.Fatalf("IntervalSchedule: %v", err)
+	}
+	periodic, err := NewPeriodicTask("billing.hourly_invoices", schedule, task)
+	if err != nil {
+		t.Fatalf("NewPeriodicTask: %v", err)
+	}
+
+	if err := contract.RegisterPeriodicTask(periodic); err != nil {
+		t.Fatalf("RegisterPeriodicTask: %v", err)
+	}
+	if err := contract.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := contract.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	if scheduler.periodic.Name() != "billing.hourly_invoices" {
+		t.Fatalf("registered periodic task = %q", scheduler.periodic.Name())
+	}
+	if !scheduler.started {
+		t.Fatal("scheduler was not started")
+	}
+	if !scheduler.shutdown {
+		t.Fatal("scheduler was not shut down")
+	}
+}
+
+type recordingPeriodicTaskScheduler struct {
+	periodic PeriodicTask
+	started  bool
+	shutdown bool
+}
+
+func (s *recordingPeriodicTaskScheduler) RegisterPeriodicTask(periodic PeriodicTask) error {
+	s.periodic = periodic
+	return nil
+}
+
+func (s *recordingPeriodicTaskScheduler) Start(context.Context) error {
+	s.started = true
+	return nil
+}
+
+func (s *recordingPeriodicTaskScheduler) Shutdown(context.Context) error {
+	s.shutdown = true
+	return nil
 }
 
 // Intent: The shared contract should define a portable cron shape instead of

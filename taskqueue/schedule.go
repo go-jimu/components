@@ -207,3 +207,13 @@ func (t PeriodicTask) Validate() error {
 type PeriodicTaskRegistrar interface {
 	RegisterPeriodicTask(PeriodicTask) error
 }
+
+// PeriodicTaskScheduler registers periodic task producers and exposes the
+// provider lifecycle used by application runtime hooks.
+//
+// This is only a provider-neutral capability composition. It does not define
+// how schedules are compiled, persisted, locked, or executed by a provider.
+type PeriodicTaskScheduler interface {
+	PeriodicTaskRegistrar
+	Worker
+}
