@@ -16,6 +16,9 @@ var (
 	ErrInvalidPayloadFactory = errors.New("task payload factory returned invalid payload")
 	ErrNilPayloadResolver    = errors.New("task payload resolver is nil")
 	ErrPanic                 = errors.New("task processor panicked")
+	ErrEmptySchedule         = errors.New("task schedule is empty")
+	ErrEmptyPeriodicTaskName = errors.New("periodic task name is empty")
+	ErrDuplicatePeriodicTask = errors.New("periodic task is already registered")
 
 	// ErrSkipRetry marks a failure as non-retryable for provider adapters.
 	ErrSkipRetry = errors.New("skip retry for task")
