@@ -148,6 +148,16 @@ func TestIntervalScheduleCapturesInterval(t *testing.T) {
 	}
 }
 
+// Intent: Interval schedules should reject timezone options because fixed
+// durations do not have wall-clock location semantics.
+func TestIntervalScheduleRejectsLocation(t *testing.T) {
+	_, err := IntervalSchedule(15*time.Minute, WithLocation("Asia/Shanghai"))
+
+	if !errors.Is(err, ErrInvalidScheduleOption) {
+		t.Fatalf("error = %v, want ErrInvalidScheduleOption", err)
+	}
+}
+
 // Intent: Invalid schedules should fail with the stable schedule error before
 // provider adapters try to register ambiguous runtime data.
 func TestScheduleConstructorsRejectEmptySchedule(t *testing.T) {
@@ -182,7 +192,15 @@ func TestNewPeriodicTaskCapturesTaskScheduleAndEnqueuePolicy(t *testing.T) {
 		t.Fatalf("CronSchedule: %v", err)
 	}
 
-	periodic, err := NewPeriodicTask("billing.daily_invoices", schedule, task, WithUnique(25*time.Hour), WithMaxRetry(3))
+	periodic, err := NewPeriodicTask(
+		"billing.daily_invoices",
+		schedule,
+		task,
+		WithDelay(30*time.Second),
+		WithUnique(25*time.Hour),
+		WithMaxRetry(3),
+		WithTimeout(2*time.Minute),
+	)
 	if err != nil {
 		t.Fatalf("NewPeriodicTask: %v", err)
 	}
@@ -197,11 +215,17 @@ func TestNewPeriodicTaskCapturesTaskScheduleAndEnqueuePolicy(t *testing.T) {
 	}
 
 	policy := periodic.EnqueuePolicy()
+	if policy.Delay() != 30*time.Second {
+		t.Fatalf("delay = %v", policy.Delay())
+	}
 	if policy.UniqueTTL() != 25*time.Hour {
 		t.Fatalf("unique ttl = %v", policy.UniqueTTL())
 	}
 	if maxRetry, ok := policy.MaxRetry(); !ok || maxRetry != 3 {
 		t.Fatalf("max retry = %d, %t; want 3, true", maxRetry, ok)
+	}
+	if policy.Timeout() != 2*time.Minute {
+		t.Fatalf("timeout = %v", policy.Timeout())
 	}
 }
 
@@ -232,6 +256,36 @@ func TestNewPeriodicTaskRejectsInvalidContract(t *testing.T) {
 
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+// Intent: Periodic tasks should reject absolute enqueue timing policies because
+// those values become stale when reused across repeated schedule fires.
+func TestNewPeriodicTaskRejectsAbsoluteEnqueuePolicy(t *testing.T) {
+	task, err := New(Definition{Type: "billing.generate_invoices.v1"}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	schedule, err := IntervalSchedule(time.Minute)
+	if err != nil {
+		t.Fatalf("IntervalSchedule: %v", err)
+	}
+	tests := []struct {
+		name string
+		opts []EnqueueOption
+	}{
+		{name: "process at", opts: []EnqueueOption{WithProcessAt(time.Now().Add(time.Minute))}},
+		{name: "deadline", opts: []EnqueueOption{WithDeadline(time.Now().Add(time.Minute))}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewPeriodicTask("billing.daily_invoices", schedule, task, tt.opts...)
+
+			if !errors.Is(err, ErrInvalidPeriodicTaskPolicy) {
+				t.Fatalf("error = %v, want ErrInvalidPeriodicTaskPolicy", err)
 			}
 		})
 	}
