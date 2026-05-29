@@ -30,8 +30,9 @@ type scheduleConfig struct {
 	location string
 }
 
-// WithLocation sets an IANA timezone name for providers that support
-// per-schedule locations.
+// WithLocation sets an IANA timezone name for cron schedules.
+//
+// Fixed interval schedules are duration-based and reject location options.
 func WithLocation(location string) ScheduleOption {
 	return func(cfg *scheduleConfig) {
 		cfg.location = location
@@ -53,6 +54,9 @@ func CronSchedule(spec string, opts ...ScheduleOption) (Schedule, error) {
 }
 
 // IntervalSchedule constructs a validated fixed interval schedule.
+//
+// Interval schedules are duration-based; use CronSchedule with WithLocation
+// when wall-clock timezone semantics matter.
 func IntervalSchedule(interval time.Duration, opts ...ScheduleOption) (Schedule, error) {
 	cfg := newScheduleConfig(opts...)
 	schedule := Schedule{
@@ -91,7 +95,7 @@ func (s Schedule) Interval() time.Duration {
 	return s.interval
 }
 
-// Location returns the configured IANA timezone name.
+// Location returns the configured IANA timezone name for cron schedules.
 func (s Schedule) Location() string {
 	return s.location
 }
@@ -99,16 +103,18 @@ func (s Schedule) Location() string {
 // Validate checks whether the schedule carries enough information for a
 // provider adapter to register it.
 func (s Schedule) Validate() error {
-	if err := validateScheduleLocation(s.location); err != nil {
-		return err
-	}
-
 	switch s.kind {
 	case ScheduleKindCron:
+		if err := validateScheduleLocation(s.location); err != nil {
+			return err
+		}
 		if err := validateCronSpec(s.spec); err != nil {
 			return err
 		}
 	case ScheduleKindInterval:
+		if s.location != "" {
+			return ErrInvalidScheduleOption
+		}
 		if s.interval <= 0 {
 			return ErrEmptySchedule
 		}
@@ -143,7 +149,8 @@ func validateScheduleLocation(location string) error {
 //
 // Each schedule fire enqueues the same Task envelope with the same enqueue
 // policy. Dynamic payload generation belongs in application or provider-level
-// orchestration outside this transport-neutral contract.
+// orchestration outside this transport-neutral contract. This intentionally
+// narrow core shape is name + Schedule + Task + EnqueuePolicy.
 type PeriodicTask struct {
 	name     string
 	schedule Schedule
@@ -186,7 +193,8 @@ func (t PeriodicTask) EnqueuePolicy() EnqueueOptions {
 }
 
 // Validate checks whether a periodic task has a semantic identity, schedule,
-// and routable task type.
+// routable task type, and enqueue policy suitable for repeated scheduled
+// enqueues.
 func (t PeriodicTask) Validate() error {
 	if t.name == "" {
 		return ErrEmptyPeriodicTaskName
@@ -197,13 +205,28 @@ func (t PeriodicTask) Validate() error {
 	if t.task.Type() == "" {
 		return ErrEmptyType
 	}
+	if err := validatePeriodicTaskPolicy(t.policy); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePeriodicTaskPolicy(policy EnqueueOptions) error {
+	if !policy.ProcessAt().IsZero() {
+		return ErrInvalidPeriodicTaskPolicy
+	}
+	if !policy.Deadline().IsZero() {
+		return ErrInvalidPeriodicTaskPolicy
+	}
 	return nil
 }
 
 // PeriodicTaskRegistrar registers periodic task producers.
 //
-// PeriodicTask.Name is the unique registration key. Implementations should
-// return ErrDuplicatePeriodicTask when the same name is registered twice.
+// PeriodicTask.Name is the unique registration key for one registrar instance.
+// Implementations should return ErrDuplicatePeriodicTask when the same name is
+// registered twice in that instance. Cross-process or cross-replica duplicate
+// prevention is outside this provider-neutral contract.
 type PeriodicTaskRegistrar interface {
 	RegisterPeriodicTask(PeriodicTask) error
 }
