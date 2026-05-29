@@ -31,9 +31,42 @@ func TestCronScheduleCapturesSpecAndLocation(t *testing.T) {
 	}
 }
 
+// Intent: The shared contract should define a portable cron shape instead of
+// silently accepting provider-specific seconds fields or descriptors.
+func TestCronScheduleRejectsUnsupportedCronDialect(t *testing.T) {
+	tests := []struct {
+		name string
+		spec string
+	}{
+		{name: "empty field list", spec: "0 2 * *"},
+		{name: "seconds field", spec: "0 0 2 * * *"},
+		{name: "descriptor", spec: "@daily"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := CronSchedule(tt.spec)
+
+			if !errors.Is(err, ErrInvalidSchedule) {
+				t.Fatalf("error = %v, want ErrInvalidSchedule", err)
+			}
+		})
+	}
+}
+
+// Intent: Timezone names should fail at construction time so adapters do not
+// defer an invalid schedule until runtime registration.
+func TestCronScheduleRejectsInvalidLocation(t *testing.T) {
+	_, err := CronSchedule("0 2 * * *", WithLocation("Mars/Base"))
+
+	if !errors.Is(err, ErrInvalidScheduleLocation) {
+		t.Fatalf("error = %v, want ErrInvalidScheduleLocation", err)
+	}
+}
+
 // Intent: Interval schedules should preserve duration semantics separately
 // from cron expressions so adapters can map them to provider periodic syntax.
-func TestEveryScheduleCapturesInterval(t *testing.T) {
+func TestIntervalScheduleCapturesInterval(t *testing.T) {
 	schedule, err := IntervalSchedule(15 * time.Minute)
 	if err != nil {
 		t.Fatalf("IntervalSchedule: %v", err)
@@ -77,7 +110,7 @@ func TestScheduleConstructorsRejectEmptySchedule(t *testing.T) {
 
 // Intent: PeriodicTask should preserve a concrete task plus enqueue policy so
 // runtime schedulers can periodically enqueue the exact background task.
-func TestNewPeriodicTaskCapturesTaskScheduleAndCopiesEnqueueOptions(t *testing.T) {
+func TestNewPeriodicTaskCapturesTaskScheduleAndEnqueuePolicy(t *testing.T) {
 	task, err := New(Definition{Type: "billing.generate_invoices.v1", Queue: "billing"}, []byte(`{"date":"2026-05-29"}`), WithKey("billing:2026-05-29"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -101,9 +134,7 @@ func TestNewPeriodicTaskCapturesTaskScheduleAndCopiesEnqueueOptions(t *testing.T
 		t.Fatalf("task type = %q", periodic.Task().Type())
 	}
 
-	copied := periodic.EnqueueOptions()
-	copied[0] = WithMaxRetry(0)
-	policy := NewEnqueueOptions(periodic.EnqueueOptions()...)
+	policy := periodic.EnqueuePolicy()
 	if policy.UniqueTTL() != 25*time.Hour {
 		t.Fatalf("unique ttl = %v", policy.UniqueTTL())
 	}

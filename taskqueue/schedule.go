@@ -1,6 +1,9 @@
 package taskqueue
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ScheduleKind identifies the provider-neutral form of a periodic schedule.
 type ScheduleKind string
@@ -35,7 +38,7 @@ func WithLocation(location string) ScheduleOption {
 	}
 }
 
-// CronSchedule constructs a validated cron expression schedule.
+// CronSchedule constructs a validated standard five-field cron schedule.
 func CronSchedule(spec string, opts ...ScheduleOption) (Schedule, error) {
 	cfg := newScheduleConfig(opts...)
 	schedule := Schedule{
@@ -96,10 +99,14 @@ func (s Schedule) Location() string {
 // Validate checks whether the schedule carries enough information for a
 // provider adapter to register it.
 func (s Schedule) Validate() error {
+	if err := validateScheduleLocation(s.location); err != nil {
+		return err
+	}
+
 	switch s.kind {
 	case ScheduleKindCron:
-		if s.spec == "" {
-			return ErrEmptySchedule
+		if err := validateCronSpec(s.spec); err != nil {
+			return err
 		}
 	case ScheduleKindInterval:
 		if s.interval <= 0 {
@@ -111,12 +118,37 @@ func (s Schedule) Validate() error {
 	return nil
 }
 
-// PeriodicTask describes a periodic producer for a concrete task.
+func validateCronSpec(spec string) error {
+	fields := strings.Fields(spec)
+	if len(fields) == 0 {
+		return ErrEmptySchedule
+	}
+	if len(fields) != 5 {
+		return ErrInvalidSchedule
+	}
+	return nil
+}
+
+func validateScheduleLocation(location string) error {
+	if location == "" {
+		return nil
+	}
+	if _, err := time.LoadLocation(location); err != nil {
+		return ErrInvalidScheduleLocation
+	}
+	return nil
+}
+
+// PeriodicTask describes a static periodic producer for a concrete task.
+//
+// Each schedule fire enqueues the same Task envelope with the same enqueue
+// policy. Dynamic payload generation belongs in application or provider-level
+// orchestration outside this transport-neutral contract.
 type PeriodicTask struct {
 	name     string
 	schedule Schedule
 	task     Task
-	options  []EnqueueOption
+	policy   EnqueueOptions
 }
 
 // NewPeriodicTask constructs a periodic task producer contract.
@@ -125,7 +157,7 @@ func NewPeriodicTask(name string, schedule Schedule, task Task, opts ...EnqueueO
 		name:     name,
 		schedule: schedule,
 		task:     task,
-		options:  append([]EnqueueOption(nil), opts...),
+		policy:   NewEnqueueOptions(opts...),
 	}
 	if err := periodic.Validate(); err != nil {
 		return PeriodicTask{}, err
@@ -148,9 +180,9 @@ func (t PeriodicTask) Task() Task {
 	return t.task
 }
 
-// EnqueueOptions returns a copy of the enqueue policy for scheduled enqueues.
-func (t PeriodicTask) EnqueueOptions() []EnqueueOption {
-	return append([]EnqueueOption(nil), t.options...)
+// EnqueuePolicy returns the enqueue policy for scheduled enqueues.
+func (t PeriodicTask) EnqueuePolicy() EnqueueOptions {
+	return t.policy
 }
 
 // Validate checks whether a periodic task has a semantic identity, schedule,
@@ -169,12 +201,9 @@ func (t PeriodicTask) Validate() error {
 }
 
 // PeriodicTaskRegistrar registers periodic task producers.
+//
+// PeriodicTask.Name is the unique registration key. Implementations should
+// return ErrDuplicatePeriodicTask when the same name is registered twice.
 type PeriodicTaskRegistrar interface {
 	RegisterPeriodicTask(PeriodicTask) error
-}
-
-// PeriodicTaskScheduler registers and runs periodic task producers.
-type PeriodicTaskScheduler interface {
-	PeriodicTaskRegistrar
-	Worker
 }

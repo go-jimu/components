@@ -4,9 +4,10 @@
 // capabilities for enqueueing, handler registration, middleware, worker
 // lifecycle, and runtime loops. It intentionally does not define worker
 // storage, acknowledgement, retry, dead-letter, or locking behavior. Periodic
-// tasks in this package mean "enqueue this Task on this schedule"; arbitrary
-// scheduler callbacks and distributed execution ownership remain application or
-// provider concerns. Provider adapters map these contracts to their own systems.
+// tasks in this package mean "enqueue this static Task envelope on this
+// schedule"; arbitrary scheduler callbacks, dynamic payload generation, and
+// distributed execution ownership remain application or provider concerns.
+// Provider adapters map these contracts to their own systems.
 //
 // TaskType is a semantic contract identifier used for schema and processor
 // routing. Queue is an optional provider-facing lane name. Providers decide how
