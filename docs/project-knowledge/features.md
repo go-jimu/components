@@ -1,5 +1,5 @@
 ---
-last_updated: 2026-05-10
+last_updated: 2026-06-01
 updated_by: superpowers-memory:update
 triggered_by_plan: 2026-05-10-integration-message.md
 ---
@@ -14,8 +14,8 @@ triggered_by_plan: 2026-05-10-integration-message.md
 
 **Enables** — Consumers combine sources, load values, resolve references, and observe updates.
 **Actors / Entry Points** — Library consumers call `config.New`, `Load`, `Value`, `Watch`, and `Close`.
-**Capability Boundary** — Package-level configuration component; not an application configuration service.
-**References** — `config/`
+**Capability Boundary** — Package-level configuration component; `config/loader` treats `defaults.*` as the fallback file and loads profile files only by explicit `<prefix>_<profile>` names.
+**References** — `config/`, `config/loader/`
 
 ### Encoding
 

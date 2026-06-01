@@ -18,6 +18,11 @@ triggered_by_plan: 2026-05-10-integration-message.md
 - CI expects race-enabled test runs through `make test`.
 - Benchmark coverage is part of the GitHub Actions workflow through `make benchmark`.
 
+## Configuration Loading
+
+- `config/loader` defaults to `configs/defaults.*` as the fallback configuration source.
+- Profile-specific configuration requires an explicit file prefix and profile alias; `WithConfigFilePrefix("foobar")` plus `dev` loads `foobar_dev.*`, not every file ending in `_dev`.
+
 ## Event Design
 
 - `mediator` remains the compatibility package for existing users.
