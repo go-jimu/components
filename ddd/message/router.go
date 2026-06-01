@@ -15,10 +15,12 @@ type Publisher interface {
 // this handler. A provider may ack, commit, or otherwise mark delivery complete
 // after all matching handlers return nil.
 //
-// A non-nil error means the message was not successfully handled. Providers may
-// apply their own retry, redelivery, dead-letter, stop, or failure-recording
-// policy. Business failures that should not cause redelivery should be handled
-// inside the handler and then return nil.
+// A non-nil error is a message-level failure: this specific message was not
+// successfully handled. Providers may apply their own retry, redelivery,
+// dead-letter, drop, or failure-recording policy. A Handler error is not, by
+// itself, a Runner runtime-loop failure. Business outcomes that should not use
+// provider failure handling should be handled inside the handler and then
+// return nil.
 type Handler interface {
 	Listening() []Kind
 	Handle(context.Context, Message) error
@@ -37,6 +39,15 @@ type Subscriber interface {
 
 // Runner is an optional runtime loop capability for providers that actively
 // consume messages.
+//
+// Run blocks until the provider runtime loop terminates. If ctx is canceled or
+// expires, Run returns ctx.Err(). A non-context error returned by Run means the
+// provider runtime cannot continue safely, for example because polling,
+// acknowledgement, commit, or provider-owned failure handling failed.
+//
+// Run errors are runtime-level failures. Handler.Handle errors are message-level
+// failures and should be handled by the provider's documented message failure
+// policy rather than being treated as Run failures by default.
 type Runner interface {
 	Run(context.Context) error
 }

@@ -1,5 +1,5 @@
 ---
-last_updated: 2026-05-10
+last_updated: 2026-06-01
 updated_by: superpowers-memory:update
 triggered_by_plan: 2026-05-10-integration-message.md
 ---
@@ -27,7 +27,8 @@ triggered_by_plan: 2026-05-10-integration-message.md
 - `ddd/message/outbox` is the reliability subpackage for integration-message outbox contracts and relay runtime; keep it separate from `ddd/message` core DTO/routing APIs and from `ddd/event`.
 - Broker-specific envelope, acknowledgement, DLQ, concrete store, and concrete broker adapter behavior should live outside both `ddd/message` and `ddd/message/outbox`.
 - `message.Kind` is a semantic message contract identifier, not a broker topic/subject/routing-key.
-- `message.Handler.Handle` returning `nil` means provider code may ack/commit; returning an error leaves retry, DLQ, redelivery, or stop policy to the provider/application.
+- `message.Handler.Handle` errors are message-level failures; provider packages must document retry, DLQ, drop, or failure-recording policy separately from `message.Runner.Run` runtime-loop termination.
+- `message.Runner.Run` returns `ctx.Err()` for context shutdown; non-context errors mean the provider runtime cannot continue safely.
 
 ## Git And CI
 
