@@ -1,5 +1,5 @@
 ---
-last_updated: 2026-05-10
+last_updated: 2026-06-01
 updated_by: superpowers-memory:update
 triggered_by_plan: 2026-05-10-integration-message.md
 ---
@@ -29,6 +29,8 @@ triggered_by_plan: 2026-05-10-integration-message.md
 **Publisher** — Capability interface that directly hands off an integration message to a messaging runtime. → `ddd/message/`
 
 **Subscriber** — Capability interface that registers integration message handlers. → `ddd/message/`
+
+**Runner** — Capability interface for provider runtime loops; `Run` reports loop termination, not ordinary handler failure. → `ddd/message/`
 
 **Router** — In-process integration message handler router keyed by message kind. → `ddd/message/`
 
