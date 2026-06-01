@@ -1,6 +1,7 @@
 package loader
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,9 +15,10 @@ import (
 type (
 	loadOptions struct {
 		ConfigurationDirectory            string // eg.configs
-		DefaultConfigFileWithoutExtension string // eg. default
+		DefaultConfigFileWithoutExtension string // eg. defaults
+		ConfigFilePrefix                  string // eg. foobar
 		EnvVarsPrefix                     string // eg. APP_
-		ProfilesAlias                     string // eg, test,beta,prod
+		ProfilesAlias                     string // eg. test
 	}
 
 	Option func(*loadOptions)
@@ -24,7 +26,7 @@ type (
 
 var defaultLoadOption = loadOptions{
 	ConfigurationDirectory:            "./configs",
-	DefaultConfigFileWithoutExtension: "default",
+	DefaultConfigFileWithoutExtension: "defaults",
 	EnvVarsPrefix:                     "",
 	ProfilesAlias:                     "",
 }
@@ -62,12 +64,17 @@ func searchConfigInDir(opts *loadOptions) ([]config.Source, error) {
 	var defaultSource config.Source
 	var extends []config.Source
 
+	if opts.ProfilesAlias != "" && opts.ConfigFilePrefix == "" {
+		return nil, fmt.Errorf("config file prefix is required when profiles alias is set")
+	}
+
 	path, err := filepath.Abs(opts.ConfigurationDirectory)
 	if err != nil {
 		return nil, err
 	}
 
-	_ = filepath.WalkDir(path, func(path string, d fs.DirEntry, err error) error {
+	profileConfigFile := opts.ConfigFilePrefix + opts.ProfilesAlias
+	if err = filepath.WalkDir(path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -80,11 +87,13 @@ func searchConfigInDir(opts *loadOptions) ([]config.Source, error) {
 			return nil
 		}
 
-		if opts.ProfilesAlias != "" && strings.HasSuffix(nonExt, opts.ProfilesAlias) {
+		if opts.ProfilesAlias != "" && nonExt == profileConfigFile {
 			extends = append(extends, file.NewSource(path))
 		}
 		return nil
-	})
+	}); err != nil {
+		return nil, err
+	}
 	if defaultSource != nil {
 		o := []config.Source{defaultSource}
 		return append(o, extends...), nil
@@ -96,6 +105,12 @@ func WithConfigurationDirectory(dir string, defaults string) Option {
 	return func(opt *loadOptions) {
 		opt.ConfigurationDirectory = dir
 		opt.DefaultConfigFileWithoutExtension = defaults
+	}
+}
+
+func WithConfigFilePrefix(prefix string) Option {
+	return func(opt *loadOptions) {
+		opt.ConfigFilePrefix = strings.TrimSpace(prefix)
 	}
 }
 
