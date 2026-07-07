@@ -30,3 +30,12 @@ message. `message.Runner.Run` errors are runtime-level failures for a provider
 loop; context shutdown returns `ctx.Err()`. Provider packages must document how
 message-level failures are retried, routed to DLQ, dropped, or otherwise
 recorded without treating every handler error as a runtime failure.
+
+## Finite state machines
+
+Use `github.com/go-jimu/components/fsm` for lightweight polymorphic state
+objects. Consumers put behavior on concrete states, such as
+`UnpaidOrderState.Pay` and `PaidOrderState.Pay`; the package owns transition
+definitions and target state construction after a behavior succeeds, while the
+business object executes its own transition through `fsm.Transit`.
+See [`fsm/README.md`](fsm/README.md) for the expected setup and runtime pattern.

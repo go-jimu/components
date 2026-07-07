@@ -2,6 +2,7 @@ package fsm
 
 import (
 	"errors"
+	"sort"
 	"sync"
 
 	"github.com/samber/oops"
@@ -11,13 +12,8 @@ import (
 type simpleStateMachine struct {
 	mu          sync.RWMutex
 	name        string
-	transitions map[StateLabel]map[Action][]transition
+	transitions map[StateLabel]map[Action][]Transition
 	builders    map[StateLabel]StateBuilder
-}
-
-type transition struct {
-	to        StateLabel
-	condition Condition
 }
 
 func NewStateMachine(name string) StateMachine {
@@ -26,7 +22,7 @@ func NewStateMachine(name string) StateMachine {
 	}
 	return &simpleStateMachine{
 		name:        name,
-		transitions: make(map[StateLabel]map[Action][]transition),
+		transitions: make(map[StateLabel]map[Action][]Transition),
 		builders:    make(map[StateLabel]StateBuilder),
 	}
 }
@@ -44,15 +40,15 @@ func (sm *simpleStateMachine) AddTransition(from, to StateLabel, action Action, 
 	defer sm.mu.Unlock()
 
 	if _, ok := sm.transitions[from]; !ok {
-		sm.transitions[from] = make(map[Action][]transition)
-		sm.transitions[from][action] = []transition{{to: to, condition: condition}}
+		sm.transitions[from] = make(map[Action][]Transition)
+		sm.transitions[from][action] = []Transition{{To: to, Condition: condition}}
 		return
 	}
 	if _, ok := sm.transitions[from][action]; !ok {
-		sm.transitions[from][action] = []transition{{to: to, condition: condition}}
+		sm.transitions[from][action] = []Transition{{To: to, Condition: condition}}
 		return
 	}
-	sm.transitions[from][action] = append(sm.transitions[from][action], transition{to: to, condition: condition})
+	sm.transitions[from][action] = append(sm.transitions[from][action], Transition{To: to, Condition: condition})
 }
 
 func (sm *simpleStateMachine) HasTransition(from StateLabel, action Action) bool {
@@ -67,32 +63,47 @@ func (sm *simpleStateMachine) HasTransition(from StateLabel, action Action) bool
 	return false
 }
 
-func (sm *simpleStateMachine) TransitionToNext(sc StateContext, action Action) error {
-	if !sm.HasTransition(sc.CurrentState().Label(), action) {
-		return NewTransitionError(sc.CurrentState().Label(), action)
-	}
-
-	var next StateLabel
+func (sm *simpleStateMachine) Transitions(from StateLabel, action Action) []Transition {
 	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 
-	trans := sm.transitions[sc.CurrentState().Label()][action]
-	for _, tran := range trans {
-		if tran.condition == nil {
-			next = tran.to
-			break
-		}
-		if tran.condition(sc) {
-			next = tran.to
-			break
-		}
+	nexts, ok := sm.transitions[from]
+	if !ok {
+		return nil
 	}
-	if next != "" {
-		builder := sm.builders[next]
-		sm.mu.RUnlock()
-		return sc.TransitionTo(builder(), action)
+
+	trans := nexts[action]
+	if len(trans) == 0 {
+		return nil
 	}
-	sm.mu.RUnlock()
-	return nil
+
+	copied := make([]Transition, len(trans))
+	copy(copied, trans)
+	return copied
+}
+
+func (sm *simpleStateMachine) BuildState(label StateLabel) (State, error) {
+	builder, ok := sm.stateBuilder(label)
+	if !ok {
+		return nil, NewStateBuilderError(label)
+	}
+
+	state := builder()
+	if state == nil {
+		return nil, NewStateBuilderError(label)
+	}
+	return state, nil
+}
+
+func (sm *simpleStateMachine) stateBuilder(label StateLabel) (StateBuilder, bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	builder, ok := sm.builders[label]
+	if !ok || builder == nil {
+		return nil, false
+	}
+	return builder, true
 }
 
 func (sm *simpleStateMachine) RegisterStateBuilder(label StateLabel, builder StateBuilder) {
@@ -117,7 +128,7 @@ func (sm *simpleStateMachine) Check() error {
 		missedStateBuilder[from] = struct{}{}
 		for _, next := range nexts {
 			for _, tran := range next {
-				missedStateBuilder[tran.to] = struct{}{}
+				missedStateBuilder[tran.To] = struct{}{}
 			}
 		}
 	}
@@ -138,12 +149,20 @@ func (sm *simpleStateMachine) Check() error {
 			for builder := range missedStateBuilder {
 				builders = append(builders, builder)
 			}
+			sortStateLabels(builders)
 			errWrap = errWrap.With("missed_state_builders", builders)
 		}
 		if len(missedTransition) > 0 {
+			sortStateLabels(missedTransition)
 			errWrap = errWrap.With("missed_transitions", missedTransition)
 		}
 		return errWrap.Wrap(errors.New("state machine check failed"))
 	}
 	return nil
+}
+
+func sortStateLabels(labels []StateLabel) {
+	sort.Slice(labels, func(i, j int) bool {
+		return labels[i] < labels[j]
+	})
 }
