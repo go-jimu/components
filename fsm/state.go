@@ -12,6 +12,10 @@ type (
 		Action  Action
 		Current StateLabel
 	}
+
+	StateBuilderError struct {
+		State StateLabel
+	}
 )
 
 var _ State = (*SimpleState)(nil)
@@ -43,4 +47,14 @@ func NewTransitionError(current StateLabel, action Action) *TransitionError {
 
 func (te *TransitionError) Error() string {
 	return fmt.Sprintf("transition from %s with action %s not found", te.Current, te.Action)
+}
+
+func NewStateBuilderError(state StateLabel) *StateBuilderError {
+	return &StateBuilderError{
+		State: state,
+	}
+}
+
+func (sbe *StateBuilderError) Error() string {
+	return fmt.Sprintf("state builder for %s not found", sbe.State)
 }
