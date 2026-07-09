@@ -25,7 +25,7 @@ compatible and adds DDD concept packages under `ddd/`.
 
 - `config/` — configuration loading, resolving, merging, watching, and typed value access. Key abstraction: `Config`.
 - `encoding/` — codec registry plus JSON/YAML/TOML/Protobuf codec packages. Key abstraction: `Codec`.
-- `fsm/` — finite state machine primitives and transition checks. Key abstractions: `State`, `StateContext`, `StateMachine`.
+- `fsm/` — finite state machine primitives and transition checks. Key abstractions: `State`, `StateContext`, `StateMachine`, `RuntimeStateMachine`.
 - `logger/` and `sloghelper/` — logger adapters and helpers for `log/slog`.
 - `mediator/` — existing in-process event mediator with global default, event collection, subscription, dispatch, and graceful shutdown.
 - `ddd/event/` — DDD-oriented domain event collection, batch dispatch, and handler subscription. Key abstractions: `Event`, `Collection`, `Dispatcher`, `Subscriber`, `InMemoryDispatcher`, `Handler`.

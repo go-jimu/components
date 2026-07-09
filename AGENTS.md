@@ -3,6 +3,26 @@
 This repository is a Go component library. Keep package changes small,
 backward-compatible when practical, and verified with `go test ./...`.
 
+## Package Orientation
+
+Start with `README.md` for the package map. Before generating consumer code for
+a package, read its `doc.go` and any `example_test.go` in that package; the
+examples are executable and should be treated as the preferred usage shape.
+
+- Use `config` for explicit source composition and `config/loader` for the
+  defaults-plus-profile application loading flow. Read `config/README.md`.
+- Use `encoding` as a codec registry. Blank import concrete codecs such as
+  `encoding/json`, `encoding/yaml`, `encoding/toml`, or `encoding/proto`.
+- Use `ddd/event` for same bounded-context domain events.
+- Use `ddd/message` for protobuf integration messages and in-process routing.
+- Use `ddd/message/outbox` for transaction-time message recording and
+  at-least-once relay publishing.
+- Use `taskqueue` for provider-neutral background task contracts.
+- Use `validation` for lightweight specification and notification helpers.
+- Use `sloghelper` with the standard library `log/slog` for new logging code.
+- Treat `logger` and `mediator` as legacy compatibility packages. Prefer
+  `sloghelper` and `ddd/event` for new code.
+
 ## FSM Usage
 
 When working with `github.com/go-jimu/components/fsm`, follow this contract:

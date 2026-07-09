@@ -1,11 +1,8 @@
 package fsm
 
 import (
-	"errors"
 	"sort"
 	"sync"
-
-	"github.com/samber/oops"
 )
 
 // simpleStateMachine is the default implementation of StateMachine.
@@ -14,6 +11,7 @@ type simpleStateMachine struct {
 	name        string
 	transitions map[StateLabel]map[Action][]Transition
 	builders    map[StateLabel]StateBuilder
+	frozen      bool
 }
 
 func NewStateMachine(name string) StateMachine {
@@ -31,24 +29,29 @@ func (sm *simpleStateMachine) Name() string {
 	return sm.name
 }
 
-func (sm *simpleStateMachine) AddTransition(from, to StateLabel, action Action, condition Condition) {
-	if from == "" || to == "" || action == "" {
-		return
+func (sm *simpleStateMachine) AddTransition(from, to StateLabel, action Action, condition Condition) error {
+	if from == "" {
+		return newStateMachineDefinitionError("transition from state is required")
+	}
+	if to == "" {
+		return newStateMachineDefinitionError("transition to state is required")
+	}
+	if action == "" {
+		return newStateMachineDefinitionError("transition action is required")
 	}
 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	if sm.frozen {
+		return newStateMachineDefinitionError("state machine is frozen")
+	}
+
 	if _, ok := sm.transitions[from]; !ok {
 		sm.transitions[from] = make(map[Action][]Transition)
-		sm.transitions[from][action] = []Transition{{To: to, Condition: condition}}
-		return
-	}
-	if _, ok := sm.transitions[from][action]; !ok {
-		sm.transitions[from][action] = []Transition{{To: to, Condition: condition}}
-		return
 	}
 	sm.transitions[from][action] = append(sm.transitions[from][action], Transition{To: to, Condition: condition})
+	return nil
 }
 
 func (sm *simpleStateMachine) HasTransition(from StateLabel, action Action) bool {
@@ -92,6 +95,9 @@ func (sm *simpleStateMachine) BuildState(label StateLabel) (State, error) {
 	if state == nil {
 		return nil, NewStateBuilderError(label)
 	}
+	if state.Label() != label {
+		return nil, NewStateBuilderMismatchError(label, state.Label())
+	}
 	return state, nil
 }
 
@@ -106,59 +112,114 @@ func (sm *simpleStateMachine) stateBuilder(label StateLabel) (StateBuilder, bool
 	return builder, true
 }
 
-func (sm *simpleStateMachine) RegisterStateBuilder(label StateLabel, builder StateBuilder) {
-	if label == "" || builder == nil {
-		return
+func (sm *simpleStateMachine) RegisterStateBuilder(label StateLabel, builder StateBuilder) error {
+	if label == "" {
+		return newStateMachineDefinitionError("state builder label is required")
+	}
+	if builder == nil {
+		return newStateMachineDefinitionError("state builder is required")
 	}
 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	if sm.frozen {
+		return newStateMachineDefinitionError("state machine is frozen")
+	}
+
 	sm.builders[label] = builder
+	return nil
 }
 
 func (sm *simpleStateMachine) Check() error {
+	transitions, builders := sm.snapshot()
+
+	missingStateBuilderSet := make(map[StateLabel]struct{})
+	for from, nexts := range transitions {
+		missingStateBuilderSet[from] = struct{}{}
+		for _, next := range nexts {
+			for _, tran := range next {
+				missingStateBuilderSet[tran.To] = struct{}{}
+			}
+		}
+	}
+
+	unreferencedStateBuilders := make([]StateLabel, 0)
+	for label := range builders {
+		_, exists := missingStateBuilderSet[label]
+		if exists {
+			delete(missingStateBuilderSet, label)
+			continue
+		}
+		unreferencedStateBuilders = append(unreferencedStateBuilders, label)
+	}
+
+	missingStateBuilders := make([]StateLabel, 0, len(missingStateBuilderSet))
+	for label := range missingStateBuilderSet {
+		missingStateBuilders = append(missingStateBuilders, label)
+	}
+	sortStateLabels(missingStateBuilders)
+	sortStateLabels(unreferencedStateBuilders)
+
+	invalidStateBuilders := make([]StateBuilderError, 0)
+	for label, builder := range builders {
+		state := builder()
+		if state == nil {
+			invalidStateBuilders = append(invalidStateBuilders, *NewStateBuilderError(label))
+			continue
+		}
+		if state.Label() != label {
+			invalidStateBuilders = append(invalidStateBuilders, *NewStateBuilderMismatchError(label, state.Label()))
+		}
+	}
+	sortStateBuilderErrors(invalidStateBuilders)
+
+	if len(missingStateBuilders) > 0 || len(unreferencedStateBuilders) > 0 || len(invalidStateBuilders) > 0 {
+		return &StateMachineCheckError{
+			MissingStateBuilders:      missingStateBuilders,
+			UnreferencedStateBuilders: unreferencedStateBuilders,
+			InvalidStateBuilders:      invalidStateBuilders,
+		}
+	}
+	return nil
+}
+
+func (sm *simpleStateMachine) snapshot() (map[StateLabel]map[Action][]Transition, map[StateLabel]StateBuilder) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	missedTransition := make([]StateLabel, 0)
-	missedStateBuilder := make(map[StateLabel]struct{})
-
+	transitions := make(map[StateLabel]map[Action][]Transition, len(sm.transitions))
 	for from, nexts := range sm.transitions {
-		missedStateBuilder[from] = struct{}{}
-		for _, next := range nexts {
-			for _, tran := range next {
-				missedStateBuilder[tran.To] = struct{}{}
-			}
+		transitions[from] = make(map[Action][]Transition, len(nexts))
+		for action, edges := range nexts {
+			copied := make([]Transition, len(edges))
+			copy(copied, edges)
+			transitions[from][action] = copied
 		}
 	}
 
-	for label := range sm.builders {
-		_, exists := missedStateBuilder[label]
-		if exists {
-			delete(missedStateBuilder, label)
-			continue
-		}
-		missedTransition = append(missedTransition, label)
+	builders := make(map[StateLabel]StateBuilder, len(sm.builders))
+	for label, builder := range sm.builders {
+		builders[label] = builder
+	}
+	return transitions, builders
+}
+
+func (sm *simpleStateMachine) Freeze() (RuntimeStateMachine, error) {
+	if err := sm.Check(); err != nil {
+		return nil, err
 	}
 
-	if len(missedStateBuilder) > 0 || len(missedTransition) > 0 {
-		var errWrap oops.OopsErrorBuilder
-		if len(missedStateBuilder) > 0 {
-			builders := make([]StateLabel, 0, len(missedStateBuilder))
-			for builder := range missedStateBuilder {
-				builders = append(builders, builder)
-			}
-			sortStateLabels(builders)
-			errWrap = errWrap.With("missed_state_builders", builders)
-		}
-		if len(missedTransition) > 0 {
-			sortStateLabels(missedTransition)
-			errWrap = errWrap.With("missed_transitions", missedTransition)
-		}
-		return errWrap.Wrap(errors.New("state machine check failed"))
-	}
-	return nil
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.frozen = true
+	return sm, nil
+}
+
+func sortStateBuilderErrors(errors []StateBuilderError) {
+	sort.Slice(errors, func(i, j int) bool {
+		return errors[i].State < errors[j].State
+	})
 }
 
 func sortStateLabels(labels []StateLabel) {

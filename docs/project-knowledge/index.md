@@ -11,7 +11,7 @@ covers_branch: hotfix/config-loader-profile-prefix@795d7dc
   Key points: component library with independent Go packages; `ddd/message` covers integration DTOs, routing, and payload resolution while outbox lives separately.
 
 - [tech-stack.md](tech-stack.md) — Languages, frameworks, and key dependencies.
-  Key points: Go 1.24.0 module; protobuf support comes from `google.golang.org/protobuf`.
+  Key points: Go 1.25.0 module; protobuf support comes from `google.golang.org/protobuf`.
 
 - [features.md](features.md) — Implemented package capabilities and boundaries.
   Key points: `config/loader` uses `defaults.*` fallback plus explicit `<prefix>_<profile>` profile files; `ddd/message` includes protobuf message construction, handler routing, and payload resolution.

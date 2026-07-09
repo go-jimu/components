@@ -20,10 +20,11 @@ The FSM package owns:
 
 - transition definitions: `from + action -> to`
 - transition guards as edge metadata through `Condition`
-- exposing candidate transition edges through `StateMachine.Transitions`
+- exposing candidate transition edges through `RuntimeStateMachine.Transitions`
 - constructing the target state through a registered `StateBuilder`
 - the standard transition flow through `Transit`
 - checking that transitions and builders are wired consistently
+- freezing configured machines into a read-only runtime surface
 
 The consumer owns:
 
@@ -145,46 +146,75 @@ label:
 
 ```go
 sm := fsm.NewStateMachine("order")
-sm.RegisterStateBuilder(StateUnpaid, func() fsm.State {
+if err := sm.RegisterStateBuilder(StateUnpaid, func() fsm.State {
 	return &UnpaidOrderState{
 		BaseOrderState: BaseOrderState{
 			SimpleState: fsm.NewSimpleState(StateUnpaid),
 		},
 	}
-})
-sm.RegisterStateBuilder(StatePaid, func() fsm.State {
+}); err != nil {
+	return err
+}
+if err := sm.RegisterStateBuilder(StatePaid, func() fsm.State {
 	return &PaidOrderState{
 		BaseOrderState: BaseOrderState{
 			SimpleState: fsm.NewSimpleState(StatePaid),
 		},
 	}
-})
-sm.RegisterStateBuilder(StatePartialRefunded, NewPartialRefundedOrderState)
-sm.RegisterStateBuilder(StateCanceled, NewCanceledOrderState)
-sm.AddTransition(StateUnpaid, StatePaid, ActionPay, nil)
-sm.AddTransition(StatePaid, StatePartialRefunded, ActionRefund, func(sc fsm.StateContext) bool {
+}); err != nil {
+	return err
+}
+if err := sm.RegisterStateBuilder(StatePartialRefunded, NewPartialRefundedOrderState); err != nil {
+	return err
+}
+if err := sm.RegisterStateBuilder(StateCanceled, NewCanceledOrderState); err != nil {
+	return err
+}
+if err := sm.AddTransition(StateUnpaid, StatePaid, ActionPay, nil); err != nil {
+	return err
+}
+if err := sm.AddTransition(StatePaid, StatePartialRefunded, ActionRefund, func(sc fsm.StateContext) bool {
 	return sc.(*Order).HasRemainingRefundAmount()
-})
-sm.AddTransition(StatePaid, StateCanceled, ActionRefund, func(sc fsm.StateContext) bool {
+}); err != nil {
+	return err
+}
+if err := sm.AddTransition(StatePaid, StateCanceled, ActionRefund, func(sc fsm.StateContext) bool {
 	return sc.(*Order).IsFullyRefunded()
-})
-sm.AddTransition(StatePaid, StateCanceled, ActionCancel, nil)
-sm.AddTransition(StatePartialRefunded, StatePartialRefunded, ActionRefund, func(sc fsm.StateContext) bool {
+}); err != nil {
+	return err
+}
+if err := sm.AddTransition(StatePaid, StateCanceled, ActionCancel, nil); err != nil {
+	return err
+}
+if err := sm.AddTransition(StatePartialRefunded, StatePartialRefunded, ActionRefund, func(sc fsm.StateContext) bool {
 	return sc.(*Order).HasRemainingRefundAmount()
-})
-sm.AddTransition(StatePartialRefunded, StateCanceled, ActionRefund, func(sc fsm.StateContext) bool {
+}); err != nil {
+	return err
+}
+if err := sm.AddTransition(StatePartialRefunded, StateCanceled, ActionRefund, func(sc fsm.StateContext) bool {
 	return sc.(*Order).IsFullyRefunded()
-})
-sm.AddTransition(StatePartialRefunded, StateCanceled, ActionCancel, nil)
+}); err != nil {
+	return err
+}
+if err := sm.AddTransition(StatePartialRefunded, StateCanceled, ActionCancel, nil); err != nil {
+	return err
+}
 
 if err := sm.Check(); err != nil {
 	return err
 }
-fsm.RegisterStateMachine(sm)
+if err := fsm.RegisterStateMachine(sm); err != nil {
+	return err
+}
 ```
 
-Call `Check` during startup or in tests. It catches missing state builders and
-registered builders that are not referenced by any transition.
+Call `Check` during startup or in tests. It catches missing state builders,
+registered builders that are not referenced by any transition, and builders that
+return nil or a state with the wrong label. `RegisterStateMachine` also calls
+`Check` and freezes build-time machines before storing them, so machines returned
+by `GetStateMachine` and `MustGetStateMachine` expose the read-only
+`RuntimeStateMachine` surface. If you do not use the registry, call `Freeze`
+after setup and pass the returned `RuntimeStateMachine` to runtime code.
 
 ## Runtime Pattern
 
@@ -275,7 +305,7 @@ The concrete state method decides whether the behavior is allowed. For an
 already-paid order, `PaidOrderState.Pay()` should return the business error.
 After the state behavior succeeds, the private `transition` helper asks
 `fsm.Transit` to perform the standard state-change flow. `Transit` reads
-candidate edges from `StateMachine.Transitions`, evaluates each edge's
+candidate edges from `RuntimeStateMachine.Transitions`, evaluates each edge's
 `Condition`, builds the matched state with `BuildState`, calls
 `next.SetContext(order)`, and delegates assignment to `order.SetState`.
 
@@ -317,8 +347,8 @@ The call chain is explicit: `order.Refund(amount)` first delegates to
 `CurrentState().(OrderState).Refund(amount)`. If that method succeeds, it calls
 the private `order.transition(ActionRefund)` helper. That helper calls
 `fsm.Transit(order, sm, ActionRefund)`. `Transit` reads candidates from
-`StateMachine.Transitions`, evaluates each registered `Condition` with the order
-as `StateContext`, builds the matched state with `BuildState`, sets the next
+`RuntimeStateMachine.Transitions`, evaluates each registered `Condition` with the
+order as `StateContext`, builds the matched state with `BuildState`, sets the next
 state's context, and calls `order.SetState`.
 
 Important details:

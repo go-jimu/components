@@ -23,6 +23,8 @@
 //   - register every state builder used by transitions
 //   - add transitions with AddTransition
 //   - call Check during application startup or tests
+//   - call Freeze, or register the machine with RegisterStateMachine, before
+//     using it at runtime
 //
 // The usual runtime flow is:
 //
@@ -30,9 +32,9 @@
 //   - each business method type-asserts CurrentState to the business state
 //     interface and executes behavior with natural parameters and return values
 //   - if behavior succeeds, call Transit with the business object, a
-//     StateMachine, and action, usually through a private helper on the business
-//     object
-//   - Transit gets candidate edges from the StateMachine, evaluates their
+//     RuntimeStateMachine, and action, usually through a private helper on the
+//     business object
+//   - Transit gets candidate edges from the RuntimeStateMachine, evaluates their
 //     conditions, builds the matching state, sets its context, and delegates
 //     state replacement to StateContext.SetState
 //
@@ -53,7 +55,8 @@
 // unconditional. If transitions exist for the current state and action but no
 // condition matches, Transit leaves the current state unchanged.
 //
-// StateMachine protects its transition and builder tables with a mutex, but it
-// does not synchronize the consumer's StateContext. The consumer is responsible
-// for any concurrency control around its business object.
+// StateMachine protects its transition and builder tables with a mutex and can
+// be frozen into the read-only RuntimeStateMachine surface, but it does not
+// synchronize the consumer's StateContext. The consumer is responsible for any
+// concurrency control around its business object.
 package fsm
