@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/go-jimu/components/fsm"
-	"github.com/samber/oops"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,22 +16,28 @@ func registerExampleOrderStateMachine(t *testing.T) {
 }
 
 func TestStateMachineCheckReportsOrderWiringErrors(t *testing.T) {
+	exampleStateArchived := fsm.StateLabel("order.archived")
+	exampleStateReturned := fsm.StateLabel("order.returned")
 	sm := fsm.NewStateMachine("order_check")
 	sm.RegisterStateBuilder(exampleStateUnpaid, newExampleUnpaidOrderState)
 	sm.RegisterStateBuilder(exampleStateCanceled, newExampleCanceledOrderState)
+	sm.RegisterStateBuilder(exampleStateArchived, func() fsm.State {
+		return fsm.NewSimpleState(exampleStateArchived)
+	})
 	sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil)
+	sm.AddTransition(exampleStateUnpaid, exampleStateReturned, exampleActionCancel, nil)
 
-	err := sm.Check()
+	var err error
+	require.NotPanics(t, func() {
+		err = sm.Check()
+	})
 
 	require.Error(t, err)
-	oopsErr := err.(oops.OopsError)
-	require.EqualValues(t,
-		map[string]any{
-			"missed_state_builders": []fsm.StateLabel{exampleStatePaid},
-			"missed_transitions":    []fsm.StateLabel{exampleStateCanceled},
-		},
-		oopsErr.Context(),
-	)
+	require.EqualError(t, err, "state machine check failed")
+	var checkErr *fsm.StateMachineCheckError
+	require.ErrorAs(t, err, &checkErr)
+	require.Equal(t, []fsm.StateLabel{exampleStatePaid, exampleStateReturned}, checkErr.MissingStateBuilders)
+	require.Equal(t, []fsm.StateLabel{exampleStateArchived, exampleStateCanceled}, checkErr.UnreferencedStateBuilders)
 }
 
 func TestOrderPayDelegatesToUnpaidStateThenTransitionsToPaid(t *testing.T) {

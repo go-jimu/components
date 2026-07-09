@@ -31,7 +31,7 @@ triggered_by_plan: 2026-05-10-integration-message.md
 #### FSM primitives
 
 **Enables** — Consumers define states, actions, conditions, and transitions.
-**Actors / Entry Points** — Consumers use `fsm.StateMachine` and related primitives.
+**Actors / Entry Points** — Consumers configure `fsm.StateMachine` and run transitions through `fsm.RuntimeStateMachine`.
 **Capability Boundary** — Generic state-machine utility; no business aggregate model is included.
 **References** — `fsm/`
 
