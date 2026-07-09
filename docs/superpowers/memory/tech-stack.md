@@ -10,7 +10,7 @@ triggered_by_plan: null
 
 | Technology | Role | Version | Notes |
 |-----------|------|---------|-------|
-| Go | Component library implementation language | 1.24.0 in `go.mod`; workspace declares Go 1.25 with toolchain go1.24 | Public module `github.com/go-jimu/components`; source refs: `go.mod`, `go.work`. |
+| Go | Component library implementation language | 1.25.0 in `go.mod` and `go.work` | Public module `github.com/go-jimu/components`; source refs: `go.mod`, `go.work`. |
 
 ## Runtime
 
