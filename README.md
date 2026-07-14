@@ -50,6 +50,13 @@ loop; context shutdown returns `ctx.Err()`. Provider packages must document how
 message-level failures are retried, routed to DLQ, dropped, or otherwise
 recorded without treating every handler error as a runtime failure.
 
+## Task queues
+
+Use `github.com/go-jimu/components/taskqueue` for provider-neutral task queue
+contracts, including task envelopes, processors, routing, enqueue policy, and
+recurring enqueue definitions. Read [`taskqueue/README.md`](taskqueue/README.md)
+before generating taskqueue consumer code or provider adapters.
+
 ## Finite state machines
 
 Use `github.com/go-jimu/components/fsm` for lightweight polymorphic state

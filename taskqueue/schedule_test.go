@@ -290,3 +290,22 @@ func TestNewPeriodicTaskRejectsAbsoluteEnqueuePolicy(t *testing.T) {
 		})
 	}
 }
+
+// Intent: Periodic task definitions should reject enqueue policies that are
+// invalid even before considering periodic reuse.
+func TestNewPeriodicTaskRejectsInvalidEnqueuePolicy(t *testing.T) {
+	task, err := New(Definition{Type: "billing.generate_invoices.v1"}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	schedule, err := IntervalSchedule(time.Minute)
+	if err != nil {
+		t.Fatalf("IntervalSchedule: %v", err)
+	}
+
+	_, err = NewPeriodicTask("billing.daily_invoices", schedule, task, WithDelay(-time.Second))
+
+	if !errors.Is(err, ErrInvalidEnqueueOption) {
+		t.Fatalf("error = %v, want ErrInvalidEnqueueOption", err)
+	}
+}
