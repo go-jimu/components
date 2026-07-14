@@ -9,8 +9,8 @@ triggered_by_plan: null
 ## Language And Module
 
 - Go module: `github.com/go-jimu/components`
-- Declared Go version: `1.24.0`
-- CI test matrix: Go `1.23.x`, `1.24.x`, and `1.25.x`
+- Declared Go version: `1.25.0`
+- CI test matrix: Go `1.24.x` and `1.25.x`
 
 ## Key Dependencies
 

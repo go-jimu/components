@@ -17,22 +17,35 @@ type (
 	// StateBuilder define the state builder interface.
 	StateBuilder func() State
 
-	// StateContext define the state context interface.
-	StateContext interface {
-		CurrentState() State                      // get the current state
-		TransitionTo(next State, by Action) error // transition to the next state
+	// Transition defines a transition edge.
+	Transition struct {
+		To        StateLabel
+		Condition Condition
 	}
 
-	// Condition define the condition function type.
+	// StateContext define the state context interface.
+	StateContext interface {
+		CurrentState() State       // get the current state
+		SetState(next State) error // replace the current state
+	}
+
+	// Condition guards whether a specific transition edge is allowed.
 	Condition func(StateContext) bool
 
-	// StateMachine define the state machine interface.
+	// RuntimeStateMachine is the read-only state machine surface used at runtime.
+	RuntimeStateMachine interface {
+		Name() string                                // get the state machine name
+		HasTransition(StateLabel, Action) bool       // check if has transition from a state by action
+		Transitions(StateLabel, Action) []Transition // get transition edges from a state by action
+		BuildState(StateLabel) (State, error)        // build a state by label
+		Check() error                                // check the completeness of States and Transitions
+	}
+
+	// StateMachine is the build-time state machine surface.
 	StateMachine interface {
-		Name() string                                            // get the state machine name
-		AddTransition(StateLabel, StateLabel, Action, Condition) // add a transition
-		HasTransition(StateLabel, Action) bool                   // check if has transition from one state to another
-		TransitionToNext(StateContext, Action) error             // transition to the next state
-		Check() error                                            // Check the completeness of States and Transitions.
-		RegisterStateBuilder(StateLabel, StateBuilder)           // register a state
+		RuntimeStateMachine
+		AddTransition(StateLabel, StateLabel, Action, Condition) error // add a transition
+		RegisterStateBuilder(StateLabel, StateBuilder) error           // register a state
+		Freeze() (RuntimeStateMachine, error)                          // validate and make the machine read-only
 	}
 )
