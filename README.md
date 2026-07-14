@@ -24,3 +24,10 @@ resolution. It is not a broker topic, subject, queue, partition, or offset.
 Provider packages map `Kind`, `Message.ID`, `Message.Key`, `OccurredAt`, and
 headers into their own broker envelopes and own retry, DLQ, ack, and commit
 policy.
+
+## Task queues
+
+Use `github.com/go-jimu/components/taskqueue` for provider-neutral task queue
+contracts, including task envelopes, processors, routing, enqueue policy, and
+recurring enqueue definitions. Read [`taskqueue/README.md`](taskqueue/README.md)
+before generating taskqueue consumer code or provider adapters.

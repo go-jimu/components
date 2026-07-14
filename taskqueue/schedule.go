@@ -15,7 +15,7 @@ const (
 	ScheduleKindInterval ScheduleKind = "interval"
 )
 
-// Schedule describes when a background task should be enqueued.
+// Schedule describes when a recurring task enqueue should happen.
 type Schedule struct {
 	kind     ScheduleKind
 	spec     string
@@ -39,7 +39,11 @@ func WithLocation(location string) ScheduleOption {
 	}
 }
 
-// CronSchedule constructs a validated standard five-field cron schedule.
+// CronSchedule constructs a validated standard five-field cron schedule shape.
+//
+// Validation is intentionally limited to the portable five-field shape and
+// optional IANA location. Provider adapters remain responsible for cron dialect
+// details such as value ranges and named fields.
 func CronSchedule(spec string, opts ...ScheduleOption) (Schedule, error) {
 	cfg := newScheduleConfig(opts...)
 	schedule := Schedule{
@@ -145,7 +149,7 @@ func validateScheduleLocation(location string) error {
 	return nil
 }
 
-// PeriodicTask describes a static periodic producer for a concrete task.
+// PeriodicTask describes a recurring enqueue definition for a concrete task.
 //
 // Each schedule fire enqueues the same Task envelope with the same enqueue
 // policy. Dynamic payload generation belongs in application or provider-level
@@ -212,6 +216,9 @@ func (t PeriodicTask) Validate() error {
 }
 
 func validatePeriodicTaskPolicy(policy EnqueueOptions) error {
+	if err := policy.Validate(); err != nil {
+		return err
+	}
 	if !policy.ProcessAt().IsZero() {
 		return ErrInvalidPeriodicTaskPolicy
 	}
@@ -226,7 +233,9 @@ func validatePeriodicTaskPolicy(policy EnqueueOptions) error {
 // PeriodicTask.Name is the unique registration key for one registrar instance.
 // Implementations should return ErrDuplicatePeriodicTask when the same name is
 // registered twice in that instance. Cross-process or cross-replica duplicate
-// prevention is outside this provider-neutral contract.
+// prevention is outside this provider-neutral contract. Implementations should
+// document whether registration is only supported before Start or can be
+// reconciled while running.
 type PeriodicTaskRegistrar interface {
 	RegisterPeriodicTask(PeriodicTask) error
 }

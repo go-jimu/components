@@ -35,6 +35,29 @@ func NewEnqueueOptions(opts ...EnqueueOption) EnqueueOptions {
 	return cfg
 }
 
+// Validate checks whether the enqueue policy is internally consistent.
+//
+// Zero values mean the provider default. Delay and ProcessAt are alternative
+// ways to describe initial processing time and must not both be set.
+func (o EnqueueOptions) Validate() error {
+	if o.delay < 0 {
+		return ErrInvalidEnqueueOption
+	}
+	if !o.processAt.IsZero() && o.delay != 0 {
+		return ErrInvalidEnqueueOption
+	}
+	if o.maxRetrySet && o.maxRetry < 0 {
+		return ErrInvalidEnqueueOption
+	}
+	if o.timeout < 0 {
+		return ErrInvalidEnqueueOption
+	}
+	if o.uniqueTTL < 0 {
+		return ErrInvalidEnqueueOption
+	}
+	return nil
+}
+
 // WithDelay asks the provider to process the task after delay.
 func WithDelay(delay time.Duration) EnqueueOption {
 	return func(cfg *EnqueueOptions) {

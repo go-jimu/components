@@ -16,6 +16,7 @@ var (
 	ErrInvalidPayloadFactory     = errors.New("task payload factory returned invalid payload")
 	ErrNilPayloadResolver        = errors.New("task payload resolver is nil")
 	ErrPanic                     = errors.New("task processor panicked")
+	ErrInvalidEnqueueOption      = errors.New("task enqueue option is invalid")
 	ErrEmptySchedule             = errors.New("task schedule is empty")
 	ErrInvalidSchedule           = errors.New("task schedule is invalid")
 	ErrInvalidScheduleLocation   = errors.New("task schedule location is invalid")
