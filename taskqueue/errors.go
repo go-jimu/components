@@ -10,6 +10,8 @@ var (
 	ErrDuplicatePayloadType      = errors.New("task payload type is already registered")
 	ErrUnknownType               = errors.New("task type is unknown")
 	ErrUnknownPayloadType        = errors.New("task payload type is unknown")
+	ErrEmptyPayloadCodec         = errors.New("task payload codec is empty")
+	ErrUnknownPayloadCodec       = errors.New("task payload codec is unknown")
 	ErrNilPayload                = errors.New("task payload is nil")
 	ErrNilDecodeTarget           = errors.New("task decode target is nil")
 	ErrNilPayloadFactory         = errors.New("task payload factory is nil or returned nil")

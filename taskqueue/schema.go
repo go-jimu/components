@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// PayloadResolver allocates an empty JSON payload target for a task type.
+// PayloadResolver allocates an empty payload target for a task type.
 type PayloadResolver interface {
 	Resolve(TaskType) (any, error)
 }
@@ -49,7 +49,7 @@ func NewSchemaRegistry() *SchemaRegistry {
 	}
 }
 
-// Register associates a task definition with a factory for its JSON payload.
+// Register associates a task definition with a factory for its payload schema.
 func (r *SchemaRegistry) Register(def Definition, factory func() any) error {
 	if def.Type == "" {
 		return ErrEmptyType
@@ -85,7 +85,7 @@ func (r *SchemaRegistry) Register(def Definition, factory func() any) error {
 	return nil
 }
 
-// Resolve returns a fresh JSON payload target for taskType.
+// Resolve returns a fresh payload target for taskType.
 func (r *SchemaRegistry) Resolve(taskType TaskType) (any, error) {
 	r.mu.RLock()
 	entry, ok := r.byType[taskType]
@@ -117,25 +117,50 @@ func (r *SchemaRegistry) DefinitionOf(payload any) (Definition, error) {
 	return def, nil
 }
 
-// NewJSONTask creates a JSON task using the definition registered for payload.
-func (r *SchemaRegistry) NewJSONTask(payload any, opts ...Option) (Task, error) {
+// NewTask creates an encoded task using the definition registered for payload.
+func (r *SchemaRegistry) NewTask(codecName string, payload any, opts ...Option) (Task, error) {
 	def, err := r.DefinitionOf(payload)
 	if err != nil {
 		return Task{}, err
 	}
-	return NewJSONTask(def, payload, opts...)
+	return NewEncodedTask(def, codecName, payload, opts...)
 }
 
-// DecodeJSON resolves task.Type() and decodes task payload into that schema.
-func (r *SchemaRegistry) DecodeJSON(task Task) (any, error) {
+// NewJSONTask creates a JSON task using the definition registered for payload.
+func (r *SchemaRegistry) NewJSONTask(payload any, opts ...Option) (Task, error) {
+	return r.NewTask(JSONCodec, payload, opts...)
+}
+
+// NewProtoTask creates a protobuf task using the definition registered for payload.
+func (r *SchemaRegistry) NewProtoTask(payload any, opts ...Option) (Task, error) {
+	return r.NewTask(ProtoCodec, payload, opts...)
+}
+
+// Decode resolves task.Type() and decodes task payload into that schema.
+func (r *SchemaRegistry) Decode(task Task) (any, error) {
+	return r.DecodeWithCodec(task, task.PayloadCodec())
+}
+
+// DecodeWithCodec resolves task.Type() and decodes task payload with codecName.
+func (r *SchemaRegistry) DecodeWithCodec(task Task, codecName string) (any, error) {
 	payload, err := r.Resolve(task.Type())
 	if err != nil {
 		return nil, err
 	}
-	if err := DecodeJSON(task, payload); err != nil {
+	if err := DecodePayloadWithCodec(task, codecName, payload); err != nil {
 		return nil, err
 	}
 	return payload, nil
+}
+
+// DecodeJSON resolves task.Type() and decodes a JSON task payload into that schema.
+func (r *SchemaRegistry) DecodeJSON(task Task) (any, error) {
+	return r.DecodeWithCodec(task, JSONCodec)
+}
+
+// DecodeProto resolves task.Type() and decodes a protobuf task payload into that schema.
+func (r *SchemaRegistry) DecodeProto(task Task) (any, error) {
+	return r.DecodeWithCodec(task, ProtoCodec)
 }
 
 func validatePayloadTarget(payload any) error {

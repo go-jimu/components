@@ -8,6 +8,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	testdata "github.com/go-jimu/components/encoding/testdata"
+	"google.golang.org/protobuf/proto"
 )
 
 // Empty task types must be rejected so provider adapters never enqueue tasks
@@ -60,16 +63,41 @@ func TestNewJSONTask_PreservesDefinitionAndCopiesHeaders(t *testing.T) {
 	if string(task.Payload()) != `{"id":"doc-1"}` {
 		t.Fatalf("payload = %s", task.Payload())
 	}
+	if task.PayloadCodec() != JSONCodec {
+		t.Fatalf("payload codec = %q, want %q", task.PayloadCodec(), JSONCodec)
+	}
 }
 
-// DecodeJSON should decode the task payload into the caller-owned target and
-// fail loudly for nil targets so bad adapters cannot silently drop payloads.
-func TestDecodeJSON_DecodesPayloadAndRejectsNilTarget(t *testing.T) {
+// DecodePayload should use the codec carried by the task envelope so provider
+// adapters can decode persisted payload bytes without treating JSON as schema.
+func TestDecodePayload_UsesEnvelopePayloadCodec(t *testing.T) {
 	task, err := NewJSONTask(Definition{Type: "document.review.v1"}, struct {
 		Limit int `json:"limit"`
 	}{Limit: 25})
 	if err != nil {
 		t.Fatalf("NewJSONTask: %v", err)
+	}
+
+	var payload struct {
+		Limit int `json:"limit"`
+	}
+	if err := DecodePayload(task, &payload); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
+	if payload.Limit != 25 {
+		t.Fatalf("limit = %d", payload.Limit)
+	}
+	if err := DecodePayload(task, nil); !errors.Is(err, ErrNilDecodeTarget) {
+		t.Fatalf("nil target error = %v, want ErrNilDecodeTarget", err)
+	}
+}
+
+// DecodeJSON remains an explicit JSON helper for callers that receive raw task
+// envelopes without codec metadata.
+func TestDecodeJSON_DecodesRawJSONPayload(t *testing.T) {
+	task, err := New(Definition{Type: "document.review.v1"}, []byte(`{"limit":25}`))
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
 
 	var payload struct {
@@ -81,8 +109,125 @@ func TestDecodeJSON_DecodesPayloadAndRejectsNilTarget(t *testing.T) {
 	if payload.Limit != 25 {
 		t.Fatalf("limit = %d", payload.Limit)
 	}
-	if err := DecodeJSON(task, nil); !errors.Is(err, ErrNilDecodeTarget) {
-		t.Fatalf("nil target error = %v, want ErrNilDecodeTarget", err)
+}
+
+// NewProtoTask and DecodeProto should use the shared encoding registry so
+// protobuf schemas can protect persisted task payload bytes.
+func TestNewProtoTask_DecodeProtoRoundTrip(t *testing.T) {
+	want := &testdata.TestModel{
+		Id:    7,
+		Name:  "review",
+		Hobby: []string{"read", "approve"},
+	}
+	task, err := NewProtoTask(
+		Definition{Type: "document.review.v1", Queue: "reconcile"},
+		want,
+		WithKey("doc-7"),
+	)
+	if err != nil {
+		t.Fatalf("NewProtoTask: %v", err)
+	}
+
+	var got testdata.TestModel
+	if err := DecodeProto(task, &got); err != nil {
+		t.Fatalf("DecodeProto: %v", err)
+	}
+	if !proto.Equal(want, &got) {
+		t.Fatalf("decoded payload = %v, want %v", &got, want)
+	}
+	if task.PayloadCodec() != ProtoCodec {
+		t.Fatalf("payload codec = %q, want %q", task.PayloadCodec(), ProtoCodec)
+	}
+}
+
+// NewEncodedTask should work with every built-in encoding codec, not just JSON
+// and protobuf, because codec choice is separate from the task schema.
+func TestNewEncodedTask_SupportsYAMLAndTOMLCodecs(t *testing.T) {
+	type payload struct {
+		ID    string
+		Limit int
+	}
+	for _, codecName := range []string{YAMLCodec, YMLCodec, TOMLCodec} {
+		t.Run(codecName, func(t *testing.T) {
+			task, err := NewEncodedTask(
+				Definition{Type: "document.review.v1"},
+				codecName,
+				payload{ID: "doc-1", Limit: 5},
+			)
+			if err != nil {
+				t.Fatalf("NewEncodedTask: %v", err)
+			}
+
+			var got payload
+			if err := DecodePayload(task, &got); err != nil {
+				t.Fatalf("DecodePayload: %v", err)
+			}
+			if got != (payload{ID: "doc-1", Limit: 5}) {
+				t.Fatalf("decoded payload = %#v", got)
+			}
+			if task.PayloadCodec() != codecName {
+				t.Fatalf("payload codec = %q, want %q", task.PayloadCodec(), codecName)
+			}
+		})
+	}
+}
+
+// Raw tasks should be able to carry payload codec metadata without requiring
+// taskqueue to know the storage envelope used by a provider adapter.
+func TestNew_WithPayloadCodecRecordsCodecMetadata(t *testing.T) {
+	task, err := New(
+		Definition{Type: "document.review.v1"},
+		[]byte{8, 7},
+		WithPayloadCodec(" PROTO "),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if task.PayloadCodec() != ProtoCodec {
+		t.Fatalf("payload codec = %q, want %q", task.PayloadCodec(), ProtoCodec)
+	}
+}
+
+// DecodePayload should fail clearly when a task does not carry codec metadata,
+// while DecodeJSON and DecodeProto remain available for explicit codecs.
+func TestDecodePayload_RejectsMissingOrUnknownCodec(t *testing.T) {
+	task, err := New(Definition{Type: "document.review.v1"}, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var payload struct{}
+
+	if err := DecodePayload(task, &payload); !errors.Is(err, ErrEmptyPayloadCodec) {
+		t.Fatalf("missing codec error = %v, want ErrEmptyPayloadCodec", err)
+	}
+
+	task, err = New(Definition{Type: "document.review.v1"}, []byte(`{}`), WithPayloadCodec("missing"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := DecodePayload(task, &payload); !errors.Is(err, ErrUnknownPayloadCodec) {
+		t.Fatalf("unknown codec error = %v, want ErrUnknownPayloadCodec", err)
+	}
+}
+
+// NewEncodedTask should reject unregistered codecs before constructing a task
+// so callers do not persist payload bytes with an undecodable codec marker.
+func TestNewEncodedTask_RejectsMissingOrUnknownCodec(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		codecName string
+		wantErr   error
+	}{
+		{name: "empty", codecName: " ", wantErr: ErrEmptyPayloadCodec},
+		{name: "unknown", codecName: "missing", wantErr: ErrUnknownPayloadCodec},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewEncodedTask(Definition{Type: "document.review.v1"}, tc.codecName, struct{}{})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+		})
 	}
 }
 
