@@ -10,10 +10,12 @@
 // remain application or provider concerns.
 // Provider adapters map these contracts to their own systems.
 //
-// TaskType is a semantic contract identifier used for schema and processor
-// routing. Queue is an optional provider-facing lane name. Providers decide how
-// to encode TaskType, Queue, Key, Headers, payload bytes, and enqueue options
-// into their own envelopes.
+// TaskType is a semantic contract identifier used for payload schema and
+// processor routing. Queue is an optional provider-facing lane name. Payload
+// codec identifies the byte encoding, such as JSON or protobuf, and is
+// separate from the schema identified by TaskType. Providers decide how to
+// encode TaskType, Queue, Key, Headers, PayloadCodec, payload bytes, and
+// enqueue options into their own envelopes.
 //
 // ExecutionInfo carries provider worker metadata for the current processing
 // attempt through context; it does not change the task payload schema.

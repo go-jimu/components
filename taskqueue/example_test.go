@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	testdata "github.com/go-jimu/components/encoding/testdata"
 	"github.com/go-jimu/components/taskqueue"
 )
 
@@ -64,6 +65,30 @@ func ExampleSchemaRegistry() {
 
 	// Output:
 	// email.welcome user-1
+}
+
+func ExampleSchemaRegistry_proto() {
+	registry := taskqueue.NewSchemaRegistry()
+	if err := registry.Register(taskqueue.Definition{Type: "model.index", Queue: "indexers"}, func() any {
+		return &testdata.TestModel{}
+	}); err != nil {
+		panic(err)
+	}
+
+	task, err := registry.NewProtoTask(&testdata.TestModel{Id: 7, Name: "doc-7"})
+	if err != nil {
+		panic(err)
+	}
+	decoded, err := registry.Decode(task)
+	if err != nil {
+		panic(err)
+	}
+
+	payload := decoded.(*testdata.TestModel)
+	fmt.Println(task.Type(), task.PayloadCodec(), payload.Id, payload.Name)
+
+	// Output:
+	// model.index proto 7 doc-7
 }
 
 func ExampleNewPeriodicTask() {

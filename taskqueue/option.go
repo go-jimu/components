@@ -4,8 +4,9 @@ package taskqueue
 type Option func(*taskConfig)
 
 type taskConfig struct {
-	key     string
-	headers map[string]string
+	key          string
+	headers      map[string]string
+	payloadCodec string
 }
 
 // WithKey sets the task idempotency or ordering key.
@@ -37,5 +38,12 @@ func WithHeaders(headers map[string]string) Option {
 		for key, value := range headers {
 			cfg.headers[key] = value
 		}
+	}
+}
+
+// WithPayloadCodec records the codec used to encode raw task payload bytes.
+func WithPayloadCodec(codecName string) Option {
+	return func(cfg *taskConfig) {
+		cfg.payloadCodec = normalizePayloadCodec(codecName)
 	}
 }
