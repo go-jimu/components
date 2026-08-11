@@ -46,11 +46,18 @@ type CloseInterruptedContext struct {
 	PendingBatches  []PendingBatch
 }
 
-// Collection stores domain events raised by an aggregate until the application
-// layer drains them after persistence succeeds.
+// Collection stores pending domain events raised by an aggregate. Drain removes
+// the current batch but leaves the collection ready to accept later events.
+// Its methods are safe for concurrent use, but they do not synchronize other
+// aggregate state or mutable values referenced by an Event.
 type Collection interface {
+	// Add records an event and reports whether the collection accepted it.
 	Add(Event) bool
+	// Drain returns the pending events in acceptance order and clears the current
+	// batch. An Add concurrent with Drain belongs to either that returned batch or
+	// the next batch.
 	Drain() []Event
+	// Len returns a snapshot of the number of events pending in the current batch.
 	Len() int
 }
 
