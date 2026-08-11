@@ -29,9 +29,7 @@ package has no runtime API.
 For new domain event code, use `github.com/go-jimu/components/ddd/event`.
 
 The legacy `mediator` package remains source-compatible for existing users and
-will only receive compatibility fixes. See
-[`docs/mediator-migration.md`](docs/mediator-migration.md) for the semantic
-differences and migration guidance.
+will only receive compatibility fixes.
 
 ## Integration messages
 

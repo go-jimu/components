@@ -22,10 +22,15 @@ func ExampleNewCollection() {
 
 	fmt.Println("pending", events.Len())
 
-	drained := events.Drain()
-	fmt.Println(drained[0].Kind(), drained[1].Kind(), events.Len())
+	firstBatch := events.Drain()
+	fmt.Println(firstBatch[0].Kind(), firstBatch[1].Kind(), events.Len())
+
+	events.Add(exampleDomainEvent{kind: "order.shipped"})
+	secondBatch := events.Drain()
+	fmt.Println(secondBatch[0].Kind(), events.Len())
 
 	// Output:
 	// pending 2
 	// order.paid order.confirmed 0
+	// order.shipped 0
 }

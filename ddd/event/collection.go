@@ -1,36 +1,38 @@
 package event
 
+import "sync"
+
 type collection struct {
-	events  []Event
-	drained bool
+	mu     sync.Mutex
+	events []Event
 }
 
-// NewCollection creates an empty aggregate event collection.
+// NewCollection creates a concurrency-safe aggregate event collection that
+// remains open across Drain calls.
 func NewCollection() Collection {
 	return &collection{}
 }
 
 func (c *collection) Add(event Event) bool {
-	if c.drained {
-		return false
-	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.events = append(c.events, event)
 	return true
 }
 
 func (c *collection) Drain() []Event {
-	if c.drained {
-		return nil
-	}
-	c.drained = true
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	events := c.events
 	c.events = nil
 	return events
 }
 
 func (c *collection) Len() int {
-	if c.drained {
-		return 0
-	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	return len(c.events)
 }
