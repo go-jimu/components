@@ -26,6 +26,12 @@ var (
 	ErrEmptyPeriodicTaskName     = errors.New("periodic task name is empty")
 	ErrInvalidPeriodicTaskPolicy = errors.New("periodic task enqueue policy is invalid")
 	ErrDuplicatePeriodicTask     = errors.New("periodic task is already registered")
+	ErrPeriodicTaskID            = errors.New("periodic task must not set a task ID")
+
+	// ErrDuplicateTask reports that a task with the same ID is still retained
+	// by the provider. Provider adapters should return it, optionally wrapping
+	// their own error, when Enqueue hits an ID conflict.
+	ErrDuplicateTask = errors.New("task with the same ID already exists")
 
 	// ErrSkipRetry marks a failure as non-retryable for provider adapters.
 	ErrSkipRetry = errors.New("skip retry for task")

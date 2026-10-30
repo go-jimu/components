@@ -4,15 +4,15 @@ package taskqueue
 type Option func(*taskConfig)
 
 type taskConfig struct {
-	key          string
+	id           string
 	headers      map[string]string
 	payloadCodec string
 }
 
-// WithKey sets the task idempotency or ordering key.
-func WithKey(key string) Option {
+// WithID sets a caller-assigned task identity. See Task.ID.
+func WithID(id string) Option {
 	return func(cfg *taskConfig) {
-		cfg.key = key
+		cfg.id = id
 	}
 }
 

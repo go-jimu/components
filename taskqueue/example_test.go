@@ -29,7 +29,7 @@ func ExampleRouter() {
 	task, err := taskqueue.NewJSONTask(
 		taskqueue.Definition{Type: "email.welcome", Queue: "mailers"},
 		welcomeEmail{UserID: "user-1"},
-		taskqueue.WithKey("user-1"),
+		taskqueue.WithID("welcome-email:user-1"),
 	)
 	if err != nil {
 		panic(err)
@@ -97,7 +97,6 @@ func ExampleNewPeriodicTask() {
 		struct {
 			Kind string `json:"kind"`
 		}{Kind: "daily"},
-		taskqueue.WithKey("reports:daily"),
 	)
 	if err != nil {
 		panic(err)

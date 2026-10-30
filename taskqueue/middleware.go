@@ -48,7 +48,7 @@ func Logging(logger *slog.Logger) Middleware {
 			attrs := []any{
 				"task_type", task.Type(),
 				"queue", task.Queue(),
-				"key", task.Key(),
+				"task_id", task.ID(),
 			}
 			attrs = appendExecutionInfoAttrs(ctx, attrs)
 			logger.InfoContext(ctx, "taskqueue processor started", attrs...)

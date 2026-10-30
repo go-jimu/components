@@ -14,7 +14,7 @@
 // processor routing. Queue is an optional provider-facing lane name. Payload
 // codec identifies the byte encoding, such as JSON or protobuf, and is
 // separate from the schema identified by TaskType. Providers decide how to
-// encode TaskType, Queue, Key, Headers, PayloadCodec, payload bytes, and
+// encode TaskType, Queue, ID, Headers, PayloadCodec, payload bytes, and
 // enqueue options into their own envelopes.
 //
 // ExecutionInfo carries provider worker metadata for the current processing

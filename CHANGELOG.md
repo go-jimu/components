@@ -6,6 +6,19 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Changed: `taskqueue.Task.Key` and `WithKey` are renamed to `ID` and `WithID`,
+  and now mean a caller-assigned task identity. The old docs called it an
+  "idempotency or ordering" key, but providers such as asynq map it to a task
+  ID that rejects any enqueue while a task with that ID is retained, including
+  archived failures. Nothing ordered tasks by it. The `Logging` attribute `key`
+  is now `task_id`.
+- Added: `taskqueue.ErrDuplicateTask`, which provider adapters return on an
+  ID conflict.
+- Changed: `NewPeriodicTask` rejects tasks with an ID (`ErrPeriodicTaskID`).
+  A fixed ID made every later fire conflict once one run was archived, which
+  silently stopped the schedule. The README examples that used fixed keys are
+  fixed.
+
 - Changed: `event.InMemoryDispatcher` handles events concurrently on five
   workers by default and no longer has a batch concept. **Events are no longer
   handled in a single global order.** Events with the same key are handled one
