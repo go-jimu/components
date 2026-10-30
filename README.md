@@ -43,7 +43,8 @@ policy.
 
 `message.Handler.Handle` errors are message-level failures for one delivered
 message. `message.Runner.Run` errors are runtime-level failures for a provider
-loop; context shutdown returns `ctx.Err()`. Provider packages must document how
+loop; context shutdown is normal and returns nil, matching `taskqueue.Runner`.
+Provider packages must document how
 message-level failures are retried, routed to DLQ, dropped, or otherwise
 recorded without treating every handler error as a runtime failure.
 

@@ -16,9 +16,9 @@
 //
 // Handler failures and provider runtime failures are separate layers.
 // Handler.Handle returns message-level failures for one delivered integration
-// message. Runner.Run returns why a provider runtime loop terminated. Context
-// cancellation or expiration returns ctx.Err(); non-context Run errors mean the
-// runtime cannot continue safely.
+// message. Runner.Run returns why a provider runtime loop terminated
+// abnormally. Context cancellation or expiration is a normal shutdown and
+// returns nil; a non-nil Run error means the runtime cannot continue safely.
 //
 // Message ID, Kind, OccurredAt, Key, and Headers are transport-neutral fields.
 // Providers decide how to encode them into their own envelopes. This package

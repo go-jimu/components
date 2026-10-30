@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Changed: `message.Runner.Run` returns nil when ctx is canceled or expires,
+  matching `taskqueue.Runner`. A non-nil error now always means the provider
+  runtime stopped abnormally. Providers that returned `ctx.Err()` must return
+  nil instead; callers that filtered `context.Canceled` keep working.
+
 - Removed: `ddd/message/outbox`. It was never validated in production, and its
   relay could not renew claim locks: `RunOptions.Claim.LockedUntil` was an
   absolute time reused on every run, so `Relay.Run` failed once it passed.
