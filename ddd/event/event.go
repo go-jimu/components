@@ -66,7 +66,10 @@ type Collection interface {
 	Len() int
 }
 
-// Handler reacts to a domain event as a follow-up transaction.
+// Handler reacts to a domain event as a follow-up transaction. Handle owns its
+// failures: by the time it runs, the publisher has returned, so the handler is
+// the only party that knows whether to retry, compensate, or record a failure.
+// The dispatcher recovers panics as bugs and reports them to WithPanicHandler.
 type Handler interface {
 	Listening() []Kind
 	Handle(context.Context, Event)

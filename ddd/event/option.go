@@ -50,7 +50,9 @@ func WithUnhandledEventHandler(fn func(UnhandledContext)) Option {
 	}
 }
 
-// WithPanicHandler sets a hook for recovered handler panics.
+// WithPanicHandler sets a hook for recovered handler panics. Keep fn to
+// reporting, such as logging or sending to an error tracker: it runs inside the
+// recovery, so a panic in fn ends the process.
 func WithPanicHandler(fn func(PanicContext)) Option {
 	return func(d *InMemoryDispatcher) {
 		d.panicHandler = fn
