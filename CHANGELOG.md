@@ -6,6 +6,21 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Fixed: `sloghelper.Error` no longer races when called concurrently; it used
+  to write every checked error into a shared package variable. `Error(nil)`
+  and `ErrorValue(nil)` no longer panic, and oops errors use `ErrorKey`.
+- Changed: `sloghelper.Error` no longer captures the logging call site's stack
+  with `debug.Stack()` for errors that carry no stack trace. That stack was
+  costly on every error log and did not show where the error came from; the
+  `source` attribute already records the call site.
+- Fixed: `sloghelper.NewLog` sets the rotation size from `MaxSize`; it used
+  `MaxAge`. Levels are case-insensitive, and an unknown level is reported with
+  a warning instead of silently becoming info.
+- Fixed: `sloghelper.Handler.Apply` is safe to call while logging, reaches
+  loggers already derived with `With` or `WithGroup`, and the package-level
+  `Apply` no longer panics before `NewLog`; such options take effect on the
+  next `NewLog`.
+
 - Fixed: `encoding.GetCodec` is case-insensitive, matching `RegisterCodec`, so a
   format taken from a file extension such as `app.YAML` finds the codec.
 - Fixed: the `encoding` registry is guarded by a lock, so registering a codec
