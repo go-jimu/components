@@ -13,10 +13,7 @@ type recordingOrderContext struct {
 }
 
 func newRecordingOrderContext(label fsm.StateLabel) *recordingOrderContext {
-	state := fsm.NewSimpleState(label)
-	context := &recordingOrderContext{current: state}
-	state.SetContext(context)
-	return context
+	return &recordingOrderContext{current: fsm.NewSimpleState(label)}
 }
 
 func (context *recordingOrderContext) CurrentState() fsm.State {
@@ -44,7 +41,7 @@ func TestOrderTransitionReturnsErrorWhenTargetBuilderMissing(t *testing.T) {
 	require.Equal(t, 0, context.transitions)
 }
 
-func TestOrderTransitionKeepsStateWhenNoConditionMatches(t *testing.T) {
+func TestOrderTransitionReportsErrorWhenNoConditionMatches(t *testing.T) {
 	sm := fsm.NewStateMachine("condition_noop")
 	sm.RegisterStateBuilder(exampleStateCanceled, func() fsm.State {
 		return fsm.NewSimpleState(exampleStateCanceled)
@@ -56,7 +53,12 @@ func TestOrderTransitionKeepsStateWhenNoConditionMatches(t *testing.T) {
 
 	err := fsm.Transit(context, sm, exampleActionRefund)
 
-	require.NoError(t, err)
+	var transitionErr *fsm.TransitionError
+	require.ErrorAs(t, err, &transitionErr)
+	require.True(t, transitionErr.Guarded)
+	require.Equal(t, exampleStatePaid, transitionErr.Current)
+	require.Equal(t, exampleActionRefund, transitionErr.Action)
+	require.EqualError(t, err, "no transition condition matched from order.paid with action refund")
 	require.Equal(t, exampleStatePaid, context.CurrentState().Label())
 	require.Equal(t, 0, context.transitions)
 }

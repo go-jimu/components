@@ -7,11 +7,11 @@ type (
 	// StateLabel define the state type.
 	StateLabel string
 
-	// State define the state interface.
+	// State is one state of a business object. It holds no reference to the
+	// object: behavior methods on the consumer's state interface take the
+	// object as a parameter, so states stay independent of any one instance.
 	State interface {
-		SetContext(StateContext) // set the state context
-		Context() StateContext   // return the state context
-		Label() StateLabel       // get the state label
+		Label() StateLabel // get the state label
 	}
 
 	// StateBuilder define the state builder interface.

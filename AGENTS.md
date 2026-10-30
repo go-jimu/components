@@ -5,65 +5,33 @@ backward-compatible when practical, and verified with `go test ./...`.
 
 ## Package Orientation
 
-Start with `README.md` for the package map. Before generating consumer code for
-a package, read its `doc.go` and any `example_test.go` in that package; the
-examples are executable and should be treated as the preferred usage shape.
+`README.md` maps needs to packages. Before writing or changing code that uses a
+package, read its `doc.go` and `example_test.go`; the examples are executable
+and set the usage shape. Where a package has a README, the README is its full
+guidance.
 
-- Use `config` for explicit source composition and `config/loader` for the
-  defaults-plus-profile application loading flow. Read `config/README.md`.
-- Use `encoding` as a codec registry. Blank import concrete codecs such as
-  `encoding/json`, `encoding/yaml`, `encoding/toml`, or `encoding/proto`.
-- Use `ddd/event` for same bounded-context domain events.
-- Use `ddd/message` for protobuf integration messages and in-process routing.
-- Use `ddd/message/outbox` for transaction-time message recording and
-  at-least-once relay publishing.
-- Use `taskqueue` for provider-neutral background task contracts.
-- Use `validation` for lightweight specification and notification helpers.
-- Use `sloghelper` with the standard library `log/slog` for new logging code.
-- Treat `logger` and `mediator` as legacy compatibility packages. Prefer
-  `sloghelper` and `ddd/event` for new code.
+- `config`: read `config/README.md`. Application code starts at
+  `config/loader`.
+- `encoding`: a codec registry. Blank import the codecs in use, such as
+  `encoding/json` or `encoding/yaml`.
+- `ddd/event`: domain events inside one bounded context, dispatched
+  concurrently and ordered per key.
+- `ddd/message`: protobuf integration messages across boundaries.
+- `taskqueue`: read `taskqueue/README.md`, whose Provider adapters checklist
+  also covers adapter code.
+- `sloghelper`: helpers around the standard library `log/slog`.
+- `validation`: specification combinators and error notification.
 
 ## FSM Usage
 
-When working with `github.com/go-jimu/components/fsm`, follow this contract:
+Before writing or changing code that uses `fsm`, read `fsm/README.md`; its
+Checklist is the bar for done, and `fsm/example_test.go` runs the pattern. The
+rules that shape every consumer:
 
-- The core model is state polymorphism: the same business object delegates a
-  behavior to its current state, and each concrete state implements that
-  behavior differently.
-- `StateMachine` owns transition definitions, exposes candidate transition
-  edges, and builds target states. It does not own business behavior or execute
-  transitions for business objects.
-- The consumer's business object implements `fsm.StateContext` and owns the
-  current state field.
-- Use `fsm.Transit(ctx, sm, action)` as the standard transition flow. Do not
-  reimplement the transition loop in each business object.
-- The consumer should define a state behavior interface, such as `Pay()`,
-  `Refund()`, and `Cancel()`, and concrete states should implement it.
-- Prefer a base/default state that implements every behavior method with an
-  error, then embed it in concrete states and override only supported behavior.
-- Invalid behavior belongs in the concrete state method. For example,
-  `PaidOrderState.Pay()` should return the "already paid" error.
-- Do not move state-specific behavior into `if`/`else` or `switch` statements on
-  the business object.
-- `StateContext.SetState` belongs to the business object. It should type-check
-  the built state, assign it to the object's current state field, and may record
-  domain events or version changes.
-- Business methods should call the current state's behavior method directly,
-  pass natural parameters and return values, then call
-  `fsm.Transit` through an unexported helper only after the behavior succeeds.
-- Do not expose `fsm.StateMachine` as a parameter on business methods such as
-  `Order.Pay(sm)`. Keep state-machine lookup and transition plumbing inside the
-  object through an unexported helper.
-- Do not use `HasTransition` as the primary permission check before calling the
-  current state's behavior method; that bypasses state polymorphism.
-- `Condition` is a transition guard evaluated by `fsm.Transit` to decide
-  whether one specific `from -> to` edge is allowed. It is not a
-  substitute for the business method's validation.
-- A nil `Condition` is unconditional. For the same `from + action`, transitions
-  are evaluated in add order and the first match wins.
-- If no condition matches, `fsm.Transit` leaves the current state unchanged.
-- Always register state builders for transition targets and call `Check` during
-  setup or tests.
-
-Read `fsm/README.md` and `fsm/example_test.go` before generating or modifying
-FSM consumer code.
+- State polymorphism: each state-specific decision lives in a concrete state's
+  behavior method, which takes the business object as a parameter.
+- Behavior first, transition second: a business method calls its state's
+  behavior, then `fsm.Transit` through an unexported helper, using a
+  package-level machine built with `fsm.MustFreeze`.
+- Persist an aggregate only after its business method succeeded; on an error,
+  roll the transaction back.

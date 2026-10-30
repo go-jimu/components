@@ -209,6 +209,11 @@ func (t PeriodicTask) Validate() error {
 	if t.task.Type() == "" {
 		return ErrEmptyType
 	}
+	// A fixed ID would make every fire after the first conflict for as long as
+	// the provider retains an earlier task, including archived failures.
+	if t.task.ID() != "" {
+		return ErrPeriodicTaskID
+	}
 	if err := validatePeriodicTaskPolicy(t.policy); err != nil {
 		return err
 	}

@@ -56,7 +56,7 @@ func TestSchemaRegistry_NewTaskInfersDefinitionFromPayload(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	task, err := registry.NewTask(JSONCodec, &reviewTaskPayload{ID: "doc-1"}, WithKey("doc-1"))
+	task, err := registry.NewTask(JSONCodec, &reviewTaskPayload{ID: "doc-1"}, WithID("doc-1"))
 	if err != nil {
 		t.Fatalf("NewTask: %v", err)
 	}
@@ -67,8 +67,8 @@ func TestSchemaRegistry_NewTaskInfersDefinitionFromPayload(t *testing.T) {
 	if task.Queue() != def.Queue {
 		t.Fatalf("queue = %q", task.Queue())
 	}
-	if task.Key() != "doc-1" {
-		t.Fatalf("key = %q", task.Key())
+	if task.ID() != "doc-1" {
+		t.Fatalf("id = %q", task.ID())
 	}
 	if string(task.Payload()) != `{"id":"doc-1","limit":0}` {
 		t.Fatalf("payload = %s", task.Payload())
@@ -88,7 +88,7 @@ func TestSchemaRegistry_NewProtoTaskAndDecode(t *testing.T) {
 	}
 
 	want := &testdata.TestModel{Id: 9, Name: "persisted", Hobby: []string{"schema"}}
-	task, err := registry.NewProtoTask(want, WithKey("doc-9"))
+	task, err := registry.NewProtoTask(want, WithID("doc-9"))
 	if err != nil {
 		t.Fatalf("NewProtoTask: %v", err)
 	}
@@ -107,8 +107,8 @@ func TestSchemaRegistry_NewProtoTaskAndDecode(t *testing.T) {
 	if task.Queue() != def.Queue {
 		t.Fatalf("queue = %q", task.Queue())
 	}
-	if task.Key() != "doc-9" {
-		t.Fatalf("key = %q", task.Key())
+	if task.ID() != "doc-9" {
+		t.Fatalf("id = %q", task.ID())
 	}
 	if task.PayloadCodec() != ProtoCodec {
 		t.Fatalf("payload codec = %q", task.PayloadCodec())

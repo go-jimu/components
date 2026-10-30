@@ -4,26 +4,28 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
-	"runtime/debug"
 	"strings"
 
 	"github.com/pkg/errors"
 	"github.com/samber/oops"
 )
 
-var (
-	ErrorKey = "error"
-
-	oopsError = &oops.OopsError{}
-)
+var ErrorKey = "error"
 
 type StackTracer interface {
 	StackTrace() errors.StackTrace
 }
 
+// Error returns an attribute for err under ErrorKey. oops errors are logged
+// as they are, since they render their own context and stack. Other errors are
+// logged as a group with the message and, when the error carries one, its
+// stack trace. A nil err is logged as null.
 func Error(err error) slog.Attr {
-	if errors.As(err, oopsError) {
-		return slog.Any("error", err)
+	if err == nil {
+		return slog.Any(ErrorKey, nil)
+	}
+	if _, ok := oops.AsOops(err); ok {
+		return slog.Any(ErrorKey, err)
 	}
 
 	group := make([]slog.Attr, 0, 2) //nolint:gomnd //no why
@@ -38,13 +40,14 @@ func Error(err error) slog.Attr {
 
 	if st != nil {
 		group = append(group, slog.Any("trace", traceLines(st.StackTrace())))
-	} else {
-		group = append(group, slog.String("trace", string(debug.Stack())))
 	}
 	return slog.Attr{Key: ErrorKey, Value: slog.GroupValue(group...)}
 }
 
 func ErrorValue(err error) slog.Value {
+	if err == nil {
+		return slog.StringValue("<nil>")
+	}
 	return slog.StringValue(err.Error())
 }
 

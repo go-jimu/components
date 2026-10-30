@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -21,45 +22,77 @@ type Options struct {
 	Compress   bool   `json:"compress" toml:"compress" yaml:"compress"`
 }
 
-var levelDescriptions = map[string]slog.Leveler{
-	"debug": slog.LevelDebug,
-	"info":  slog.LevelInfo,
-	"warn":  slog.LevelWarn,
-	"error": slog.LevelError,
-}
+var (
+	defaultMu      sync.Mutex
+	defaultHandler *Handler
+	pendingOptions []HandlerOption
+)
 
-var defaultHandler *Handler
-
+// NewLog creates a JSON logger from opt and sets it as the slog default.
+// Level is case-insensitive and defaults to info; an unknown level falls back
+// to info and is reported with a warning.
 func NewLog(opt Options) *slog.Logger {
+	level, known := parseLevel(opt.Level)
 	opts := &slog.HandlerOptions{
 		AddSource:   true,
-		Level:       levelDescriptions[opt.Level],
+		Level:       level,
 		ReplaceAttr: shortFilePath,
 	}
 
-	var output io.Writer
-	if opt.Output == "" || strings.ToLower(opt.Output) == "console" {
-		output = os.Stdout
-	} else {
-		output = &lumberjack.Logger{
-			Filename:   opt.Output,
-			MaxSize:    opt.MaxAge,
-			MaxBackups: opt.MaxBackups,
-			MaxAge:     opt.MaxAge,
-			LocalTime:  opt.LocalTime,
-			Compress:   opt.Compress,
-		}
+	handler, _ := NewHandler(slog.NewJSONHandler(newOutput(opt), opts)).(*Handler)
+	defaultMu.Lock()
+	for _, pending := range pendingOptions {
+		handler.Apply(pending)
 	}
+	pendingOptions = nil
+	defaultHandler = handler
+	defaultMu.Unlock()
 
-	defaultHandler, _ = NewHandler(slog.NewJSONHandler(output, opts)).(*Handler)
-	logger := slog.New(defaultHandler)
+	logger := slog.New(handler)
 	slog.SetDefault(logger)
+	if !known {
+		logger.Warn("unknown log level, falling back to info", slog.String("level", opt.Level))
+	}
 	logger.Info("the log module has been initialized successfully.", slog.Any("option", opt))
 	return logger
 }
 
+// Apply applies opt to the handler of the logger created by NewLog. Options
+// applied before NewLog take effect when NewLog is called.
 func Apply(opt HandlerOption) {
+	defaultMu.Lock()
+	defer defaultMu.Unlock()
+	if defaultHandler == nil {
+		pendingOptions = append(pendingOptions, opt)
+		return
+	}
 	defaultHandler.Apply(opt)
+}
+
+func parseLevel(s string) (slog.Level, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return slog.LevelInfo, true
+	}
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(s)); err != nil {
+		return slog.LevelInfo, false
+	}
+	return level, true
+}
+
+func newOutput(opt Options) io.Writer {
+	if opt.Output == "" || strings.ToLower(opt.Output) == "console" {
+		return os.Stdout
+	}
+	return &lumberjack.Logger{
+		Filename:   opt.Output,
+		MaxSize:    opt.MaxSize,
+		MaxBackups: opt.MaxBackups,
+		MaxAge:     opt.MaxAge,
+		LocalTime:  opt.LocalTime,
+		Compress:   opt.Compress,
+	}
 }
 
 func shortFilePath(_ []string, a slog.Attr) slog.Attr {

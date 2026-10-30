@@ -291,15 +291,15 @@ func TestNewDefaultResolver(t *testing.T) {
 			path:   "foo.bar.value2",
 			expect: "$PORT",
 		},
-		//{
-		//	name:   "test abc${PORT}foo${COUNT}bar",
-		//	path:   "foo.bar.value3",
-		//	expect: "abc8080foo10bar",
-		//},
+		{
+			name:   "test abc${PORT}foo${COUNT}bar",
+			path:   "foo.bar.value3",
+			expect: "abc8080foo10bar",
+		},
 		{
 			name:   "test ${foo${bar}}",
 			path:   "foo.bar.value4",
-			expect: "",
+			expect: "}",
 		},
 	}
 
@@ -381,6 +381,31 @@ func TestExpand(t *testing.T) {
 	for _, tt := range tests {
 		if got := expand(tt.input, tt.mapping, false); got != tt.want {
 			t.Errorf("expand() want: %s, got: %s", tt.want, got)
+		}
+	}
+}
+
+// With toType, only a value that is exactly one placeholder changes type;
+// embedded placeholders keep the surrounding text.
+func TestExpandToType(t *testing.T) {
+	values := map[string]string{"HOST": "h", "PORT": "8080", "QUOTED": `"0123"`, "DEBUG": "true"}
+	mapping := func(s string) string { return values[s] }
+
+	tests := []struct {
+		input string
+		want  interface{}
+	}{
+		{input: "${PORT}", want: int64(8080)},
+		{input: "${DEBUG}", want: true},
+		{input: "${QUOTED}", want: "0123"},
+		{input: "${HOST}:${PORT}", want: "h:8080"},
+		{input: "id-${QUOTED}", want: "id-0123"},
+		{input: "${PORT}${PORT}", want: "80808080"},
+		{input: "plain", want: "plain"},
+	}
+	for _, tt := range tests {
+		if got := expand(tt.input, mapping, true); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("expand(%q) want: %#v, got: %#v", tt.input, tt.want, got)
 		}
 	}
 }

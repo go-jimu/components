@@ -38,7 +38,7 @@ type Task struct {
 	def          Definition
 	payload      []byte
 	payloadCodec string
-	key          string
+	id           string
 	headers      map[string]string
 }
 
@@ -57,7 +57,7 @@ func New(def Definition, payload []byte, opts ...Option) (Task, error) {
 		def:          def,
 		payload:      append([]byte(nil), payload...),
 		payloadCodec: cfg.payloadCodec,
-		key:          cfg.key,
+		id:           cfg.id,
 		headers:      cloneHeaders(cfg.headers),
 	}, nil
 }
@@ -151,9 +151,18 @@ func (t Task) PayloadCodec() string {
 	return t.payloadCodec
 }
 
-// Key returns the task idempotency or ordering key.
-func (t Task) Key() string {
-	return t.key
+// ID returns the caller-assigned task identity, or "" when the provider should
+// assign one.
+//
+// A provider keeps at most one task per ID while it retains that task, which
+// may include retries, archived failures, and completed tasks kept for
+// inspection. Enqueueing a task whose ID is still retained fails with
+// ErrDuplicateTask. Use an ID that names one unit of work, such as
+// "welcome-email:user-1", not a recurring one. ID deduplicates by identity;
+// WithUnique deduplicates by content for a time window. ID does not order
+// tasks.
+func (t Task) ID() string {
+	return t.id
 }
 
 // Headers returns a copy of task extension metadata.

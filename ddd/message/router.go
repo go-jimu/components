@@ -40,10 +40,12 @@ type Subscriber interface {
 // Runner is an optional runtime loop capability for providers that actively
 // consume messages.
 //
-// Run blocks until the provider runtime loop terminates. If ctx is canceled or
-// expires, Run returns ctx.Err(). A non-context error returned by Run means the
-// provider runtime cannot continue safely, for example because polling,
-// acknowledgement, commit, or provider-owned failure handling failed.
+// Run blocks until the provider runtime loop terminates. Context cancellation or
+// expiration is a normal shutdown signal: Run stops consuming and returns nil
+// unless shutdown itself fails. Callers that need to know why ctx ended can
+// check ctx.Err(). A non-nil error returned by Run means the provider runtime
+// cannot continue safely, for example because polling, acknowledgement,
+// commit, or provider-owned failure handling failed.
 //
 // Run errors are runtime-level failures. Handler.Handle errors are message-level
 // failures and should be handled by the provider's documented message failure

@@ -32,14 +32,14 @@ func TestNewJSONTask_EmptyTypeReturnsErrorBeforeEncodingPayload(t *testing.T) {
 }
 
 // JSON task construction should preserve the transport-neutral definition,
-// key, and headers while copying mutable metadata away from caller state.
+// ID, and headers while copying mutable metadata away from caller state.
 func TestNewJSONTask_PreservesDefinitionAndCopiesHeaders(t *testing.T) {
 	headers := map[string]string{"trace-id": "trace-1"}
 	task, err := NewJSONTask(Definition{Type: "document.review.v1", Queue: "reconcile"},
 		struct {
 			ID string `json:"id"`
 		}{ID: "doc-1"},
-		WithKey("doc-1"),
+		WithID("doc-1"),
 		WithHeader("source", "scheduler"),
 		WithHeaders(headers),
 	)
@@ -54,8 +54,8 @@ func TestNewJSONTask_PreservesDefinitionAndCopiesHeaders(t *testing.T) {
 	if task.Queue() != "reconcile" {
 		t.Fatalf("queue = %q", task.Queue())
 	}
-	if task.Key() != "doc-1" {
-		t.Fatalf("key = %q", task.Key())
+	if task.ID() != "doc-1" {
+		t.Fatalf("id = %q", task.ID())
 	}
 	if got := task.Headers(); !reflect.DeepEqual(got, map[string]string{"source": "scheduler", "trace-id": "trace-1"}) {
 		t.Fatalf("headers = %#v", got)
@@ -122,7 +122,7 @@ func TestNewProtoTask_DecodeProtoRoundTrip(t *testing.T) {
 	task, err := NewProtoTask(
 		Definition{Type: "document.review.v1", Queue: "reconcile"},
 		want,
-		WithKey("doc-7"),
+		WithID("doc-7"),
 	)
 	if err != nil {
 		t.Fatalf("NewProtoTask: %v", err)
@@ -376,7 +376,7 @@ func TestLogging_RecordsSuccessfulTask(t *testing.T) {
 		return nil
 	}, Logging(logger))
 
-	task, err := NewJSONTask(Definition{Type: "document.review.v1", Queue: "reconcile"}, struct{}{}, WithKey("doc-1"))
+	task, err := NewJSONTask(Definition{Type: "document.review.v1", Queue: "reconcile"}, struct{}{}, WithID("doc-1"))
 	if err != nil {
 		t.Fatalf("NewJSONTask: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestLogging_RecordsSuccessfulTask(t *testing.T) {
 		`"msg":"taskqueue processor completed"`,
 		`"task_type":"document.review.v1"`,
 		`"queue":"reconcile"`,
-		`"key":"doc-1"`,
+		`"task_id":"doc-1"`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("logs = %s, want %s", output, want)

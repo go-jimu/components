@@ -183,7 +183,7 @@ func TestScheduleConstructorsRejectEmptySchedule(t *testing.T) {
 // Intent: PeriodicTask should preserve a concrete task plus enqueue policy so
 // runtime schedulers can periodically enqueue the exact background task.
 func TestNewPeriodicTaskCapturesTaskScheduleAndEnqueuePolicy(t *testing.T) {
-	task, err := New(Definition{Type: "billing.generate_invoices.v1", Queue: "billing"}, []byte(`{"date":"2026-05-29"}`), WithKey("billing:2026-05-29"))
+	task, err := New(Definition{Type: "billing.generate_invoices.v1", Queue: "billing"}, []byte(`{"date":"2026-05-29"}`))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -307,5 +307,24 @@ func TestNewPeriodicTaskRejectsInvalidEnqueuePolicy(t *testing.T) {
 
 	if !errors.Is(err, ErrInvalidEnqueueOption) {
 		t.Fatalf("error = %v, want ErrInvalidEnqueueOption", err)
+	}
+}
+
+// Intent: a periodic task re-enqueues the same envelope on every fire, so a
+// fixed task ID would conflict with any earlier task the provider still
+// retains, such as an archived failure, and stop the schedule for good.
+func TestNewPeriodicTaskRejectsTaskID(t *testing.T) {
+	task, err := New(Definition{Type: "reports.generate_daily"}, []byte(`{}`), WithID("reports:daily"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	schedule, err := CronSchedule("0 2 * * *")
+	if err != nil {
+		t.Fatalf("CronSchedule: %v", err)
+	}
+
+	_, err = NewPeriodicTask("reports.daily", schedule, task)
+	if !errors.Is(err, ErrPeriodicTaskID) {
+		t.Fatalf("error = %v, want ErrPeriodicTaskID", err)
 	}
 }

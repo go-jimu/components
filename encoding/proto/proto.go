@@ -3,7 +3,7 @@
 package proto
 
 import (
-	"errors"
+	"fmt"
 	"reflect"
 
 	"github.com/go-jimu/components/encoding"
@@ -21,11 +21,15 @@ func init() {
 type codec struct{}
 
 func (codec) Marshal(v interface{}) ([]byte, error) {
-	return proto.Marshal(v.(proto.Message))
+	pm, err := getProtoMessage(v)
+	if err != nil {
+		return nil, err
+	}
+	return proto.Marshal(pm)
 }
 
 func (codec) Unmarshal(data []byte, v interface{}) error {
-	pm, err := getProtoMessage(v)
+	pm, err := getUnmarshalTarget(v)
 	if err != nil {
 		return err
 	}
@@ -36,15 +40,40 @@ func (codec) Name() string {
 	return Name
 }
 
+var protoMessageType = reflect.TypeOf((*proto.Message)(nil)).Elem()
+
+// getProtoMessage returns the non-nil proto message v holds directly or
+// through pointers.
 func getProtoMessage(v interface{}) (proto.Message, error) {
+	val := reflect.ValueOf(v)
 	if msg, ok := v.(proto.Message); ok {
+		if val.Kind() == reflect.Ptr && val.IsNil() {
+			return nil, fmt.Errorf("cannot marshal nil %T", v)
+		}
 		return msg, nil
 	}
-	val := reflect.ValueOf(v)
-	if val.Kind() != reflect.Ptr {
-		return nil, errors.New("not proto message")
+	if val.Kind() != reflect.Ptr || val.IsNil() {
+		return nil, fmt.Errorf("not proto message: %T", v)
 	}
+	return getProtoMessage(val.Elem().Interface())
+}
 
-	val = val.Elem()
-	return getProtoMessage(val.Interface())
+// getUnmarshalTarget returns a non-nil proto message to unmarshal into. Like
+// encoding/json, it allocates a nil message that v points to.
+func getUnmarshalTarget(v interface{}) (proto.Message, error) {
+	val := reflect.ValueOf(v)
+	for val.Kind() == reflect.Ptr {
+		if val.IsNil() {
+			return nil, fmt.Errorf("cannot unmarshal into nil %T", v)
+		}
+		if msg, ok := val.Interface().(proto.Message); ok {
+			return msg, nil
+		}
+		elem := val.Elem()
+		if elem.Kind() == reflect.Ptr && elem.IsNil() && elem.Type().Implements(protoMessageType) {
+			elem.Set(reflect.New(elem.Type().Elem()))
+		}
+		val = elem
+	}
+	return nil, fmt.Errorf("not proto message: %T", v)
 }

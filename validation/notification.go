@@ -5,15 +5,19 @@ import (
 )
 
 type (
-	// Notification define a interface to abstract notification pattern
+	// Notification collects validation errors so all of them can be reported
+	// at once instead of stopping at the first.
 	Notification interface {
+		// Add records err. A nil err is ignored.
 		Add(error)
+		// Err returns nil when nothing was added, and an *ErrChain otherwise.
 		Err() error
 	}
 
-	// ErrChain implement error interface
+	// ErrChain is the error returned by Notification.Err. It keeps the original
+	// errors, so errors.Is and errors.As match any of them.
 	ErrChain struct {
-		errors []string
+		errors []error
 	}
 
 	notification struct {
@@ -27,11 +31,11 @@ var (
 )
 
 func newErrChain() *ErrChain {
-	return &ErrChain{errors: []string{}}
+	return &ErrChain{}
 }
 
-func (e *ErrChain) add(msg string) {
-	e.errors = append(e.errors, msg)
+func (e *ErrChain) add(err error) {
+	e.errors = append(e.errors, err)
 }
 
 func (e *ErrChain) errCounts() int {
@@ -41,8 +45,20 @@ func (e *ErrChain) errCounts() int {
 func (e *ErrChain) Error() string {
 	t := make([]string, 0, 1+len(e.errors))
 	t = append(t, "errors raised:")
-	t = append(t, e.errors...)
+	for _, err := range e.errors {
+		t = append(t, err.Error())
+	}
 	return strings.Join(t, "\n- ")
+}
+
+// Unwrap returns the collected errors for errors.Is and errors.As.
+func (e *ErrChain) Unwrap() []error {
+	return e.errors
+}
+
+// Errors returns a copy of the collected errors in the order they were added.
+func (e *ErrChain) Errors() []error {
+	return append([]error(nil), e.errors...)
 }
 
 func NewSimpleNotification() Notification {
@@ -57,7 +73,7 @@ func (notify *notification) Add(err error) {
 	if notify.chain == nil {
 		notify.chain = newErrChain()
 	}
-	notify.chain.add(err.Error())
+	notify.chain.add(err)
 }
 
 func (notify *notification) Err() error {

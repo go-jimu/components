@@ -208,6 +208,7 @@ func TestTransitReportsMissingTransitionWithoutChangingState(t *testing.T) {
 
 	var transitionErr *fsm.TransitionError
 	require.ErrorAs(t, err, &transitionErr)
+	require.False(t, transitionErr.Guarded)
 	require.Equal(t, exampleStateUnpaid, transitionErr.Current)
 	require.Equal(t, exampleActionPay, transitionErr.Action)
 	require.EqualError(t, err, "transition from order.unpaid with action pay not found")
@@ -240,13 +241,10 @@ type rejectingStateContext struct {
 }
 
 func newRejectingStateContext(label fsm.StateLabel, err error) *rejectingStateContext {
-	state := fsm.NewSimpleState(label)
-	context := &rejectingStateContext{
-		current: state,
+	return &rejectingStateContext{
+		current: fsm.NewSimpleState(label),
 		err:     err,
 	}
-	state.SetContext(context)
-	return context
 }
 
 func (context *rejectingStateContext) CurrentState() fsm.State {
@@ -272,7 +270,6 @@ func TestTransitPropagatesSetStateErrorAfterPreparingNextState(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 	require.NotNil(t, context.rejected)
 	require.Equal(t, exampleStateCanceled, context.rejected.Label())
-	require.Same(t, context, context.rejected.Context())
 	require.Equal(t, exampleStatePaid, context.CurrentState().Label())
 }
 

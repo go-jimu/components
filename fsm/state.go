@@ -4,16 +4,18 @@ import "fmt"
 
 type (
 	// SimpleState is a reusable State implementation for concrete state structs
-	// that only need context and label storage.
+	// that only need label storage.
 	SimpleState struct {
-		context StateContext
-		label   StateLabel
+		label StateLabel
 	}
 
-	// TransitionError reports a missing transition for the current state/action.
+	// TransitionError reports that no transition could be taken for the current
+	// state/action. Guarded is false when no edge is registered, and true when
+	// edges exist but none of their conditions matched.
 	TransitionError struct {
 		Action  Action
 		Current StateLabel
+		Guarded bool
 	}
 
 	// StateBuilderError reports a missing, nil, or label-mismatched state builder.
@@ -47,14 +49,6 @@ func (s *SimpleState) Label() StateLabel {
 	return s.label
 }
 
-func (s *SimpleState) Context() StateContext {
-	return s.context
-}
-
-func (s *SimpleState) SetContext(context StateContext) {
-	s.context = context
-}
-
 func NewTransitionError(current StateLabel, action Action) *TransitionError {
 	return &TransitionError{
 		Action:  action,
@@ -62,7 +56,18 @@ func NewTransitionError(current StateLabel, action Action) *TransitionError {
 	}
 }
 
+func newGuardedTransitionError(current StateLabel, action Action) *TransitionError {
+	return &TransitionError{
+		Action:  action,
+		Current: current,
+		Guarded: true,
+	}
+}
+
 func (te *TransitionError) Error() string {
+	if te.Guarded {
+		return fmt.Sprintf("no transition condition matched from %s with action %s", te.Current, te.Action)
+	}
 	return fmt.Sprintf("transition from %s with action %s not found", te.Current, te.Action)
 }
 
