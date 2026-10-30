@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -252,5 +253,49 @@ func TestAtomicValue_Scan(t *testing.T) {
 	}{"a"})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Intent: a missing key yields a Value whose accessors all report the lookup
+// error instead of panicking.
+func TestErrValueReportsErrorFromEveryAccessor(t *testing.T) {
+	v := errValue{err: ErrNotFound}
+	checks := map[string]error{}
+	_, checks["Bool"] = v.Bool()
+	_, checks["Int"] = v.Int()
+	_, checks["Float"] = v.Float()
+	_, checks["Duration"] = v.Duration()
+	_, checks["String"] = v.String()
+	_, checks["Slice"] = v.Slice()
+	_, checks["Map"] = v.Map()
+	checks["Scan"] = v.Scan(new(struct{}))
+	for name, err := range checks {
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s error = %v, want ErrNotFound", name, err)
+		}
+	}
+	v.Store(1)
+	if v.Load() != nil {
+		t.Fatal("errValue must stay empty after Store")
+	}
+}
+
+// Intent: with WithResolveActualTypes, a value that is a single placeholder
+// keeps the type of its resolved text.
+func TestWithResolveActualTypesConvertsWholePlaceholders(t *testing.T) {
+	c := New(
+		WithSource(newTestJSONSource(`{"port":"${PORT:8080}","addr":"${HOST:a}:${PORT:8080}"}`)),
+		WithResolveActualTypes(true),
+	)
+	if err := c.Load(); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if port := c.Value("port").Load(); port != int64(8080) {
+		t.Fatalf("port = %#v, want int64(8080)", port)
+	}
+	if addr, _ := c.Value("addr").String(); addr != "a:8080" {
+		t.Fatalf("addr = %q, want %q", addr, "a:8080")
 	}
 }

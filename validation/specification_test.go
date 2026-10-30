@@ -67,3 +67,40 @@ func TestSpec(t *testing.T) {
 		t.FailNow()
 	}
 }
+
+// Intent: every combinator evaluates its operands with boolean logic and
+// describes itself from its operands.
+func TestSpecificationCombinators(t *testing.T) {
+	ge10 := new(testSpecV1) // value >= 10
+	lt80 := new(testSpecV2) // value < 80
+	inputs := []int{5, 50, 90}
+
+	tests := []struct {
+		name string
+		spec Specification
+		want []bool // for each of inputs
+		str  string
+	}{
+		{"and", NewAndSpecification(ge10, lt80), []bool{false, true, false}, "(value >= 10) AND (value < 80)"},
+		{"or", NewOrSpecification(ge10, lt80), []bool{true, true, true}, "(value >= 10) OR (value < 80)"},
+		{"and not", NewAndNotSpecification(ge10, lt80), []bool{false, false, true}, "(value >= 10) AND !(value < 80)"},
+		{"or not", NewOrNotSpecification(lt80, ge10), []bool{true, true, false}, "(value < 80) OR !(value >= 10)"},
+		{"not", NewNotSpecification(ge10), []bool{true, false, false}, "!(value >= 10)"},
+		{"all", NewAllSpecification(ge10, lt80), []bool{false, true, false}, "ALL[value >= 10, value < 80]"},
+		{"any", NewAnySpecification(ge10, lt80), []bool{true, true, true}, "ANY[value >= 10, value < 80]"},
+		{"empty all", NewAllSpecification(), []bool{true, true, true}, "ALL[]"},
+		{"empty any", NewAnySpecification(), []bool{false, false, false}, "ANY[]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for i, in := range inputs {
+				if got := tt.spec.IsSatisfiedBy(in); got != tt.want[i] {
+					t.Fatalf("IsSatisfiedBy(%d) = %v, want %v", in, got, tt.want[i])
+				}
+			}
+			if got := tt.spec.String(); got != tt.str {
+				t.Fatalf("String() = %q, want %q", got, tt.str)
+			}
+		})
+	}
+}
