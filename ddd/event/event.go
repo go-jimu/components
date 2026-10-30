@@ -51,8 +51,8 @@ type CloseInterruptedContext struct {
 // Its methods are safe for concurrent use, but they do not synchronize other
 // aggregate state or mutable values referenced by an Event.
 type Collection interface {
-	// Add records an event and reports whether the collection accepted it.
-	Add(Event) bool
+	// Add records an event in the current batch. A nil event is ignored.
+	Add(Event)
 	// Drain returns the pending events in acceptance order and clears the current
 	// batch. An Add concurrent with Drain belongs to either that returned batch or
 	// the next batch.

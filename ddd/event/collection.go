@@ -13,12 +13,15 @@ func NewCollection() Collection {
 	return &collection{}
 }
 
-func (c *collection) Add(event Event) bool {
+func (c *collection) Add(event Event) {
+	if event == nil {
+		return
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.events = append(c.events, event)
-	return true
 }
 
 func (c *collection) Drain() []Event {

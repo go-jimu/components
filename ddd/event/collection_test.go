@@ -3,7 +3,6 @@ package event_test
 import (
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,8 +23,8 @@ func (e testEvent) Kind() event.Kind { return e.kind }
 func TestCollectionAddDrainOrderAndLen(t *testing.T) {
 	collection := event.NewCollection()
 
-	require.True(t, collection.Add(testEvent{kind: "order.paid", name: "first"}))
-	require.True(t, collection.Add(testEvent{kind: "order.confirmed", name: "second"}))
+	collection.Add(testEvent{kind: "order.paid", name: "first"})
+	collection.Add(testEvent{kind: "order.confirmed", name: "second"})
 	require.Equal(t, 2, collection.Len())
 
 	drained := collection.Drain()
@@ -40,14 +39,14 @@ func TestCollectionAddDrainOrderAndLen(t *testing.T) {
 // the application drains the previous batch.
 func TestCollectionSupportsMultipleDrainCycles(t *testing.T) {
 	collection := event.NewCollection()
-	require.True(t, collection.Add(testEvent{kind: "player.joined", name: "first"}))
+	collection.Add(testEvent{kind: "player.joined", name: "first"})
 
 	firstBatch := collection.Drain()
 	require.Len(t, firstBatch, 1)
 	require.Equal(t, "first", firstBatch[0].(testEvent).name)
 	require.Equal(t, 0, collection.Len())
 
-	require.True(t, collection.Add(testEvent{kind: "player.moved", name: "second"}))
+	collection.Add(testEvent{kind: "player.moved", name: "second"})
 	require.Equal(t, 1, collection.Len())
 	// A later batch must not overwrite storage returned by an earlier Drain.
 	require.Equal(t, "first", firstBatch[0].(testEvent).name)
@@ -66,7 +65,7 @@ func TestCollectionEmptyDrainDoesNotCloseCollection(t *testing.T) {
 	collection := event.NewCollection()
 
 	require.Empty(t, collection.Drain())
-	require.True(t, collection.Add(testEvent{kind: "player.joined"}))
+	collection.Add(testEvent{kind: "player.joined"})
 	require.Len(t, collection.Drain(), 1)
 }
 
@@ -87,7 +86,6 @@ func TestCollectionConcurrentAddDrainAndLen(t *testing.T) {
 	}
 	defer stopDrainer()
 
-	var rejected atomic.Int64
 	var producers sync.WaitGroup
 	producers.Add(producerCount)
 	for producer := range producerCount {
@@ -96,9 +94,7 @@ func TestCollectionConcurrentAddDrainAndLen(t *testing.T) {
 			<-start
 			for sequence := range eventsPerProducer {
 				id := producer*eventsPerProducer + sequence
-				if !collection.Add(testEvent{kind: "player.changed", id: id}) {
-					rejected.Add(1)
-				}
+				collection.Add(testEvent{kind: "player.changed", id: id})
 				runtime.Gosched()
 			}
 		}()
@@ -142,7 +138,6 @@ func TestCollectionConcurrentAddDrainAndLen(t *testing.T) {
 	stopDrainer()
 	waitFor(drainerDone, "event drainer")
 
-	require.Zero(t, rejected.Load())
 	require.Len(t, drained, producerCount*eventsPerProducer)
 	require.Equal(t, 0, collection.Len())
 
@@ -163,4 +158,17 @@ func TestCollectionConcurrentAddDrainAndLen(t *testing.T) {
 		nextSequence[producer]++
 	}
 	require.NotContains(t, seen, false)
+}
+
+// Intent: a nil event is a programming error with nothing to dispatch, so it
+// must not occupy a slot in the batch.
+func TestCollectionIgnoresNilEvent(t *testing.T) {
+	collection := event.NewCollection()
+
+	collection.Add(nil)
+	collection.Add(testEvent{kind: "order.paid", name: "only"})
+	collection.Add(nil)
+
+	require.Equal(t, 1, collection.Len())
+	require.Equal(t, []event.Event{testEvent{kind: "order.paid", name: "only"}}, collection.Drain())
 }

@@ -6,6 +6,11 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Changed: `event.Collection.Add` no longer returns a bool. It always returned
+  true since collections became reusable across `Drain`, so the result only
+  invited dead error handling. `Add(nil)` is now ignored instead of putting nil
+  into the batch. Calls that use `Add` as a statement compile unchanged.
+
 - Fixed: `sloghelper.Error` no longer races when called concurrently; it used
   to write every checked error into a shared package variable. `Error(nil)`
   and `ErrorValue(nil)` no longer panic, and oops errors use `ErrorKey`.
