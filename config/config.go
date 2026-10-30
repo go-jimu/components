@@ -158,7 +158,9 @@ type change struct {
 
 // refreshCache brings every cached value up to date with the reader. A value
 // whose type changed cannot be stored into the existing Value, so the cache
-// entry is replaced; Values obtained before the change keep the old value.
+// entry is replaced; Values obtained before the change keep the old value. A
+// removed key is cached as not found, so Value reports ErrNotFound and the
+// key's observers hear about the removal and about the key coming back.
 func (c *config) refreshCache() []change {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
@@ -168,10 +170,13 @@ func (c *config) refreshCache() []change {
 		k, _ := key.(string)
 		v, _ := value.(Value)
 		n, ok := c.reader.Value(k)
-		if !ok || reflect.DeepEqual(n.Load(), v.Load()) {
+		if !ok {
+			n = &errValue{err: ErrNotFound}
+		}
+		if reflect.DeepEqual(n.Load(), v.Load()) {
 			return true
 		}
-		if reflect.TypeOf(n.Load()) == reflect.TypeOf(v.Load()) {
+		if ok && reflect.TypeOf(n.Load()) == reflect.TypeOf(v.Load()) {
 			v.Store(n.Load())
 		} else {
 			c.cached.Store(k, n)
