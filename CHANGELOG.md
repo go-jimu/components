@@ -1,6 +1,10 @@
 # Change log
 
-## Unreleased
+## v0.11.0
+
+This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
+and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
+Removed entries below.
 
 - Changed: `event.Dispatcher.Dispatch` and `DispatchAll` take a
   `context.Context`. When the in-memory queue is full, the caller waits only
