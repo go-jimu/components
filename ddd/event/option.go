@@ -66,9 +66,9 @@ func WithCloseInterruptedHandler(fn func(CloseInterruptedContext)) Option {
 }
 
 // WithWorkers sets how many events the dispatcher may handle concurrently. The
-// default is 5. Size it against the resources handlers share, such as the
-// database connection pool. With 1 worker, every event is handled in the order
-// it was accepted.
+// default is 5, so handlers and hooks run on several goroutines at once. Size it
+// against the resources handlers share, such as the database connection pool.
+// With 1 worker, every event is handled in the order it was accepted.
 func WithWorkers(n int) Option {
 	return func(d *InMemoryDispatcher) {
 		if n > 0 {
@@ -86,7 +86,9 @@ func WithKeyFunc(fn func(Event) string) Option {
 	}
 }
 
-// WithBufferSize sets the maximum number of queued events.
+// WithBufferSize sets how many events the queue holds before DispatchAll waits.
+// A single call with more events than size is accepted once the queue is empty,
+// so the queue can briefly hold more.
 func WithBufferSize(size int) Option {
 	return func(d *InMemoryDispatcher) {
 		if size > 0 {

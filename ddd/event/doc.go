@@ -8,15 +8,17 @@
 //
 // Dispatch and DispatchAll report admission only: whether the dispatcher
 // accepted the events, never whether handlers succeeded. DispatchAll accepts
-// all of its events or none. The ctx passed in bounds only the wait for
-// admission. Handlers run after the caller returns, on a context owned by the
-// dispatcher; copy the caller values a handler needs, such as trace or request
-// IDs, through SourceContext, typically in WithContextFactory.
+// all of its events or none, and calls waiting for queue space are admitted in
+// arrival order. The ctx passed in bounds only the wait for admission. Handlers
+// run asynchronously, possibly before DispatchAll returns, on a context owned by
+// the dispatcher; copy the caller values a handler needs, such as trace or
+// request IDs, through SourceContext, typically in WithContextFactory.
 //
 // # Ordering
 //
-// InMemoryDispatcher handles events on a pool of workers, five by default.
-// Ordering is per key, usually the ID of the aggregate that raised the event:
+// InMemoryDispatcher handles events on a pool of workers, five by default, so
+// a Handler and the hooks set by options run on several goroutines at once:
+// make them safe for concurrent use. Ordering is per key, usually the ID of the aggregate that raised the event:
 // events with the same key, from Keyed or WithKeyFunc, run one at a time in
 // acceptance order. Events with different keys, or no key, run concurrently.
 // The handlers of one event run in subscription order.
@@ -32,6 +34,11 @@
 // the pool. Set WithHandlerTimeout and keep handlers responsive to their
 // context. Size WithWorkers against the resources handlers share, such as the
 // database connection pool.
+//
+// A handler that dispatches a follow-up event waits for queue space while
+// holding its worker; when every worker does this on a full queue, they wait
+// on each other. Dispatch follow-ups from the use case, or pass a ctx with a
+// deadline.
 //
 // # Durability
 //

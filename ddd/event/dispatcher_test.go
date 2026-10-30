@@ -1037,3 +1037,129 @@ func TestDispatcherCloseInterruptedReportsAllWorkers(t *testing.T) {
 	require.Equal(t, []event.Event{keyed("a", "a1"), keyed("b", "b1")}, snapshot.InFlight)
 	require.Equal(t, []event.Event{keyed("a", "a2")}, snapshot.Pending)
 }
+
+// Intent: waiting calls are admitted first come, first served. A batch that
+// needs more space than one freed slot keeps its place, so single events
+// dispatched after it cannot starve it.
+func TestDispatcherWaitingCallsAdmittedInArrivalOrder(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var handled []string
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1), event.WithBufferSize(2))
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(_ context.Context, ev event.Event) {
+			mu.Lock()
+			handled = append(handled, eventName(ev))
+			mu.Unlock()
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+		},
+	})
+
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "in-flight"}))
+	receiveWithin(t, "first handler start", started)
+	require.NoError(t, dispatcher.DispatchAll(context.Background(), []event.Event{
+		testEvent{kind: "order.event", name: "queued-1"},
+		testEvent{kind: "order.event", name: "queued-2"},
+	}))
+
+	batch := make(chan error, 1)
+	go func() {
+		batch <- dispatcher.DispatchAll(context.Background(), []event.Event{
+			testEvent{kind: "order.event", name: "batch-1"},
+			testEvent{kind: "order.event", name: "batch-2"},
+		})
+	}()
+	time.Sleep(20 * time.Millisecond)
+	single := make(chan error, 1)
+	go func() {
+		single <- dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "single"})
+	}()
+	time.Sleep(20 * time.Millisecond)
+
+	close(release)
+	require.NoError(t, receiveWithin(t, "batch dispatch", batch))
+	require.NoError(t, receiveWithin(t, "single dispatch", single))
+	require.NoError(t, dispatcher.Close(context.Background()))
+	require.Equal(t, []string{"in-flight", "queued-1", "queued-2", "batch-1", "batch-2", "single"}, handled)
+}
+
+// Intent: a waiting call that gives up passes its place on, so the call behind
+// it is admitted when space frees.
+func TestDispatcherAbandonedWaitPassesTurnOn(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1), event.WithBufferSize(1))
+	defer dispatcher.Close(context.Background())
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(context.Context, event.Event) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+		},
+	})
+
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "in-flight"}))
+	receiveWithin(t, "first handler start", started)
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "queued"}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	abandoned := make(chan error, 1)
+	go func() {
+		abandoned <- dispatcher.Dispatch(ctx, testEvent{kind: "order.event", name: "abandoned"})
+	}()
+	time.Sleep(20 * time.Millisecond)
+	next := make(chan error, 1)
+	go func() {
+		next <- dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "next"})
+	}()
+	time.Sleep(20 * time.Millisecond)
+
+	cancel()
+	require.ErrorIs(t, receiveWithin(t, "abandoned dispatch", abandoned), context.Canceled)
+	close(release)
+	require.NoError(t, receiveWithin(t, "next dispatch", next))
+}
+
+type panickingKey struct{ testEvent }
+
+func (panickingKey) Key() string { panic("key failed") }
+
+// Intent: a panicking key leaves the dispatcher usable and queues none of the
+// batch.
+func TestDispatcherPanickingKeyQueuesNothing(t *testing.T) {
+	handled := make(chan string, 2)
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(_ context.Context, ev event.Event) {
+			handled <- eventName(ev)
+		},
+	})
+
+	require.PanicsWithValue(t, "key failed", func() {
+		_ = dispatcher.DispatchAll(context.Background(), []event.Event{
+			testEvent{kind: "order.event", name: "before-panic"},
+			panickingKey{testEvent{kind: "order.event", name: "panics"}},
+		})
+	})
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "after"}))
+	require.NoError(t, dispatcher.Close(context.Background()))
+	close(handled)
+	var names []string
+	for name := range handled {
+		names = append(names, name)
+	}
+	require.Equal(t, []string{"after"}, names)
+}

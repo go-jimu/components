@@ -32,6 +32,8 @@ type InMemoryDispatcher struct {
 	ready                   *sync.Cond
 	spaceFreed              chan struct{}
 	queue                   []queued
+	waiters                 []uint64
+	nextTicket              uint64
 	inFlight                map[uint64]queued
 	busyKeys                map[string]struct{}
 	closed                  bool
@@ -117,13 +119,15 @@ func (d *InMemoryDispatcher) Dispatch(ctx context.Context, event Event) error {
 
 // DispatchAll accepts all events or none of them. When the queue cannot hold
 // them, it waits until it can or until ctx is done; ctx does not reject events
-// that can be queued immediately. More events than the buffer size are
-// accepted once the queue is empty. Nil events are skipped.
+// that can be queued immediately. Waiting calls are admitted first come, first
+// served, so a later call never overtakes an earlier one. More events than the
+// buffer size are accepted once the queue is empty. Nil events are skipped.
 func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) error {
-	accepted := make([]Event, 0, len(events))
+	accepted := make([]queued, 0, len(events))
 	for _, event := range events {
 		if event != nil {
-			accepted = append(accepted, event)
+			// Keys run user code, so they are computed before taking the lock.
+			accepted = append(accepted, queued{key: d.keyOf(event), event: event})
 		}
 	}
 	if len(accepted) == 0 {
@@ -134,26 +138,35 @@ func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) er
 	}
 	source := context.WithoutCancel(ctx)
 
+	var turn uint64 // 0 until this call joins the line for queue space
 	for {
 		d.mu.Lock()
 		if d.closed {
+			d.removeWaiterLocked(turn)
 			d.mu.Unlock()
 			d.logger.Warn("domain event dispatch rejected", slog.Int("event_count", len(accepted)))
 			return ErrDispatcherClosed
 		}
-		if len(d.queue) == 0 || len(d.queue)+len(accepted) <= d.bufferSize {
-			for _, event := range accepted {
+		if d.isFirstWaiterLocked(turn) && d.fitsLocked(len(accepted)) {
+			d.removeWaiterLocked(turn)
+			for _, item := range accepted {
 				d.nextSeq++
-				d.queue = append(d.queue, queued{
-					seq:    d.nextSeq,
-					key:    d.keyOf(event),
-					event:  event,
-					source: source,
-				})
+				item.seq = d.nextSeq
+				item.source = source
+				d.queue = append(d.queue, item)
 			}
 			d.ready.Broadcast()
+			if len(d.waiters) > 0 {
+				// The next waiter may fit in the space that is left.
+				d.signalSpaceFreedLocked()
+			}
 			d.mu.Unlock()
 			return nil
+		}
+		if turn == 0 {
+			d.nextTicket++
+			turn = d.nextTicket
+			d.waiters = append(d.waiters, turn)
 		}
 		spaceFreed := d.spaceFreed
 		d.mu.Unlock()
@@ -161,9 +174,36 @@ func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) er
 		select {
 		case <-spaceFreed:
 		case <-ctx.Done():
+			d.mu.Lock()
+			d.removeWaiterLocked(turn)
+			// The waiter behind this one may now be first.
+			d.signalSpaceFreedLocked()
+			d.mu.Unlock()
 			return ctx.Err()
 		}
 	}
+}
+
+// isFirstWaiterLocked reports whether turn may be admitted now: a call that has
+// not joined the line goes first only when nobody is waiting.
+func (d *InMemoryDispatcher) isFirstWaiterLocked(turn uint64) bool {
+	if turn == 0 {
+		return len(d.waiters) == 0
+	}
+	return d.waiters[0] == turn
+}
+
+func (d *InMemoryDispatcher) removeWaiterLocked(turn uint64) {
+	if turn == 0 {
+		return
+	}
+	if i := slices.Index(d.waiters, turn); i >= 0 {
+		d.waiters = slices.Delete(d.waiters, i, i+1)
+	}
+}
+
+func (d *InMemoryDispatcher) fitsLocked(n int) bool {
+	return len(d.queue) == 0 || len(d.queue)+n <= d.bufferSize
 }
 
 // keyOf returns the ordering key of event, or "" when it has none. A Keyed
