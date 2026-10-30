@@ -1,39 +1,41 @@
-// Package event provides domain event primitives for use inside one bounded
-// context. Concrete dispatchers may be in-memory or backed by external
-// middleware, but the package does not expose broker-specific concepts.
+// Package event provides domain events for use inside one bounded context:
+// facts an aggregate raises, collected in a Collection and dispatched after the
+// aggregate is persisted. Each Handler is a follow-up transaction that owns its
+// own error policy. Integration messages that cross a boundary belong in
+// ddd/message.
 //
-// The package is intentionally scoped to domain events inside one bounded
-// context. It is not an integration message bus, broker abstraction,
-// transactional outbox, or reliable delivery mechanism across process restarts.
+// # Dispatch
 //
-// Dispatch errors report only dispatcher admission or delivery failures. They
-// do not report handler success or failure. Handlers represent follow-up
-// transactions and own their own error policy.
+// Dispatch and DispatchAll report admission only: whether the dispatcher
+// accepted the events, never whether handlers succeeded. DispatchAll accepts
+// all of its events or none. The ctx passed in bounds only the wait for
+// admission. Handlers run after the caller returns, on a context owned by the
+// dispatcher; copy the caller values a handler needs, such as trace or request
+// IDs, through SourceContext, typically in WithContextFactory.
 //
-// The ctx passed to Dispatch only bounds how long the caller waits to be
-// admitted. Handlers run after the caller returns, so their context is owned by
-// the dispatcher and does not inherit the caller's cancellation, deadline, or
-// values. Copy the caller values a handler needs, such as trace or request
-// identifiers, through SourceContext.
+// # Ordering
 //
 // InMemoryDispatcher handles events on a pool of workers, five by default.
-// Ordering is per key: events with the same key, from Keyed or WithKeyFunc,
-// are handled one at a time in the order they were accepted. Events with
-// different keys, and events without a key, are handled concurrently with no
-// ordering between them. The handlers of one event run in subscription order.
-// Usually the key is the ID of the aggregate that raised the event.
+// Ordering is per key, usually the ID of the aggregate that raised the event:
+// events with the same key, from Keyed or WithKeyFunc, run one at a time in
+// acceptance order. Events with different keys, or no key, run concurrently.
+// The handlers of one event run in subscription order.
 //
 // Acceptance order is not commit order: two requests that commit in one order
-// may dispatch in the other. Handlers should be idempotent and tolerate events
-// of different transactions arriving out of order, for example by checking an
-// aggregate version.
+// may dispatch in the other. Write handlers to be idempotent and to tolerate
+// events of different transactions arriving out of order, for example by
+// checking an aggregate version.
 //
-// Workers are shared, so a handler that blocks holds a worker. Set
-// WithHandlerTimeout and keep handlers responsive to their context; with five
-// workers, five stuck handlers stop all handling. Size WithWorkers against the
-// resources handlers share, such as the database connection pool.
+// # Capacity
 //
-// Accepted events live only in memory and are lost if the process exits before
-// they are handled. Follow-up work that must not be lost needs a durable
-// mechanism or an explicit step in the use case.
+// A running handler holds a worker, so a stuck handler takes a worker out of
+// the pool. Set WithHandlerTimeout and keep handlers responsive to their
+// context. Size WithWorkers against the resources handlers share, such as the
+// database connection pool.
+//
+// # Durability
+//
+// Delivery is best-effort and in memory: events still queued when the process
+// exits are lost. Put follow-up work that must survive a crash behind a
+// durable mechanism or into the use case itself.
 package event

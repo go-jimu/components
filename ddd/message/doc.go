@@ -1,26 +1,21 @@
-// Package message provides protobuf-first integration message primitives for
-// direct, non-transactional communication across boundaries.
+// Package message provides protobuf-first integration messages for direct,
+// non-transactional communication across bounded contexts or services. Domain
+// facts inside one bounded context belong in ddd/event.
 //
-// The package is separate from ddd/event. Domain events model facts raised
-// inside a bounded context and are usually dispatched after persistence.
-// Integration messages in this package wrap protobuf payloads with routing and
-// trace metadata for direct publication without transactional guarantees.
+// Kind is the semantic contract that routes a message to its handlers and
+// resolves its payload type. Providers map Kind, ID, OccurredAt, Key, and
+// Headers onto their own broker envelopes, such as topics and record headers.
 //
-// Message Kind is a semantic contract identifier used for handler routing and
-// payload resolution. It is not a topic, subject, queue, partition, or routing
-// key, although providers may map it to those concepts.
+// Subscriber registers handlers. The broker runtime (polling,
+// acknowledgement, offset commit, retry, redelivery, dead-letter routing) is
+// the provider's.
 //
-// Subscriber only means handler registration. Broker runtime concerns such as
-// polling, acknowledgement, offset commit, retry, redelivery, and dead-letter
-// routing belong to provider or application code.
+// Failures come in two layers:
 //
-// Handler failures and provider runtime failures are separate layers.
-// Handler.Handle returns message-level failures for one delivered integration
-// message. Runner.Run returns why a provider runtime loop terminated
-// abnormally. Context cancellation or expiration is a normal shutdown and
-// returns nil; a non-nil Run error means the runtime cannot continue safely.
-//
-// Message ID, Kind, OccurredAt, Key, and Headers are transport-neutral fields.
-// Providers decide how to encode them into their own envelopes. This package
-// intentionally does not define Kafka-style header names.
+//   - Handler.Handle returns a message-level failure for one delivered
+//     message. Each provider documents its policy for these: retry,
+//     dead-letter, drop, or record.
+//   - Runner.Run returns a runtime-level failure: the provider loop cannot
+//     continue safely. Context cancellation or expiration is a normal shutdown
+//     and returns nil, matching taskqueue.Runner.
 package message

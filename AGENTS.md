@@ -5,21 +5,24 @@ backward-compatible when practical, and verified with `go test ./...`.
 
 ## Package Orientation
 
-Start with `README.md` for the package map. Before generating consumer code for
-a package, read its `doc.go` and any `example_test.go` in that package; the
-examples are executable and should be treated as the preferred usage shape.
+`README.md` maps needs to packages. Before writing or changing code that uses a
+package, read its `doc.go` and `example_test.go`; the examples are executable
+and set the usage shape. Where a package has a README, the README is its full
+guidance.
 
-- Use `config` for explicit source composition and `config/loader` for the
-  defaults-plus-profile application loading flow. Read `config/README.md`.
-- Use `encoding` as a codec registry. Blank import concrete codecs such as
-  `encoding/json`, `encoding/yaml`, `encoding/toml`, or `encoding/proto`.
-- Use `ddd/event` for same bounded-context domain events.
-- Use `ddd/message` for protobuf integration messages and in-process routing.
-- Use `taskqueue` for provider-neutral background task contracts.
-- Use `validation` for lightweight specification and notification helpers.
-- Use `sloghelper` with the standard library `log/slog` for new logging code.
-- Treat `logger` and `mediator` as legacy compatibility packages. Prefer
-  `sloghelper` and `ddd/event` for new code.
+- `config`: read `config/README.md`. Application code starts at
+  `config/loader`.
+- `encoding`: a codec registry. Blank import the codecs in use, such as
+  `encoding/json` or `encoding/yaml`.
+- `ddd/event`: domain events inside one bounded context, dispatched
+  concurrently and ordered per key.
+- `ddd/message`: protobuf integration messages across boundaries.
+- `taskqueue`: read `taskqueue/README.md`, whose Provider adapters checklist
+  also covers adapter code.
+- `validation`, `sloghelper`: small helpers; `sloghelper` is the logging
+  package for new code.
+- `logger` and `mediator` are legacy; new code uses `sloghelper` and
+  `ddd/event`.
 
 ## FSM Usage
 
