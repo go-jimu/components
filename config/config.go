@@ -47,11 +47,16 @@ const (
 type config struct {
 	opts     options
 	reader   *reader
-	cached   sync.Map
 	watchers []Watcher
 
-	observerMu sync.Mutex
-	observers  map[string][]Observer
+	// cached is read without a lock; cacheMu serializes every write to it with
+	// the reader read that produced the value, and guards observers. notifyMu
+	// serializes notify, so observers of one key run one at a time and in
+	// change order.
+	cached    sync.Map
+	cacheMu   sync.Mutex
+	observers map[string][]Observer
+	notifyMu  sync.Mutex
 
 	done      chan struct{}
 	closeOnce sync.Once
@@ -132,11 +137,33 @@ func nextWatchRetryDelay(delay time.Duration) time.Duration {
 	return min(2*delay, watchRetryCap)
 }
 
-// notify updates cached values that changed and calls their observers. A
-// value whose type changed cannot be stored into the existing Value, so the
-// cache entry is replaced; Values obtained before the change keep the old
-// value.
+// notify updates cached values that changed and calls their observers.
+// Observers run outside cacheMu, so they may call Value and Watch.
 func (c *config) notify() {
+	c.notifyMu.Lock()
+	defer c.notifyMu.Unlock()
+
+	for _, change := range c.refreshCache() {
+		for _, observe := range change.observers {
+			observe(change.key, change.value)
+		}
+	}
+}
+
+type change struct {
+	key       string
+	value     Value
+	observers []Observer
+}
+
+// refreshCache brings every cached value up to date with the reader. A value
+// whose type changed cannot be stored into the existing Value, so the cache
+// entry is replaced; Values obtained before the change keep the old value.
+func (c *config) refreshCache() []change {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+
+	var changes []change
 	c.cached.Range(func(key, value interface{}) bool {
 		k, _ := key.(string)
 		v, _ := value.(Value)
@@ -150,17 +177,14 @@ func (c *config) notify() {
 			c.cached.Store(k, n)
 			v = n
 		}
-		for _, observe := range c.observersOf(k) {
-			observe(k, v)
-		}
+		changes = append(changes, change{
+			key:       k,
+			value:     v,
+			observers: append([]Observer(nil), c.observers[k]...),
+		})
 		return true
 	})
-}
-
-func (c *config) observersOf(key string) []Observer {
-	c.observerMu.Lock()
-	defer c.observerMu.Unlock()
-	return append([]Observer(nil), c.observers[key]...)
+	return changes
 }
 
 // upsertKeyValues returns a copy of snapshot where entries with the same Key
@@ -194,10 +218,23 @@ func flattenKeyValues(snapshots [][]*KeyValue, index int, replacement []*KeyValu
 	return all
 }
 
+// Load reads every source and replaces the whole configuration, then starts
+// watching the sources. Load can be called again, for example to retry after
+// an error: each call starts over from the sources, and the sources are
+// watched once.
 func (c *config) Load() error {
+	if err := c.load(); err != nil {
+		return err
+	}
+	c.notify()
+	return nil
+}
+
+func (c *config) load() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	snapshots := make([][]*KeyValue, 0, len(c.opts.sources))
 	for _, src := range c.opts.sources {
 		kvs, err := src.Load()
 		if err != nil {
@@ -206,39 +243,64 @@ func (c *config) Load() error {
 		for _, v := range kvs {
 			slog.Debug(fmt.Sprintf("config loaded: %s format: %s", v.Key, v.Format))
 		}
-		if err = c.reader.Merge(kvs...); err != nil {
-			slog.Error("failed to merge config source", sloghelper.Error(err))
-			return err
-		}
-		c.snapshots = append(c.snapshots, kvs)
+		snapshots = append(snapshots, kvs)
 	}
-	if err := c.reader.Resolve(); err != nil {
-		slog.Error("failed to resolve config source", sloghelper.Error(err))
+	if err := c.reader.Reset(flattenKeyValues(snapshots, -1, nil)...); err != nil {
+		slog.Error("failed to load config sources", sloghelper.Error(err))
 		return err
+	}
+	c.snapshots = snapshots
+	if len(c.watchers) > 0 {
+		return nil
 	}
 	// Watch after every source is loaded, so a reload always sees a snapshot
 	// for each source.
-	for i, src := range c.opts.sources {
+	watchers := make([]Watcher, 0, len(c.opts.sources))
+	for _, src := range c.opts.sources {
 		w, err := src.Watch()
 		if err != nil {
 			slog.Error("failed to watch config source", sloghelper.Error(err))
+			for _, started := range watchers {
+				_ = started.Stop()
+			}
 			return err
 		}
-		c.watchers = append(c.watchers, w)
+		watchers = append(watchers, w)
+	}
+	c.watchers = watchers
+	for i, w := range watchers {
 		go c.watch(i, w)
 	}
 	return nil
 }
 
 func (c *config) Value(key string) Value {
-	if v, ok := c.cached.Load(key); ok {
-		return v.(Value)
+	if v, ok := c.cachedValue(key); ok {
+		return v
+	}
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	return c.valueLocked(key)
+}
+
+func (c *config) valueLocked(key string) Value {
+	if v, ok := c.cachedValue(key); ok {
+		return v
 	}
 	if v, ok := c.reader.Value(key); ok {
 		c.cached.Store(key, v)
 		return v
 	}
 	return &errValue{err: ErrNotFound}
+}
+
+func (c *config) cachedValue(key string) (Value, bool) {
+	v, ok := c.cached.Load(key)
+	if !ok {
+		return nil, false
+	}
+	value, ok := v.(Value)
+	return value, ok
 }
 
 func (c *config) Scan(v interface{}) error {
@@ -252,11 +314,13 @@ func (c *config) Scan(v interface{}) error {
 // Watch registers o to be called when the value at key changes. Every observer
 // registered for a key is called.
 func (c *config) Watch(key string, o Observer) error {
-	if v := c.Value(key); v.Load() == nil {
+	// Caching the value and registering o under one lock means every change
+	// after the value was read reaches o.
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	if v := c.valueLocked(key); v.Load() == nil {
 		return ErrNotFound
 	}
-	c.observerMu.Lock()
-	defer c.observerMu.Unlock()
 	if c.observers == nil {
 		c.observers = make(map[string][]Observer)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -72,9 +73,8 @@ func coerceScalar(value interface{}, kind reflect.Kind) interface{} {
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64:
 		if s, ok := value.(string); ok {
-			n := json.Number(strings.TrimSpace(s))
-			if _, err := n.Float64(); err == nil {
-				return n
+			if s = strings.TrimSpace(s); isJSONNumber(s) {
+				return json.Number(s)
 			}
 		}
 	case reflect.String:
@@ -87,6 +87,16 @@ func coerceScalar(value interface{}, kind reflect.Kind) interface{} {
 	default:
 	}
 	return value
+}
+
+// isJSONNumber reports whether s is a JSON number literal. NaN and Inf parse
+// as floats but have no JSON form, so they stay strings for json.Unmarshal to
+// report.
+func isJSONNumber(s string) bool {
+	if s == "" || (s[0] != '-' && (s[0] < '0' || s[0] > '9')) {
+		return false
+	}
+	return json.Valid([]byte(s))
 }
 
 func coerceComposite(value interface{}, t reflect.Type) interface{} {
@@ -135,8 +145,8 @@ func coerceStruct(m map[string]interface{}, t reflect.Type) map[string]interface
 	fields := jsonFields(t)
 	dst := make(map[string]interface{}, len(m))
 	for k, v := range m {
-		if ft, ok := matchField(fields, k); ok {
-			dst[k] = coerce(v, ft)
+		if f, ok := matchField(fields, k); ok {
+			dst[k] = f.coerce(v)
 			continue
 		}
 		dst[k] = v
@@ -145,13 +155,37 @@ func coerceStruct(m map[string]interface{}, t reflect.Type) map[string]interface
 }
 
 type jsonField struct {
-	name string
-	typ  reflect.Type
+	name      string
+	typ       reflect.Type
+	depth     int
+	tagged    bool
+	stringOpt bool
+}
+
+// coerce converts v for the field. A field tagged ",string" takes its scalar
+// value quoted, so numbers and bools become strings and strings stay as they
+// are.
+func (f jsonField) coerce(v interface{}) interface{} {
+	if f.stringOpt {
+		return coerceScalar(v, reflect.String)
+	}
+	return coerce(v, f.typ)
 }
 
 // jsonFields lists the fields encoding/json would decode into, including
-// fields promoted from untagged embedded structs.
+// fields promoted from untagged embedded structs, and keeps only the dominant
+// field for each name.
 func jsonFields(t reflect.Type) []jsonField {
+	return dominantFields(collectFields(t, 0, map[reflect.Type]bool{}))
+}
+
+func collectFields(t reflect.Type, depth int, path map[reflect.Type]bool) []jsonField {
+	if path[t] {
+		return nil
+	}
+	path[t] = true
+	defer delete(path, t)
+
 	var fields []jsonField
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
@@ -159,38 +193,90 @@ func jsonFields(t reflect.Type) []jsonField {
 		if tag == "-" {
 			continue
 		}
-		name, _, _ := strings.Cut(tag, ",")
+		name, opts, _ := strings.Cut(tag, ",")
 		ft := f.Type
 		for ft.Kind() == reflect.Ptr {
 			ft = ft.Elem()
 		}
 		if f.Anonymous && name == "" && ft.Kind() == reflect.Struct {
-			fields = append(fields, jsonFields(ft)...)
+			fields = append(fields, collectFields(ft, depth+1, path)...)
 			continue
 		}
 		if !f.IsExported() {
 			continue
 		}
-		if name == "" {
-			name = f.Name
+		field := jsonField{name: name, typ: f.Type, depth: depth, tagged: name != ""}
+		if !field.tagged {
+			field.name = f.Name
 		}
-		fields = append(fields, jsonField{name: name, typ: f.Type})
+		field.stringOpt = hasStringOption(opts, ft.Kind())
+		fields = append(fields, field)
 	}
 	return fields
 }
 
+// hasStringOption reports whether encoding/json applies the ",string" option,
+// which it honors only for scalar fields.
+func hasStringOption(opts string, kind reflect.Kind) bool {
+	// reflect.Bool through reflect.Float64 are the bool, integer, and float kinds.
+	scalar := (kind >= reflect.Bool && kind <= reflect.Float64) || kind == reflect.String
+	return scalar && slices.Contains(strings.Split(opts, ","), "string")
+}
+
+// dominantFields applies the encoding/json rule for fields sharing a name: the
+// shallowest wins, a tagged field beats untagged ones at the same depth, and a
+// tie leaves the name to no field. Field order is kept.
+func dominantFields(fields []jsonField) []jsonField {
+	byName := make(map[string][]jsonField)
+	for _, f := range fields {
+		byName[f.name] = append(byName[f.name], f)
+	}
+	dominant := make([]jsonField, 0, len(fields))
+	for _, f := range fields {
+		if winner, ok := dominantField(byName[f.name]); ok && winner == f {
+			dominant = append(dominant, f)
+		}
+	}
+	return dominant
+}
+
+func dominantField(fields []jsonField) (jsonField, bool) {
+	minDepth := fields[0].depth
+	for _, f := range fields[1:] {
+		minDepth = min(minDepth, f.depth)
+	}
+	var shallowest, tagged []jsonField
+	for _, f := range fields {
+		if f.depth != minDepth {
+			continue
+		}
+		shallowest = append(shallowest, f)
+		if f.tagged {
+			tagged = append(tagged, f)
+		}
+	}
+	switch {
+	case len(tagged) == 1:
+		return tagged[0], true
+	case len(tagged) == 0 && len(shallowest) == 1:
+		return shallowest[0], true
+	default:
+		return jsonField{}, false
+	}
+}
+
 // matchField follows encoding/json: an exact name match wins, otherwise the
 // first case-insensitive match.
-func matchField(fields []jsonField, key string) (reflect.Type, bool) {
+func matchField(fields []jsonField, key string) (jsonField, bool) {
 	for _, f := range fields {
 		if f.name == key {
-			return f.typ, true
+			return f, true
 		}
 	}
 	for _, f := range fields {
 		if strings.EqualFold(f.name, key) {
-			return f.typ, true
+			return f, true
 		}
 	}
-	return nil, false
+	return jsonField{}, false
 }

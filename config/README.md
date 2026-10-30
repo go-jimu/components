@@ -47,15 +47,17 @@ addr, err := cfg.Value("server.http.addr").String()
 `WithSource` replaces the source list, so pass every source in one call. Later
 sources override earlier ones, also when a watched source reloads: a reload
 rebuilds the configuration from every source in order, then notifies the
-observers registered with `Watch`.
+observers registered with `Watch`. `Load` starts over from the sources on every
+call, so retry it after an error; the sources are watched once.
 
 ## Scanning
 
 `Scan` decodes through `encoding/json`, so struct fields use `json` tags. Before
 decoding, string values are converted to the kind of the target field:
 `"8080"` fills an `int`, `"true"` fills a `bool`, and `"5s"` or `"1m30s"` fills a
-`time.Duration`. Numbers and booleans also fill `string` fields. Values that
-cannot be converted are reported by `encoding/json` as usual.
+`time.Duration`. Numbers and booleans also fill `string` fields and fields
+tagged `,string`. Values that cannot be converted, such as `"NaN"`, are reported
+by `encoding/json` as usual.
 `Value(path).Duration()` accepts the same duration strings.
 
 ## Placeholders and environment variables
