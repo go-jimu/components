@@ -6,6 +6,9 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Removed: the deprecated `logger` and `mediator` packages. Use the standard
+  library `log/slog` with `sloghelper`, and `ddd/event` for domain events.
+
 - Changed: `config` merges sources with its own deep merge, ported from
   go-kratos, instead of `dario.cat/mergo`. Nested maps merge key by key, other
   values from later sources replace earlier ones, and merged values are copied
@@ -131,9 +134,6 @@ Removed entries below.
   replacing the whole value with the first placeholder.
 - Fixed: `config/loader.Load` stops source watchers after loading instead of
   leaking goroutines and file watches on every call.
-
-- Deprecated: `mediator` is now a legacy package for existing users. New domain
-  event code should use `ddd/event`.
 
 ## v0.3.1
 

@@ -19,10 +19,8 @@ guidance.
 - `ddd/message`: protobuf integration messages across boundaries.
 - `taskqueue`: read `taskqueue/README.md`, whose Provider adapters checklist
   also covers adapter code.
-- `validation`, `sloghelper`: small helpers; `sloghelper` is the logging
-  package for new code.
-- `logger` and `mediator` are legacy; new code uses `sloghelper` and
-  `ddd/event`.
+- `sloghelper`: helpers around the standard library `log/slog`.
+- `validation`: specification combinators and error notification.
 
 ## FSM Usage
 
