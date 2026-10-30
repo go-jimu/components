@@ -3,8 +3,8 @@
 ## v0.11.0
 
 This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
-and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
-Removed entries below.
+`taskqueue`, `config`, and `config/loader`, and removes `ddd/message/outbox`,
+`logger`, and `mediator`. See the Changed and Removed entries below.
 
 - Changed: CI tests Go 1.25 through 1.27. Go 1.25 is the minimum `go.mod`
   requires; Go 1.24 is no longer supported.
@@ -63,7 +63,9 @@ Removed entries below.
   at a time in acceptance order; events with different keys, or without a key,
   run concurrently. To keep the old global order, use `event.WithWorkers(1)`;
   to keep per-aggregate order without changing existing events, use
-  `event.WithKeyFunc`.
+  `event.WithKeyFunc`. **Handlers and the hooks set by options now run on
+  several goroutines at once**, so they must be safe for concurrent use; with
+  one worker they ran on a single goroutine.
 - Added: `event.Keyed`, `event.WithWorkers`, and `event.WithKeyFunc`.
 - Changed: dispatcher diagnostics are per event. `UnhandledContext` and
   `PanicContext` drop `BatchID`, `PanicContext` gains `Handler`,
@@ -74,7 +76,10 @@ Removed entries below.
   `in_flight_event_count`, and `pending_event_count`.
 - Changed: `event.WithBufferSize` limits queued events instead of batches.
   `DispatchAll` accepts all of its events or none; a call larger than the
-  buffer is accepted once the queue is empty.
+  buffer is accepted once the queue is empty. Calls waiting for queue space are
+  admitted in arrival order, so steady single-event traffic cannot starve a
+  larger call. Event keys are computed before the dispatcher takes its lock, so
+  a panicking `Key` or key function reaches the caller and queues nothing.
 
 - Changed: `event.Collection.Add` no longer returns a bool. It always returned
   true since collections became reusable across `Drain`, so the result only
@@ -101,7 +106,8 @@ Removed entries below.
 - Fixed: the `encoding` registry is guarded by a lock, so registering a codec
   at runtime no longer races with concurrent lookups.
 - Fixed: the `encoding/proto` codec returns an error instead of panicking on
-  non-proto values, nil, and nil pointers. `Marshal` accepts a pointer to a
+  non-proto values, nil, and nil pointers, including a nil message passed to
+  `Marshal`, which used to encode as empty bytes. `Marshal` accepts a pointer to a
   message like `Unmarshal`, and `Unmarshal` allocates a nil message that its
   argument points to.
 
@@ -136,7 +142,19 @@ Removed entries below.
   as environment variables, before configuration paths.
 - Fixed: `config.Scan` converts string values to the target field kind, so
   placeholder values fill `int`, `bool`, `float` and `time.Duration` fields, and
-  durations accept strings such as `"5s"`.
+  durations accept strings such as `"5s"`. Fields tagged `,string` keep working,
+  and a field shadowing a promoted field of the same name is matched as
+  `encoding/json` matches it.
+- Changed: `config.Scan` converts numbers and booleans into `string` fields;
+  it used to return an error for them.
+- Fixed: calling `config.Load` again, such as a retry after an error, replaces
+  the configuration and keeps hot reload working. Before, every call stacked
+  another copy of each source and started more watchers, so stale copies hid
+  later reloads. A second `Load` also notifies observers of changed values.
+- Fixed: config observers run one change at a time instead of concurrently
+  from each source watcher, and a cached value can no longer be overwritten by
+  an older one. An observer registered with `Watch` also receives a change
+  that lands while it is being registered.
 - Fixed: `config.Value.Duration` accepts duration strings such as `"5s"`, like
   `Scan`. Before, it only parsed integer nanoseconds.
 - Fixed: config hot reload rebuilds the configuration from every source in its
