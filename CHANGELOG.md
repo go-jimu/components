@@ -15,6 +15,9 @@
   original order. Before, a changed lower-priority source was merged on top and
   overrode higher-priority sources, and readers could briefly see unresolved
   placeholders between merge and resolve.
+- Fixed: with `config.WithResolveActualTypes(true)`, a placeholder embedded in
+  a longer string such as `${HOST}:${PORT}` is interpolated instead of
+  replacing the whole value with the first placeholder.
 - Fixed: `config/loader.Load` stops source watchers after loading instead of
   leaking goroutines and file watches on every call.
 

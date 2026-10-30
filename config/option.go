@@ -202,21 +202,27 @@ func convertToType(input string) interface{} {
 	return input
 }
 
+var placeholderRegexp = regexp.MustCompile(`\${(.*?)}`)
+
+// expand replaces ${name:default} placeholders in s. With toType, a value that
+// is exactly one placeholder is converted to its actual type; placeholders
+// embedded in a longer string are interpolated as strings.
 func expand(s string, mapping func(string) string, toType bool) interface{} {
-	r := regexp.MustCompile(`\${(.*?)}`)
-	re := r.FindAllStringSubmatch(s, -1)
-	var ct interface{}
-	for _, i := range re {
-		if len(i) == 2 { //nolint:gomnd
-			m := mapping(i[1])
-			if toType {
-				ct = convertToType(m)
-				return ct
-			}
-			s = strings.ReplaceAll(s, i[0], m)
+	if toType {
+		if m := placeholderRegexp.FindStringSubmatch(s); m != nil && m[0] == s {
+			return convertToType(mapping(m[1]))
 		}
 	}
-	return s
+	return placeholderRegexp.ReplaceAllStringFunc(s, func(placeholder string) string {
+		m := mapping(placeholderRegexp.FindStringSubmatch(placeholder)[1])
+		if toType {
+			// Quotes only force the string type; they are not part of the text.
+			if str, ok := convertToType(m).(string); ok {
+				return str
+			}
+		}
+		return m
+	})
 }
 
 func defaultMerge(dst, src interface{}) error {
