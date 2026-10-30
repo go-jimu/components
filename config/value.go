@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -151,7 +152,19 @@ func (v *atomicValue) String() (string, error) {
 	return "", v.typeAssertError()
 }
 
+// Duration accepts duration strings such as "5s", like Scan into a
+// time.Duration field, and falls back to an integer number of nanoseconds.
 func (v *atomicValue) Duration() (time.Duration, error) {
+	if s, ok := v.Load().(string); ok {
+		if d, err := time.ParseDuration(strings.TrimSpace(s)); err == nil {
+			return d, nil
+		}
+		val, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q", s)
+		}
+		return time.Duration(val), nil
+	}
 	val, err := v.Int()
 	if err != nil {
 		return 0, err

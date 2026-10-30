@@ -47,6 +47,8 @@ Removed entries below.
 - Fixed: `config.Scan` converts string values to the target field kind, so
   placeholder values fill `int`, `bool`, `float` and `time.Duration` fields, and
   durations accept strings such as `"5s"`.
+- Fixed: `config.Value.Duration` accepts duration strings such as `"5s"`, like
+  `Scan`. Before, it only parsed integer nanoseconds.
 - Fixed: config hot reload rebuilds the configuration from every source in its
   original order. Before, a changed lower-priority source was merged on top and
   overrode higher-priority sources, and readers could briefly see unresolved

@@ -156,6 +156,38 @@ func TestAtomicValue_Duration(t *testing.T) {
 	}
 }
 
+// Intent: Duration must accept the same forms as Scan into a time.Duration
+// field, so "5s" from a file or placeholder works through Value as well.
+func TestAtomicValue_DurationParsesStrings(t *testing.T) {
+	tests := []struct {
+		in   interface{}
+		want time.Duration
+	}{
+		{in: "5s", want: 5 * time.Second},
+		{in: " 1m30s ", want: 90 * time.Second},
+		{in: "250ms", want: 250 * time.Millisecond},
+		{in: "5", want: time.Duration(5)},
+		{in: float64(5), want: time.Duration(5)},
+	}
+	for _, tt := range tests {
+		v := atomicValue{}
+		v.Store(tt.in)
+		got, err := v.Duration()
+		if err != nil {
+			t.Fatalf("Duration(%#v) error = %v", tt.in, err)
+		}
+		if got != tt.want {
+			t.Fatalf("Duration(%#v) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+
+	v := atomicValue{}
+	v.Store("five seconds")
+	if _, err := v.Duration(); err == nil {
+		t.Fatal("Duration(\"five seconds\") should fail")
+	}
+}
+
 func TestAtomicValue_Slice(t *testing.T) {
 	vlist := []interface{}{int64(5)}
 	v := atomicValue{}
