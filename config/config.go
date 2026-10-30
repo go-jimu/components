@@ -38,12 +38,23 @@ type Config interface {
 	Close() error
 }
 
+// Watch retries a failing source with exponential backoff between these bounds.
+const (
+	watchRetryInitial = time.Second
+	watchRetryCap     = 30 * time.Second
+)
+
 type config struct {
-	opts      options
-	reader    *reader
-	cached    sync.Map
-	observers sync.Map
-	watchers  []Watcher
+	opts     options
+	reader   *reader
+	cached   sync.Map
+	watchers []Watcher
+
+	observerMu sync.Mutex
+	observers  map[string][]Observer
+
+	done      chan struct{}
+	closeOnce sync.Once
 
 	// mu serializes reloads. snapshots holds the latest key values of each
 	// source in source order, so a reload can rebuild the whole configuration
@@ -65,23 +76,33 @@ func New(opts ...Option) Config {
 		o.resolver = newResolver(o.lookup, o.actualTypes)
 	}
 	return &config{
-		opts:   o,
-		reader: newReader(o),
+		opts:      o,
+		reader:    newReader(o),
+		observers: make(map[string][]Observer),
+		done:      make(chan struct{}),
 	}
 }
 
 func (c *config) watch(index int, w Watcher) {
+	delay := watchRetryInitial
 	for {
 		kvs, err := w.Next()
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				slog.Info("watcher's ctx was canceled")
+				slog.Info("config watcher stopped")
 				return
 			}
-			time.Sleep(time.Second)
-			slog.Error("faield to watch next config", sloghelper.Error(err))
+			slog.Error("failed to watch next config",
+				slog.Duration("retry_in", delay), sloghelper.Error(err))
+			select {
+			case <-c.done:
+				return
+			case <-time.After(delay):
+			}
+			delay = nextWatchRetryDelay(delay)
 			continue
 		}
+		delay = watchRetryInitial
 		if len(kvs) == 0 {
 			continue
 		}
@@ -107,22 +128,39 @@ func (c *config) reload(index int, kvs []*KeyValue) error {
 	return nil
 }
 
+func nextWatchRetryDelay(delay time.Duration) time.Duration {
+	return min(2*delay, watchRetryCap)
+}
+
+// notify updates cached values that changed and calls their observers. A
+// value whose type changed cannot be stored into the existing Value, so the
+// cache entry is replaced; Values obtained before the change keep the old
+// value.
 func (c *config) notify() {
 	c.cached.Range(func(key, value interface{}) bool {
 		k, _ := key.(string)
 		v, _ := value.(Value)
-		if n, ok := c.reader.Value(k); ok &&
-			reflect.TypeOf(n.Load()) == reflect.TypeOf(v.Load()) &&
-			!reflect.DeepEqual(n.Load(), v.Load()) {
+		n, ok := c.reader.Value(k)
+		if !ok || reflect.DeepEqual(n.Load(), v.Load()) {
+			return true
+		}
+		if reflect.TypeOf(n.Load()) == reflect.TypeOf(v.Load()) {
 			v.Store(n.Load())
-			if o, found := c.observers.Load(k); found {
-				if observe, isObserver := o.(Observer); isObserver {
-					observe(k, v)
-				}
-			}
+		} else {
+			c.cached.Store(k, n)
+			v = n
+		}
+		for _, observe := range c.observersOf(k) {
+			observe(k, v)
 		}
 		return true
 	})
+}
+
+func (c *config) observersOf(key string) []Observer {
+	c.observerMu.Lock()
+	defer c.observerMu.Unlock()
+	return append([]Observer(nil), c.observers[key]...)
 }
 
 // upsertKeyValues returns a copy of snapshot where entries with the same Key
@@ -211,15 +249,27 @@ func (c *config) Scan(v interface{}) error {
 	return scanJSON(data, v)
 }
 
+// Watch registers o to be called when the value at key changes. Every observer
+// registered for a key is called.
 func (c *config) Watch(key string, o Observer) error {
 	if v := c.Value(key); v.Load() == nil {
 		return ErrNotFound
 	}
-	c.observers.Store(key, o)
+	c.observerMu.Lock()
+	defer c.observerMu.Unlock()
+	if c.observers == nil {
+		c.observers = make(map[string][]Observer)
+	}
+	c.observers[key] = append(c.observers[key], o)
 	return nil
 }
 
 func (c *config) Close() error {
+	c.closeOnce.Do(func() {
+		if c.done != nil {
+			close(c.done)
+		}
+	})
 	for _, w := range c.watchers {
 		if err := w.Stop(); err != nil {
 			return err

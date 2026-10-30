@@ -6,6 +6,13 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Fixed: `config.Watch` keeps every observer registered for a key; a later
+  `Watch` used to replace the earlier one. Observers are also notified when a
+  reloaded value changes type, which used to be skipped.
+- Fixed: a failing config watcher retries with exponential backoff from one
+  second up to 30 seconds, logs before waiting, and stops waiting when the
+  config is closed.
+
 - Removed: the deprecated `logger` and `mediator` packages. Use the standard
   library `log/slog` with `sloghelper`, and `ddd/event` for domain events.
 
