@@ -53,7 +53,14 @@
 // A Condition is a transition guard evaluated by Transit to decide whether a
 // specific from-state to to-state edge is allowed. A nil condition is
 // unconditional. If transitions exist for the current state and action but no
-// condition matches, Transit leaves the current state unchanged.
+// condition matches, Transit returns a *TransitionError with Guarded set and
+// leaves the current state unchanged. To stay in the current state on purpose,
+// register an explicit self-transition.
+//
+// Transit runs after the state behavior has already changed the business
+// object. When a business method returns an error, from the behavior or from
+// Transit, callers must discard the business object, for example by rolling
+// back the transaction, instead of persisting it.
 //
 // StateMachine protects its transition and builder tables with a mutex and can
 // be frozen into the read-only RuntimeStateMachine surface, but it does not

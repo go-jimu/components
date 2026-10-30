@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Changed: `fsm.Transit` returns a `*TransitionError` with `Guarded` set when
+  transitions exist but no condition matches. It used to return nil, so a
+  behavior could change the aggregate while the state silently stayed the same.
+  Register an explicit self-transition to stay in the current state.
+
 - Changed: `message.Runner.Run` returns nil when ctx is canceled or expires,
   matching `taskqueue.Runner`. A non-nil error now always means the provider
   runtime stopped abnormally. Providers that returned `ctx.Err()` must return

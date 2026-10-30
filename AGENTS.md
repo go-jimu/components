@@ -59,7 +59,10 @@ When working with `github.com/go-jimu/components/fsm`, follow this contract:
   substitute for the business method's validation.
 - A nil `Condition` is unconditional. For the same `from + action`, transitions
   are evaluated in add order and the first match wins.
-- If no condition matches, `fsm.Transit` leaves the current state unchanged.
+- If no condition matches, `fsm.Transit` returns a `*TransitionError` with
+  `Guarded` set. Register an explicit self-transition to stay in the current
+  state, and never persist an aggregate whose business method returned an
+  error.
 - Always register state builders for transition targets and call `Check` during
   setup or tests.
 

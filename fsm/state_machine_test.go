@@ -208,6 +208,7 @@ func TestTransitReportsMissingTransitionWithoutChangingState(t *testing.T) {
 
 	var transitionErr *fsm.TransitionError
 	require.ErrorAs(t, err, &transitionErr)
+	require.False(t, transitionErr.Guarded)
 	require.Equal(t, exampleStateUnpaid, transitionErr.Current)
 	require.Equal(t, exampleActionPay, transitionErr.Action)
 	require.EqualError(t, err, "transition from order.unpaid with action pay not found")

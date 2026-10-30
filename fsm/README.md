@@ -357,7 +357,14 @@ Important details:
 - Transitions for the same `from + action` are checked in the order they were
   added.
 - The first matching transition wins.
-- If no condition matches, `Transit` leaves the current state unchanged.
+- If no condition matches, `Transit` returns a `*TransitionError` with
+  `Guarded` set and leaves the current state unchanged. To stay in the current
+  state on purpose, register an explicit self-transition such as
+  `PartialRefunded -> PartialRefunded`.
+- `Transit` runs after the state behavior has already changed the aggregate.
+  When a business method returns an error, from the behavior or from
+  `Transit`, discard the aggregate (roll back the transaction) instead of
+  persisting it.
 - Put unconditional transitions after conditional transitions when both share
   the same `from + action`.
 
