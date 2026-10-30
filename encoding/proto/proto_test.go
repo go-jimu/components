@@ -102,3 +102,84 @@ func Test_getProtoMessage(t *testing.T) {
 		})
 	}
 }
+
+// Intent: the codec is looked up by name, so callers cannot see from the type
+// that it only accepts proto messages. Invalid input must return an error
+// instead of panicking.
+func TestCodecRejectsInvalidInputWithoutPanic(t *testing.T) {
+	c := codec{}
+	data, err := c.Marshal(&testData.TestModel{Id: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nilModel *testData.TestModel
+	var nilInt *int
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{name: "marshal non-proto", call: func() error { _, marshalErr := c.Marshal(1); return marshalErr }},
+		{name: "marshal nil", call: func() error { _, marshalErr := c.Marshal(nil); return marshalErr }},
+		{name: "marshal struct value", call: func() error {
+			_, marshalErr := c.Marshal(testData.TestModel{})
+			return marshalErr
+		}},
+		{name: "unmarshal nil", call: func() error { return c.Unmarshal(data, nil) }},
+		{name: "unmarshal nil message pointer", call: func() error { return c.Unmarshal(data, nilModel) }},
+		{name: "unmarshal nil non-proto pointer", call: func() error { return c.Unmarshal(data, nilInt) }},
+		{name: "unmarshal non-proto pointer", call: func() error { n := 0; return c.Unmarshal(data, &n) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var callErr error
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("panicked: %v", r)
+					}
+				}()
+				callErr = tt.call()
+			}()
+			if callErr == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
+// Intent: like encoding/json, unmarshaling into a pointer to a nil message
+// pointer allocates the message.
+func TestCodecUnmarshalAllocatesNilMessagePointer(t *testing.T) {
+	c := codec{}
+	data, err := c.Marshal(&testData.TestModel{Id: 7, Name: "kratos"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var res *testData.TestModel
+	if err = c.Unmarshal(data, &res); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if res == nil || res.Id != 7 || res.Name != "kratos" {
+		t.Fatalf("Unmarshal() got %v", res)
+	}
+}
+
+// Intent: Marshal accepts the same pointer-to-message shape as Unmarshal.
+func TestCodecMarshalAcceptsPointerToMessage(t *testing.T) {
+	c := codec{}
+	model := &testData.TestModel{Id: 3}
+
+	data, err := c.Marshal(&model)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	var res testData.TestModel
+	if err = c.Unmarshal(data, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Id != 3 {
+		t.Fatalf("Id = %d, want 3", res.Id)
+	}
+}

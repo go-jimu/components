@@ -2,7 +2,9 @@ package encoding_test
 
 import (
 	"encoding/xml"
+	"fmt"
 	"runtime/debug"
+	"sync"
 	"testing"
 
 	"github.com/go-jimu/components/encoding"
@@ -86,4 +88,51 @@ func didPanic(f PanicTestFunc) (bool, interface{}, string) {
 	}()
 
 	return didPanic, message, stack
+}
+
+// namedCodec is a Codec whose name can be chosen by the test.
+type namedCodec struct {
+	codec2
+	name string
+}
+
+func (c namedCodec) Name() string {
+	return c.name
+}
+
+// Intent: lookups must match registration, which normalizes names to lowercase,
+// so a format taken from a file extension such as "YAML" finds the codec.
+func TestGetCodecIsCaseInsensitive(t *testing.T) {
+	registered := namedCodec{name: "Case-Test"}
+	encoding.RegisterCodec(registered)
+
+	for _, name := range []string{"case-test", "CASE-TEST", "Case-Test"} {
+		if got := encoding.GetCodec(name); got != registered {
+			t.Fatalf("GetCodec(%q) = %v, want %v", name, got, registered)
+		}
+	}
+}
+
+// Intent: registering at runtime while other goroutines look up codecs must be
+// race free.
+func TestRegistryConcurrentRegisterAndGet(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			encoding.RegisterCodec(namedCodec{name: fmt.Sprintf("concurrent-%d", i)})
+		}(i)
+		go func() {
+			defer wg.Done()
+			_ = encoding.GetCodec("xml")
+		}()
+	}
+	wg.Wait()
+
+	for i := 0; i < 8; i++ {
+		if encoding.GetCodec(fmt.Sprintf("concurrent-%d", i)) == nil {
+			t.Fatalf("codec concurrent-%d not registered", i)
+		}
+	}
 }

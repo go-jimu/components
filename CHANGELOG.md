@@ -6,6 +6,15 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Fixed: `encoding.GetCodec` is case-insensitive, matching `RegisterCodec`, so a
+  format taken from a file extension such as `app.YAML` finds the codec.
+- Fixed: the `encoding` registry is guarded by a lock, so registering a codec
+  at runtime no longer races with concurrent lookups.
+- Fixed: the `encoding/proto` codec returns an error instead of panicking on
+  non-proto values, nil, and nil pointers. `Marshal` accepts a pointer to a
+  message like `Unmarshal`, and `Unmarshal` allocates a nil message that its
+  argument points to.
+
 - Changed: `event.Dispatcher.Dispatch` and `DispatchAll` take a
   `context.Context`. When the in-memory queue is full, the caller waits only
   until ctx is done and gets `ctx.Err()`; before, it blocked indefinitely.
