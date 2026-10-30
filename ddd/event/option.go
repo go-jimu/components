@@ -65,7 +65,28 @@ func WithCloseInterruptedHandler(fn func(CloseInterruptedContext)) Option {
 	}
 }
 
-// WithBufferSize sets the maximum number of queued event batches.
+// WithWorkers sets how many events the dispatcher may handle concurrently. The
+// default is 5. Size it against the resources handlers share, such as the
+// database connection pool. With 1 worker, every event is handled in the order
+// it was accepted.
+func WithWorkers(n int) Option {
+	return func(d *InMemoryDispatcher) {
+		if n > 0 {
+			d.workers = n
+		}
+	}
+}
+
+// WithKeyFunc sets the ordering key of events that do not implement Keyed, for
+// example to key existing events by aggregate ID without changing them. An
+// empty key means the event has no ordering requirement.
+func WithKeyFunc(fn func(Event) string) Option {
+	return func(d *InMemoryDispatcher) {
+		d.keyFunc = fn
+	}
+}
+
+// WithBufferSize sets the maximum number of queued events.
 func WithBufferSize(size int) Option {
 	return func(d *InMemoryDispatcher) {
 		if size > 0 {

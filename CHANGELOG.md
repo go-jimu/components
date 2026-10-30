@@ -6,6 +6,25 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Changed: `event.InMemoryDispatcher` handles events concurrently on five
+  workers by default and no longer has a batch concept. **Events are no longer
+  handled in a single global order.** Events with the same key are handled one
+  at a time in acceptance order; events with different keys, or without a key,
+  run concurrently. To keep the old global order, use `event.WithWorkers(1)`;
+  to keep per-aggregate order without changing existing events, use
+  `event.WithKeyFunc`.
+- Added: `event.Keyed`, `event.WithWorkers`, and `event.WithKeyFunc`.
+- Changed: dispatcher diagnostics are per event. `UnhandledContext` and
+  `PanicContext` drop `BatchID`, `PanicContext` gains `Handler`,
+  `CloseInterruptedContext` reports `InFlight` and `Pending` events instead of
+  `InFlightBatchID` and `PendingBatches`, and `PendingBatch` is removed. Log
+  attributes `batch_id`, `in_flight_batch_id`, `pending_batch_count`, and
+  `pending_batch_ids` are replaced by `event_kind`, `event_key`,
+  `in_flight_event_count`, and `pending_event_count`.
+- Changed: `event.WithBufferSize` limits queued events instead of batches.
+  `DispatchAll` accepts all of its events or none; a call larger than the
+  buffer is accepted once the queue is empty.
+
 - Changed: `event.Collection.Add` no longer returns a bool. It always returned
   true since collections became reusable across `Drain`, so the result only
   invited dead error handling. `Add(nil)` is now ignored instead of putting nil

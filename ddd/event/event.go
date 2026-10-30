@@ -19,45 +19,49 @@ var ErrDispatcherClosed = errors.New("domain event dispatcher is closed")
 
 // UnhandledContext describes an event that has no registered handler.
 type UnhandledContext struct {
-	BatchID uint64
-	Event   Event
+	Event Event
 }
 
-// PanicContext describes a recovered handler panic.
+// PanicContext describes a handler panic recovered by the dispatcher.
 type PanicContext struct {
-	BatchID uint64
 	Event   Event
+	Handler Handler
 	Panic   any
 	Stack   []byte
 }
 
-// PendingBatch describes an accepted event batch that was not started before
-// Close was interrupted.
-type PendingBatch struct {
-	BatchID uint64
-	Events  []Event
+// CloseInterruptedContext describes accepted events that were not confirmed
+// as handled before Close was interrupted. InFlight lists the events workers
+// were handling and Pending the events not yet started, both in the order
+// they were accepted.
+type CloseInterruptedContext struct {
+	Error    error
+	InFlight []Event
+	Pending  []Event
 }
 
-// CloseInterruptedContext describes accepted work that was not confirmed as
-// handled before Close was interrupted.
-type CloseInterruptedContext struct {
-	Error           error
-	InFlightBatchID uint64
-	PendingBatches  []PendingBatch
+// Keyed is implemented by events that must be handled in order with other
+// events of the same key, usually the ID of the aggregate that raised them.
+//
+// Events with the same key are handled one at a time in the order they were
+// accepted. Events with different keys, and events without a key, are handled
+// concurrently. An empty key means no key. Events that do not implement Keyed
+// can get a key from WithKeyFunc.
+type Keyed interface {
+	Key() string
 }
 
 // Collection stores pending domain events raised by an aggregate. Drain removes
-// the current batch but leaves the collection ready to accept later events.
+// the pending events but leaves the collection ready to accept later events.
 // Its methods are safe for concurrent use, but they do not synchronize other
 // aggregate state or mutable values referenced by an Event.
 type Collection interface {
-	// Add records an event in the current batch. A nil event is ignored.
+	// Add records a pending event. A nil event is ignored.
 	Add(Event)
-	// Drain returns the pending events in acceptance order and clears the current
-	// batch. An Add concurrent with Drain belongs to either that returned batch or
-	// the next batch.
+	// Drain returns the pending events in acceptance order and clears them. An
+	// Add concurrent with Drain is returned by either that Drain or the next.
 	Drain() []Event
-	// Len returns a snapshot of the number of events pending in the current batch.
+	// Len returns a snapshot of the number of pending events.
 	Len() int
 }
 
@@ -67,11 +71,12 @@ type Handler interface {
 	Handle(context.Context, Event)
 }
 
-// Dispatcher accepts domain event batches for handling.
+// Dispatcher accepts domain events for asynchronous handling.
 //
-// Dispatch and DispatchAll only bound admission with ctx: when the dispatcher
-// has to wait for capacity, it stops waiting and returns ctx.Err() once ctx is
-// done, without accepting the batch. Accepted events are handled after the
+// DispatchAll accepts all of its events or none of them. Dispatch and
+// DispatchAll only bound admission with ctx: when the dispatcher has to wait
+// for capacity, it stops waiting and returns ctx.Err() once ctx is done,
+// without accepting the events. Accepted events are handled after the
 // caller returns, so handlers never inherit the cancellation, deadline, or
 // values of ctx. Use SourceContext to read caller values explicitly.
 type Dispatcher interface {
