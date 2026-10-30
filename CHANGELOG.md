@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Changed: `config/loader` no longer merges environment variables as an override
+  layer. Reference them from configuration files with `${NAME:default}`
+  placeholders, resolved from `<prefix>NAME`. The old layer could not address
+  nested keys and leaked unrelated variables into top-level fields.
+- Added: `config.WithLookup` resolves placeholders from an external source, such
+  as environment variables, before configuration paths.
+- Fixed: `config.Scan` converts string values to the target field kind, so
+  placeholder values fill `int`, `bool`, `float` and `time.Duration` fields, and
+  durations accept strings such as `"5s"`.
+- Fixed: config hot reload rebuilds the configuration from every source in its
+  original order. Before, a changed lower-priority source was merged on top and
+  overrode higher-priority sources, and readers could briefly see unresolved
+  placeholders between merge and resolve.
+- Fixed: `config/loader.Load` stops source watchers after loading instead of
+  leaking goroutines and file watches on every call.
+
 - Deprecated: `mediator` is now a legacy package for existing users. New domain
   event code should use `ddd/event`.
 

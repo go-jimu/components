@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/go-jimu/components/config"
-	"github.com/go-jimu/components/config/env"
 	"github.com/go-jimu/components/config/file"
 )
 
@@ -45,19 +44,31 @@ func Load(v any, opts ...Option) error {
 		opt(o)
 	}
 
-	// load from config files
 	sources, err := searchConfigInDir(o)
 	if err != nil {
 		return err
 	}
-	// load from environment vars
-	sources = append(sources, env.NewSource(o.EnvVarsPrefix))
 
-	conf := config.New(config.WithSource(sources...))
+	// Environment variables only feed ${NAME:default} placeholders. They are
+	// not merged as an override layer, because their flat keys cannot address
+	// nested configuration paths.
+	conf := config.New(
+		config.WithSource(sources...),
+		config.WithLookup(envLookup(o.EnvVarsPrefix)),
+	)
+	// Load starts source watchers; a one-shot load must stop them.
+	defer conf.Close()
 	if err = conf.Load(); err != nil {
 		return err
 	}
 	return conf.Scan(v)
+}
+
+// envLookup resolves placeholder ${NAME} from environment variable prefix+NAME.
+func envLookup(prefix string) config.Lookup {
+	return func(name string) (string, bool) {
+		return os.LookupEnv(prefix + name)
+	}
 }
 
 func searchConfigInDir(opts *loadOptions) ([]config.Source, error) {

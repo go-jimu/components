@@ -26,7 +26,7 @@ type reader struct {
 	lock   sync.Mutex
 }
 
-func newReader(opts options) Reader {
+func newReader(opts options) *reader {
 	return &reader{
 		opts:   opts,
 		values: make(map[string]interface{}),
@@ -38,23 +38,47 @@ func (r *reader) Merge(kvs ...*KeyValue) error {
 	if err != nil {
 		return err
 	}
+	if err = r.mergeInto(merged, kvs); err != nil {
+		return err
+	}
+	r.lock.Lock()
+	r.values = merged
+	r.lock.Unlock()
+	return nil
+}
+
+// Reset rebuilds the values from kvs alone and resolves placeholders before
+// publishing them, so readers never observe a partially merged or unresolved
+// state. kvs must be ordered from lowest to highest priority.
+func (r *reader) Reset(kvs ...*KeyValue) error {
+	merged := make(map[string]interface{})
+	if err := r.mergeInto(merged, kvs); err != nil {
+		return err
+	}
+	if err := r.opts.resolver(merged); err != nil {
+		return err
+	}
+	r.lock.Lock()
+	r.values = merged
+	r.lock.Unlock()
+	return nil
+}
+
+func (r *reader) mergeInto(merged map[string]interface{}, kvs []*KeyValue) error {
 	for _, kv := range kvs {
 		next := make(map[string]interface{})
-		if err = r.opts.decoder(kv, next); err != nil {
+		if err := r.opts.decoder(kv, next); err != nil {
 			slog.Error("failed to decode configurations",
 				slog.String("key", kv.Key), slog.String("value", string(kv.Value)), sloghelper.Error(err))
 			return err
 		}
-		if err = r.opts.merge(&merged, convertMap(next)); err != nil {
+		if err := r.opts.merge(&merged, convertMap(next)); err != nil {
 			slog.Error(
 				"failed to merge configurations",
 				slog.String("key", kv.Key), slog.String("value", string(kv.Value)), sloghelper.Error(err))
 			return err
 		}
 	}
-	r.lock.Lock()
-	r.values = merged
-	r.lock.Unlock()
 	return nil
 }
 

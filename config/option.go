@@ -22,11 +22,17 @@ type Option func(*options)
 // Merge is config merge func.
 type Merge func(dst, src interface{}) error
 
+// Lookup looks up a placeholder name outside the loaded configuration, for
+// example in environment variables. It reports whether name was found.
+type Lookup func(name string) (string, bool)
+
 type options struct {
-	sources  []Source
-	decoder  Decoder
-	resolver Resolver
-	merge    Merge
+	sources     []Source
+	decoder     Decoder
+	resolver    Resolver
+	merge       Merge
+	lookup      Lookup
+	actualTypes bool
 }
 
 // WithSource with config source.
@@ -51,7 +57,8 @@ func WithDecoder(d Decoder) Option {
 // bool input will enable conversion of config to data types
 func WithResolveActualTypes(enableConvertToType bool) Option {
 	return func(o *options) {
-		o.resolver = newActualTypesResolver(enableConvertToType)
+		o.resolver = nil
+		o.actualTypes = enableConvertToType
 	}
 }
 
@@ -59,6 +66,16 @@ func WithResolveActualTypes(enableConvertToType bool) Option {
 func WithResolver(r Resolver) Option {
 	return func(o *options) {
 		o.resolver = r
+	}
+}
+
+// WithLookup sets an external lookup for ${name:default} placeholders used by
+// the built-in resolvers. The lookup is consulted before configuration paths,
+// so it can supply values such as environment variables that are not part of
+// the merged configuration. It has no effect on a resolver set by WithResolver.
+func WithLookup(lookup Lookup) Option {
+	return func(o *options) {
+		o.lookup = lookup
 	}
 }
 
@@ -92,17 +109,19 @@ func defaultDecoder(src *KeyValue, target map[string]interface{}) error {
 	return fmt.Errorf("unsupported key: %s format: %s", src.Key, src.Format)
 }
 func newActualTypesResolver(enableConvertToType bool) func(map[string]interface{}) error {
-	return func(input map[string]interface{}) error {
-		mapper := mapper(input)
-		return resolver(input, mapper, enableConvertToType)
-	}
+	return newResolver(nil, enableConvertToType)
 }
 
 // defaultResolver resolve placeholder in map value,
 // placeholder format in ${key:default}.
 func defaultResolver(input map[string]interface{}) error {
-	mapper := mapper(input)
-	return resolver(input, mapper, false)
+	return resolver(input, mapper(input, nil), false)
+}
+
+func newResolver(lookup Lookup, toType bool) Resolver {
+	return func(input map[string]interface{}) error {
+		return resolver(input, mapper(input, lookup), toType)
+	}
 }
 
 func resolver(input map[string]interface{}, mapper func(name string) string, toType bool) error {
@@ -135,9 +154,14 @@ func resolver(input map[string]interface{}, mapper func(name string) string, toT
 	return resolve(input)
 }
 
-func mapper(input map[string]interface{}) func(name string) string {
+func mapper(input map[string]interface{}, lookup Lookup) func(name string) string {
 	mapper := func(name string) string {
 		args := strings.SplitN(strings.TrimSpace(name), ":", 2) //nolint:gomnd
+		if lookup != nil {
+			if v, ok := lookup(args[0]); ok {
+				return v
+			}
+		}
 		if v, has := readValue(input, args[0]); has {
 			s, _ := v.String()
 			return s
