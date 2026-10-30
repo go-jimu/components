@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"dario.cat/mergo"
 	"github.com/go-jimu/components/encoding"
 )
 
@@ -223,8 +222,4 @@ func expand(s string, mapping func(string) string, toType bool) interface{} {
 		}
 		return m
 	})
-}
-
-func defaultMerge(dst, src interface{}) error {
-	return mergo.Map(dst, src, mergo.WithOverride)
 }

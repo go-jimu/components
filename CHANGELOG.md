@@ -6,6 +6,11 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Changed: `config` merges sources with its own deep merge, ported from
+  go-kratos, instead of `dario.cat/mergo`. Nested maps merge key by key, other
+  values from later sources replace earlier ones, and merged values are copied
+  rather than shared with the source.
+
 - Changed: `fsm.State` is only `Label()`. `SetContext` and `Context` are
   removed, and `Transit` no longer wires the next state to the business object.
   State behavior methods now take the business object as a parameter. The back

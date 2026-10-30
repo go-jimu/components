@@ -3,7 +3,6 @@ module github.com/go-jimu/components
 go 1.25.0
 
 require (
-	dario.cat/mergo v1.0.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/pkg/errors v0.9.1
