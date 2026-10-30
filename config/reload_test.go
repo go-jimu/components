@@ -170,3 +170,43 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 }
+
+// A key removed on reload reads as not found, its observers hear about the
+// removal, and they hear about the key again when it comes back.
+func TestReloadReportsRemovedKeys(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.yaml")
+	writeFile(t, base, "port: 80\nname: app\n")
+
+	c := config.New(config.WithSource(file.NewSource(base)))
+	require.NoError(t, c.Load())
+	defer c.Close()
+
+	notified := make(chan config.Value, 2)
+	require.NoError(t, c.Watch("port", func(_ string, v config.Value) {
+		notified <- v
+	}))
+
+	writeFile(t, base, "name: app\n")
+	select {
+	case v := <-notified:
+		assert.Nil(t, v.Load())
+	case <-time.After(3 * time.Second):
+		t.Fatal("observer was not notified of the removal")
+	}
+	_, err := c.Value("port").Int()
+	require.ErrorIs(t, err, config.ErrNotFound)
+
+	writeFile(t, base, "port: 8080\nname: app\n")
+	select {
+	case v := <-notified:
+		n, err := v.Int()
+		require.NoError(t, err)
+		assert.Equal(t, int64(8080), n)
+	case <-time.After(3 * time.Second):
+		t.Fatal("observer was not notified when the key came back")
+	}
+	port, err := c.Value("port").Int()
+	require.NoError(t, err)
+	assert.Equal(t, int64(8080), port)
+}

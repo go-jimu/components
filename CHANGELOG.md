@@ -1,5 +1,12 @@
 # Change log
 
+## v0.11.2
+
+- Fixed: a key removed from its source on reload now reads as `ErrNotFound`
+  from `config.Value`, and `Watch` observers are notified with a Value whose
+  `Load` is nil. The cache used to keep serving the removed value, and the
+  observers were not told.
+
 ## v0.11.0
 
 This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
