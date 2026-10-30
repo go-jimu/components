@@ -121,6 +121,11 @@ func TestCodecRejectsInvalidInputWithoutPanic(t *testing.T) {
 	}{
 		{name: "marshal non-proto", call: func() error { _, marshalErr := c.Marshal(1); return marshalErr }},
 		{name: "marshal nil", call: func() error { _, marshalErr := c.Marshal(nil); return marshalErr }},
+		{name: "marshal nil message pointer", call: func() error { _, marshalErr := c.Marshal(nilModel); return marshalErr }},
+		{name: "marshal pointer to nil message pointer", call: func() error {
+			_, marshalErr := c.Marshal(&nilModel)
+			return marshalErr
+		}},
 		{name: "marshal struct value", call: func() error {
 			_, marshalErr := c.Marshal(testData.TestModel{})
 			return marshalErr

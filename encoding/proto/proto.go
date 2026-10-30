@@ -42,13 +42,16 @@ func (codec) Name() string {
 
 var protoMessageType = reflect.TypeOf((*proto.Message)(nil)).Elem()
 
-// getProtoMessage returns the proto message v holds directly or through
-// pointers.
+// getProtoMessage returns the non-nil proto message v holds directly or
+// through pointers.
 func getProtoMessage(v interface{}) (proto.Message, error) {
+	val := reflect.ValueOf(v)
 	if msg, ok := v.(proto.Message); ok {
+		if val.Kind() == reflect.Ptr && val.IsNil() {
+			return nil, fmt.Errorf("cannot marshal nil %T", v)
+		}
 		return msg, nil
 	}
-	val := reflect.ValueOf(v)
 	if val.Kind() != reflect.Ptr || val.IsNil() {
 		return nil, fmt.Errorf("not proto message: %T", v)
 	}
