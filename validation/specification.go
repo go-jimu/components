@@ -54,7 +54,7 @@ var (
 	_ Specification = (*OrNotSpecification)(nil)
 	_ Specification = (*NotSpecification)(nil)
 	_ Specification = (*AllSpecification)(nil)
-	_ Specification = (*AndSpecification)(nil)
+	_ Specification = (*AnySpecification)(nil)
 )
 
 func NewAndSpecification(s1, s2 Specification) Specification {
@@ -142,8 +142,8 @@ func NewAnySpecification(specs ...Specification) Specification {
 	return &AnySpecification{specs: specs}
 }
 
-func (any *AnySpecification) IsSatisfiedBy(candidate interface{}) bool {
-	for _, spec := range any.specs {
+func (anySpec *AnySpecification) IsSatisfiedBy(candidate interface{}) bool {
+	for _, spec := range anySpec.specs {
 		if spec.IsSatisfiedBy(candidate) {
 			return true
 		}
@@ -151,10 +151,10 @@ func (any *AnySpecification) IsSatisfiedBy(candidate interface{}) bool {
 	return false
 }
 
-func (any *AnySpecification) String() string {
-	rules := make([]string, len(any.specs))
-	for i := 0; i < len(any.specs); i++ {
-		rules[i] = any.specs[i].String()
+func (anySpec *AnySpecification) String() string {
+	rules := make([]string, len(anySpec.specs))
+	for i := 0; i < len(anySpec.specs); i++ {
+		rules[i] = anySpec.specs[i].String()
 	}
 	return fmt.Sprintf("ANY[%s]", strings.Join(rules, ", "))
 }

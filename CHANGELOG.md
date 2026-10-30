@@ -6,6 +6,11 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Fixed: `validation.Notification` keeps the original errors instead of their
+  messages, so `errors.Is` and `errors.As` match errors inside the returned
+  `*ErrChain`. The message format is unchanged.
+- Added: `validation.ErrChain.Errors` returns the collected errors in order.
+
 - Changed: `taskqueue.Task.Key` and `WithKey` are renamed to `ID` and `WithID`,
   and now mean a caller-assigned task identity. The old docs called it an
   "idempotency or ordering" key, but providers such as asynq map it to a task
