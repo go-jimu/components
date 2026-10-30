@@ -33,7 +33,6 @@ func Transit(context StateContext, sm RuntimeStateMachine, action Action) error 
 			return err
 		}
 
-		next.SetContext(context)
 		return context.SetState(next)
 	}
 	return newGuardedTransitionError(current.Label(), action)

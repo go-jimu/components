@@ -7,14 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func registerExampleOrderStateMachine(t *testing.T) {
-	t.Helper()
-
-	sm := newExampleOrderStateMachine()
-	require.NoError(t, sm.Check())
-	fsm.RegisterStateMachine(sm)
-}
-
 func TestStateMachineCheckReportsOrderWiringErrors(t *testing.T) {
 	exampleStateArchived := fsm.StateLabel("order.archived")
 	exampleStateReturned := fsm.StateLabel("order.returned")
@@ -41,7 +33,6 @@ func TestStateMachineCheckReportsOrderWiringErrors(t *testing.T) {
 }
 
 func TestOrderPayDelegatesToUnpaidStateThenTransitionsToPaid(t *testing.T) {
-	registerExampleOrderStateMachine(t)
 	order := newExampleOrder()
 
 	receipt, err := order.Pay(42, "card")
@@ -54,7 +45,6 @@ func TestOrderPayDelegatesToUnpaidStateThenTransitionsToPaid(t *testing.T) {
 }
 
 func TestPaidOrderRejectsSecondPayFromStateMethod(t *testing.T) {
-	registerExampleOrderStateMachine(t)
 	order := newExampleOrder()
 	_, err := order.Pay(42, "card")
 	require.NoError(t, err)
@@ -70,7 +60,6 @@ func TestPaidOrderRejectsSecondPayFromStateMethod(t *testing.T) {
 }
 
 func TestUnpaidOrderRejectsCancelFromStateMethod(t *testing.T) {
-	registerExampleOrderStateMachine(t)
 	order := newExampleOrder()
 
 	err := order.Cancel()
@@ -81,7 +70,6 @@ func TestUnpaidOrderRejectsCancelFromStateMethod(t *testing.T) {
 }
 
 func TestOrderRefundCanStayPartialAcrossMultipleRefunds(t *testing.T) {
-	registerExampleOrderStateMachine(t)
 	order := newExampleOrder()
 	_, err := order.Pay(42, "card")
 	require.NoError(t, err)
@@ -127,11 +115,8 @@ func TestOrderTransitionCallsConditionsAfterStateBehavior(t *testing.T) {
 		partialToCanceledCalls++
 		return sc.(*exampleOrder).isFullyRefunded()
 	})
-	require.NoError(t, sm.Check())
-	fsm.RegisterStateMachine(sm)
-
 	order := newExampleOrder()
-	order.stateMachineName = machineName
+	order.machine = fsm.MustFreeze(sm)
 	_, err := order.Pay(42, "card")
 	require.NoError(t, err)
 
@@ -151,7 +136,6 @@ func TestOrderTransitionCallsConditionsAfterStateBehavior(t *testing.T) {
 }
 
 func TestOrderRefundTransitionsToCanceledWhenNothingRemains(t *testing.T) {
-	registerExampleOrderStateMachine(t)
 	order := newExampleOrder()
 	_, err := order.Pay(42, "card")
 	require.NoError(t, err)
@@ -166,7 +150,6 @@ func TestOrderRefundTransitionsToCanceledWhenNothingRemains(t *testing.T) {
 }
 
 func TestPartialRefundedOrderCancelFullyRefundsAndCancels(t *testing.T) {
-	registerExampleOrderStateMachine(t)
 	order := newExampleOrder()
 	_, err := order.Pay(42, "card")
 	require.NoError(t, err)
@@ -180,7 +163,6 @@ func TestPartialRefundedOrderCancelFullyRefundsAndCancels(t *testing.T) {
 }
 
 func TestOrderRefundRejectsTooLargeAmountWithoutTransition(t *testing.T) {
-	registerExampleOrderStateMachine(t)
 	order := newExampleOrder()
 	_, err := order.Pay(10, "cash")
 	require.NoError(t, err)
@@ -190,4 +172,47 @@ func TestOrderRefundRejectsTooLargeAmountWithoutTransition(t *testing.T) {
 	require.EqualError(t, err, "refund amount exceeds remaining amount")
 	require.Equal(t, exampleStatePaid, order.CurrentState().Label())
 	require.Equal(t, 0, order.refundedAmount)
+}
+
+// Intent: a state restored from a stored label needs no wiring to the order,
+// because states receive the order as a parameter.
+func TestOrderRestoredFromLabelWorksWithoutWiring(t *testing.T) {
+	state, err := exampleOrderMachine.BuildState(exampleStatePaid)
+	require.NoError(t, err)
+	orderState, ok := state.(exampleOrderState)
+	require.True(t, ok)
+	order := &exampleOrder{
+		machine:    exampleOrderMachine,
+		state:      orderState,
+		paidAmount: 42,
+	}
+
+	require.NoError(t, order.Refund(12))
+	require.Equal(t, exampleStatePartialRefunded, order.CurrentState().Label())
+	require.Equal(t, 12, order.refundedAmount)
+}
+
+// Intent: copying an order yields an independent order; behavior on the copy
+// must not change the original through a shared state reference.
+func TestCopiedOrderIsIndependent(t *testing.T) {
+	original := newExampleOrder()
+	_, err := original.Pay(42, "card")
+	require.NoError(t, err)
+
+	copied := *original
+	require.NoError(t, copied.Refund(12))
+
+	require.Equal(t, 12, copied.refundedAmount)
+	require.Equal(t, 0, original.refundedAmount)
+	require.Equal(t, exampleStatePaid, original.CurrentState().Label())
+}
+
+// Intent: MustFreeze fails fast on a miswired machine.
+func TestMustFreezePanicsOnInvalidMachine(t *testing.T) {
+	sm := fsm.NewStateMachine("must_freeze_invalid")
+	require.NoError(t, sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil))
+
+	require.PanicsWithValue(t,
+		`fsm: state machine "must_freeze_invalid" is invalid: state machine check failed`,
+		func() { fsm.MustFreeze(sm) })
 }

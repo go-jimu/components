@@ -13,10 +13,7 @@ type recordingOrderContext struct {
 }
 
 func newRecordingOrderContext(label fsm.StateLabel) *recordingOrderContext {
-	state := fsm.NewSimpleState(label)
-	context := &recordingOrderContext{current: state}
-	state.SetContext(context)
-	return context
+	return &recordingOrderContext{current: fsm.NewSimpleState(label)}
 }
 
 func (context *recordingOrderContext) CurrentState() fsm.State {

@@ -48,14 +48,28 @@ func (registry *stateMachineRegistry) get(name string) (RuntimeStateMachine, boo
 	return sm, ok
 }
 
+// RegisterStateMachine checks, freezes, and stores sm in a process-wide
+// registry under its name.
+//
+// Deprecated: keep the machine in a package-level variable built with
+// MustFreeze and pass it to Transit. A global registry hides the dependency
+// behind a string name, fails only at runtime when the name is wrong or not
+// yet registered, and shares state between tests.
 func RegisterStateMachine(sm RuntimeStateMachine) error {
 	return defaultRegistry.register(sm)
 }
 
+// GetStateMachine returns a machine stored by RegisterStateMachine.
+//
+// Deprecated: see RegisterStateMachine.
 func GetStateMachine(name string) (RuntimeStateMachine, bool) {
 	return defaultRegistry.get(name)
 }
 
+// MustGetStateMachine returns a machine stored by RegisterStateMachine and
+// panics if none is stored under name.
+//
+// Deprecated: see RegisterStateMachine.
 func MustGetStateMachine(name string) RuntimeStateMachine {
 	sm, ok := GetStateMachine(name)
 	if !ok {

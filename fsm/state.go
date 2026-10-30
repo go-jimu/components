@@ -4,10 +4,9 @@ import "fmt"
 
 type (
 	// SimpleState is a reusable State implementation for concrete state structs
-	// that only need context and label storage.
+	// that only need label storage.
 	SimpleState struct {
-		context StateContext
-		label   StateLabel
+		label StateLabel
 	}
 
 	// TransitionError reports that no transition could be taken for the current
@@ -48,14 +47,6 @@ func NewSimpleState(label StateLabel) *SimpleState {
 
 func (s *SimpleState) Label() StateLabel {
 	return s.label
-}
-
-func (s *SimpleState) Context() StateContext {
-	return s.context
-}
-
-func (s *SimpleState) SetContext(context StateContext) {
-	s.context = context
 }
 
 func NewTransitionError(current StateLabel, action Action) *TransitionError {

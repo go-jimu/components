@@ -6,6 +6,17 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Changed: `fsm.State` is only `Label()`. `SetContext` and `Context` are
+  removed, and `Transit` no longer wires the next state to the business object.
+  State behavior methods now take the business object as a parameter. The back
+  reference had to be wired by hand when restoring an object from storage, and
+  a copied object kept states pointing at the original.
+- Added: `fsm.MustFreeze` checks and freezes a machine for a package-level
+  variable.
+- Deprecated: `fsm.RegisterStateMachine`, `GetStateMachine`, and
+  `MustGetStateMachine`. Keep the machine in a package-level variable built
+  with `MustFreeze`.
+
 - Fixed: `validation.Notification` keeps the original errors instead of their
   messages, so `errors.Is` and `errors.As` match errors inside the returned
   `*ErrChain`. The message format is unchanged.

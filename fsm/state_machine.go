@@ -1,6 +1,7 @@
 package fsm
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 )
@@ -214,6 +215,18 @@ func (sm *simpleStateMachine) Freeze() (RuntimeStateMachine, error) {
 	defer sm.mu.Unlock()
 	sm.frozen = true
 	return sm, nil
+}
+
+// MustFreeze checks and freezes sm, and panics if it is invalid. It suits a
+// package-level variable that holds a domain's state machine:
+//
+//	var orderMachine = fsm.MustFreeze(newOrderStateMachine())
+func MustFreeze(sm StateMachine) RuntimeStateMachine {
+	frozen, err := sm.Freeze()
+	if err != nil {
+		panic(fmt.Sprintf("fsm: state machine %q is invalid: %v", sm.Name(), err))
+	}
+	return frozen
 }
 
 func sortStateBuilderErrors(errors []StateBuilderError) {

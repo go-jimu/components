@@ -18,13 +18,17 @@ const (
 	exampleActionCancel         fsm.Action     = "cancel"
 )
 
+// exampleOrderMachine is built, checked, and frozen once, like a domain
+// package would do with a package-level variable.
+var exampleOrderMachine = fsm.MustFreeze(newExampleOrderStateMachine())
+
 type exampleOrder struct {
-	stateMachineName string
-	state            exampleOrderState
-	paidAmount       int
-	paymentMethod    string
-	refundedAmount   int
-	canceled         bool
+	machine        fsm.RuntimeStateMachine
+	state          exampleOrderState
+	paidAmount     int
+	paymentMethod  string
+	refundedAmount int
+	canceled       bool
 }
 
 func (order *exampleOrder) remainingAmount() int {
@@ -39,11 +43,13 @@ func (order *exampleOrder) isFullyRefunded() bool {
 	return order.remainingAmount() == 0
 }
 
+// exampleOrderState is the behavior interface. Each method receives the order
+// it acts on, so states hold no reference to an order.
 type exampleOrderState interface {
 	fsm.State
-	Pay(amount int, method string) (string, error)
-	Refund(amount int) error
-	Cancel() error
+	Pay(order *exampleOrder, amount int, method string) (string, error)
+	Refund(order *exampleOrder, amount int) error
+	Cancel(order *exampleOrder) error
 }
 
 type exampleBaseOrderState struct {
@@ -67,13 +73,12 @@ type exampleCanceledOrderState struct {
 }
 
 func newExampleOrder() *exampleOrder {
-	initial := newExampleUnpaidOrderState().(exampleOrderState)
-	order := &exampleOrder{
-		stateMachineName: exampleStateMachineName,
-		state:            initial,
+	return &exampleOrder{
+		machine: exampleOrderMachine,
+		state: &exampleUnpaidOrderState{
+			exampleBaseOrderState: exampleBaseOrderState{SimpleState: fsm.NewSimpleState(exampleStateUnpaid)},
+		},
 	}
-	initial.SetContext(order)
-	return order
 }
 
 func (order *exampleOrder) CurrentState() fsm.State {
@@ -81,7 +86,7 @@ func (order *exampleOrder) CurrentState() fsm.State {
 }
 
 func (order *exampleOrder) transition(action fsm.Action) error {
-	return fsm.Transit(order, fsm.MustGetStateMachine(order.stateMachineName), action)
+	return fsm.Transit(order, order.machine, action)
 }
 
 func (order *exampleOrder) SetState(next fsm.State) error {
@@ -94,7 +99,7 @@ func (order *exampleOrder) SetState(next fsm.State) error {
 }
 
 func (order *exampleOrder) Pay(amount int, method string) (string, error) {
-	receipt, err := order.CurrentState().(exampleOrderState).Pay(amount, method)
+	receipt, err := order.state.Pay(order, amount, method)
 	if err != nil {
 		return "", err
 	}
@@ -105,73 +110,70 @@ func (order *exampleOrder) Pay(amount int, method string) (string, error) {
 }
 
 func (order *exampleOrder) Refund(amount int) error {
-	if err := order.CurrentState().(exampleOrderState).Refund(amount); err != nil {
+	if err := order.state.Refund(order, amount); err != nil {
 		return err
 	}
 	return order.transition(exampleActionRefund)
 }
 
 func (order *exampleOrder) Cancel() error {
-	if err := order.CurrentState().(exampleOrderState).Cancel(); err != nil {
+	if err := order.state.Cancel(order); err != nil {
 		return err
 	}
 	return order.transition(exampleActionCancel)
 }
 
-func (state *exampleBaseOrderState) Pay(int, string) (string, error) {
+func (state *exampleBaseOrderState) Pay(*exampleOrder, int, string) (string, error) {
 	return "", fmt.Errorf("%s cannot pay", state.Label())
 }
 
-func (state *exampleBaseOrderState) Refund(int) error {
+func (state *exampleBaseOrderState) Refund(*exampleOrder, int) error {
 	return fmt.Errorf("%s cannot refund", state.Label())
 }
 
-func (state *exampleBaseOrderState) Cancel() error {
+func (state *exampleBaseOrderState) Cancel(*exampleOrder) error {
 	return fmt.Errorf("%s cannot cancel", state.Label())
 }
 
-func (state *exampleUnpaidOrderState) Pay(amount int, method string) (string, error) {
+func (state *exampleUnpaidOrderState) Pay(order *exampleOrder, amount int, method string) (string, error) {
 	if amount <= 0 {
 		return "", errors.New("payment amount must be positive")
 	}
-	order := state.Context().(*exampleOrder)
 	order.paidAmount = amount
 	order.paymentMethod = method
 	return fmt.Sprintf("receipt:%s:%d", method, amount), nil
 }
 
-func (state *examplePaidOrderState) Pay(int, string) (string, error) {
+func (state *examplePaidOrderState) Pay(*exampleOrder, int, string) (string, error) {
 	return "", errors.New("order has already been paid")
 }
 
-func (state *examplePaidOrderState) Refund(amount int) error {
-	if amount <= 0 {
-		return errors.New("refund amount must be positive")
-	}
-	order := state.Context().(*exampleOrder)
-	if amount > order.remainingAmount() {
-		return errors.New("refund amount exceeds remaining amount")
-	}
-	order.refundedAmount += amount
+func (state *examplePaidOrderState) Refund(order *exampleOrder, amount int) error {
+	return refundExampleOrder(order, amount)
+}
+
+func (state *examplePaidOrderState) Cancel(order *exampleOrder) error {
+	cancelExampleOrder(order)
 	return nil
 }
 
-func (state *examplePaidOrderState) Cancel() error {
-	order := state.Context().(*exampleOrder)
-	order.refundedAmount = order.paidAmount
-	order.canceled = true
-	return nil
-}
-
-func (state *examplePartialRefundedOrderState) Pay(int, string) (string, error) {
+func (state *examplePartialRefundedOrderState) Pay(*exampleOrder, int, string) (string, error) {
 	return "", errors.New("partially refunded order cannot be paid again")
 }
 
-func (state *examplePartialRefundedOrderState) Refund(amount int) error {
+func (state *examplePartialRefundedOrderState) Refund(order *exampleOrder, amount int) error {
+	return refundExampleOrder(order, amount)
+}
+
+func (state *examplePartialRefundedOrderState) Cancel(order *exampleOrder) error {
+	cancelExampleOrder(order)
+	return nil
+}
+
+func refundExampleOrder(order *exampleOrder, amount int) error {
 	if amount <= 0 {
 		return errors.New("refund amount must be positive")
 	}
-	order := state.Context().(*exampleOrder)
 	if amount > order.remainingAmount() {
 		return errors.New("refund amount exceeds remaining amount")
 	}
@@ -179,11 +181,9 @@ func (state *examplePartialRefundedOrderState) Refund(amount int) error {
 	return nil
 }
 
-func (state *examplePartialRefundedOrderState) Cancel() error {
-	order := state.Context().(*exampleOrder)
+func cancelExampleOrder(order *exampleOrder) {
 	order.refundedAmount = order.paidAmount
 	order.canceled = true
-	return nil
 }
 
 func newExampleUnpaidOrderState() fsm.State {
@@ -242,14 +242,7 @@ func newExampleOrderStateMachine() fsm.StateMachine {
 	return sm
 }
 
-func ExampleStateMachine_orderPayment() {
-	sm := newExampleOrderStateMachine()
-	if err := sm.Check(); err != nil {
-		fmt.Println(err)
-		return
-	}
-	fsm.RegisterStateMachine(sm)
-
+func ExampleMustFreeze_orderPayment() {
 	paidOrder := newExampleOrder()
 	receipt, _ := paidOrder.Pay(42, "card")
 	fmt.Println(receipt, paidOrder.CurrentState().Label())

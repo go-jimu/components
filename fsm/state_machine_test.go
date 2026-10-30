@@ -241,13 +241,10 @@ type rejectingStateContext struct {
 }
 
 func newRejectingStateContext(label fsm.StateLabel, err error) *rejectingStateContext {
-	state := fsm.NewSimpleState(label)
-	context := &rejectingStateContext{
-		current: state,
+	return &rejectingStateContext{
+		current: fsm.NewSimpleState(label),
 		err:     err,
 	}
-	state.SetContext(context)
-	return context
 }
 
 func (context *rejectingStateContext) CurrentState() fsm.State {
@@ -273,7 +270,6 @@ func TestTransitPropagatesSetStateErrorAfterPreparingNextState(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 	require.NotNil(t, context.rejected)
 	require.Equal(t, exampleStateCanceled, context.rejected.Label())
-	require.Same(t, context, context.rejected.Context())
 	require.Equal(t, exampleStatePaid, context.CurrentState().Label())
 }
 
