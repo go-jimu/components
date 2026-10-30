@@ -9,4 +9,10 @@
 // Dispatch errors report only dispatcher admission or delivery failures. They
 // do not report handler success or failure. Handlers represent follow-up
 // transactions and own their own error policy.
+//
+// The ctx passed to Dispatch only bounds how long the caller waits to be
+// admitted. Handlers run after the caller returns, so their context is owned by
+// the dispatcher and does not inherit the caller's cancellation, deadline, or
+// values. Copy the caller values a handler needs, such as trace or request
+// identifiers, through SourceContext.
 package event

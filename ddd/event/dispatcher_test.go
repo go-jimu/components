@@ -25,9 +25,9 @@ func (h handlerFunc) Handle(ctx context.Context, ev event.Event) {
 
 type dispatchOnly struct{}
 
-func (dispatchOnly) Dispatch(event.Event) error      { return nil }
-func (dispatchOnly) DispatchAll([]event.Event) error { return nil }
-func (dispatchOnly) Close(context.Context) error     { return nil }
+func (dispatchOnly) Dispatch(context.Context, event.Event) error      { return nil }
+func (dispatchOnly) DispatchAll(context.Context, []event.Event) error { return nil }
+func (dispatchOnly) Close(context.Context) error                      { return nil }
 
 // Intent: producer-only implementations should satisfy Dispatcher without
 // supporting subscriptions.
@@ -114,7 +114,7 @@ func TestDispatcherDispatchAcceptedWhileOpen(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 	require.Equal(t, event.Kind("order.paid"), (<-called).Kind())
 }
 
@@ -124,8 +124,8 @@ func TestDispatcherDispatchAllEmptyBatchAccepted(t *testing.T) {
 	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
 	defer dispatcher.Close(context.Background())
 
-	require.NoError(t, dispatcher.DispatchAll(nil))
-	require.NoError(t, dispatcher.DispatchAll([]event.Event{}))
+	require.NoError(t, dispatcher.DispatchAll(context.Background(), nil))
+	require.NoError(t, dispatcher.DispatchAll(context.Background(), []event.Event{}))
 }
 
 // Intent: once the dispatcher is closed, new event batches are rejected with a
@@ -134,8 +134,10 @@ func TestDispatcherRejectsAfterClose(t *testing.T) {
 	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
 	require.NoError(t, dispatcher.Close(context.Background()))
 
-	require.ErrorIs(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}), event.ErrDispatcherClosed)
-	require.ErrorIs(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}), event.ErrDispatcherClosed)
+	require.ErrorIs(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}), event.ErrDispatcherClosed)
+	require.ErrorIs(t,
+		dispatcher.DispatchAll(context.Background(), []event.Event{testEvent{kind: "order.paid"}}),
+		event.ErrDispatcherClosed)
 }
 
 // Intent: rejected dispatches happen in a background component, so they should
@@ -148,7 +150,9 @@ func TestDispatcherLogsRejectedDispatch(t *testing.T) {
 	)
 	require.NoError(t, dispatcher.Close(context.Background()))
 
-	require.ErrorIs(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}), event.ErrDispatcherClosed)
+	require.ErrorIs(t,
+		dispatcher.DispatchAll(context.Background(), []event.Event{testEvent{kind: "order.paid"}}),
+		event.ErrDispatcherClosed)
 
 	record := receiveLogWithin(t, "rejected dispatch log", records)
 	for record.message != "domain event dispatch rejected" {
@@ -167,7 +171,9 @@ func TestDispatcherRejectsAfterDelayCloseCancel(t *testing.T) {
 	cancel()
 	require.ErrorIs(t, dispatcher.Close(ctx), context.Canceled)
 
-	require.ErrorIs(t, dispatcher.DispatchAll([]event.Event{testEvent{kind: "order.paid"}}), event.ErrDispatcherClosed)
+	require.ErrorIs(t,
+		dispatcher.DispatchAll(context.Background(), []event.Event{testEvent{kind: "order.paid"}}),
+		event.ErrDispatcherClosed)
 }
 
 // Intent: close waits for already accepted work to finish before returning.
@@ -186,7 +192,7 @@ func TestDispatcherCloseDrainsAcceptedBatches(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 	<-started
 
 	var wg sync.WaitGroup
@@ -240,11 +246,11 @@ func TestDispatcherDispatchAllBatchDoesNotInterleave(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll(context.Background(), []event.Event{
 		testEvent{kind: "order.event", name: "a1"},
 		testEvent{kind: "order.event", name: "a2"},
 	}))
-	require.NoError(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll(context.Background(), []event.Event{
 		testEvent{kind: "order.event", name: "b1"},
 		testEvent{kind: "order.event", name: "b2"},
 	}))
@@ -271,7 +277,7 @@ func TestDispatcherHandlersRunInSubscriptionOrder(t *testing.T) {
 		handle: func(context.Context, event.Event) { seen <- "second" },
 	})
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 	require.Equal(t, "first", <-seen)
 	require.Equal(t, "second", <-seen)
 }
@@ -288,7 +294,7 @@ func TestDispatcherUnhandledEventHook(t *testing.T) {
 	)
 	defer dispatcher.Close(context.Background())
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "unknown"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "unknown"}))
 	ctx := receiveWithin(t, "unhandled event", unhandled)
 	require.Equal(t, uint64(1), ctx.BatchID)
 	require.Equal(t, event.Kind("unknown"), ctx.Event.Kind())
@@ -304,7 +310,7 @@ func TestDispatcherLogsUnhandledEventWithoutHook(t *testing.T) {
 	)
 	defer dispatcher.Close(context.Background())
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "unknown"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "unknown"}))
 
 	record := receiveLogWithin(t, "unhandled event log", records)
 	require.Equal(t, slog.LevelWarn, record.level)
@@ -339,7 +345,7 @@ func TestDispatcherRecoversPanicAndContinues(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll(context.Background(), []event.Event{
 		testEvent{kind: "order.event", name: "first"},
 		testEvent{kind: "order.event", name: "second"},
 	}))
@@ -356,7 +362,7 @@ func TestDispatcherRecoversPanicAndContinues(t *testing.T) {
 type contextKey string
 
 // Intent: handler context is owned by the dispatcher, so configured context
-// values should be available without passing caller request context to Dispatch.
+// values should be available without inheriting the caller context.
 func TestDispatcherContextFactory(t *testing.T) {
 	valueCh := make(chan string, 1)
 	dispatcher := event.NewDispatcher(
@@ -374,7 +380,7 @@ func TestDispatcherContextFactory(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 	require.Equal(t, "dispatcher-context", <-valueCh)
 }
 
@@ -400,7 +406,7 @@ func TestDispatcherLogsNilContextFactory(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 	receiveWithin(t, "handler after nil context factory", handled)
 	record := receiveLogWithin(t, "nil context factory log", records)
 	require.Equal(t, slog.LevelWarn, record.level)
@@ -427,7 +433,7 @@ func TestDispatcherHandlerTimeout(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 	require.ErrorIs(t, <-done, context.DeadlineExceeded)
 }
 
@@ -443,7 +449,7 @@ func TestDispatcherCloseReturnsContextErrorOnTimeout(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -469,9 +475,9 @@ func TestDispatcherLogsCloseContextError(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 	<-started
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.paid"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -515,12 +521,12 @@ func TestDispatcherCloseInterruptedHookReportsAbandonedWork(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll(context.Background(), []event.Event{
 		testEvent{kind: "order.event", name: "first"},
 		testEvent{kind: "order.event", name: "second"},
 	}))
 	<-firstStarted
-	require.NoError(t, dispatcher.DispatchAll([]event.Event{
+	require.NoError(t, dispatcher.DispatchAll(context.Background(), []event.Event{
 		testEvent{kind: "order.event", name: "third"},
 	}))
 
@@ -558,9 +564,9 @@ func TestDispatcherCloseTimeoutStopsTakingQueuedBatches(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.event", name: "first"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "first"}))
 	<-firstStarted
-	require.NoError(t, dispatcher.Dispatch(testEvent{kind: "order.event", name: "second"}))
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "second"}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -572,4 +578,173 @@ func TestDispatcherCloseTimeoutStopsTakingQueuedBatches(t *testing.T) {
 		t.Fatal("queued batch started after close timeout")
 	case <-time.After(30 * time.Millisecond):
 	}
+}
+
+// Intent: a full queue must not block the caller beyond its own context, and
+// rejected events must not be queued.
+func TestDispatcherDispatchReturnsContextErrorWhenQueueFull(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var handled []string
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithBufferSize(1))
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(_ context.Context, ev event.Event) {
+			mu.Lock()
+			if te, ok := ev.(testEvent); ok {
+				handled = append(handled, te.name)
+			}
+			mu.Unlock()
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+		},
+	})
+
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "in-flight"}))
+	receiveWithin(t, "first handler start", started)
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "queued"}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := dispatcher.Dispatch(ctx, testEvent{kind: "order.event", name: "rejected"})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	close(release)
+	require.NoError(t, dispatcher.Close(context.Background()))
+	require.Equal(t, []string{"in-flight", "queued"}, handled)
+}
+
+// Intent: a waiting dispatch should be accepted as soon as the worker frees
+// queue space.
+func TestDispatcherBlockedDispatchAcceptedWhenSpaceFrees(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithBufferSize(1))
+	defer dispatcher.Close(context.Background())
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(context.Context, event.Event) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+		},
+	})
+
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "in-flight"}))
+	receiveWithin(t, "first handler start", started)
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "queued"}))
+
+	result := make(chan error, 1)
+	go func() {
+		result <- dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "waiting"})
+	}()
+	select {
+	case err := <-result:
+		t.Fatalf("dispatch returned %v before queue space was freed", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(release)
+	require.NoError(t, receiveWithin(t, "blocked dispatch result", result))
+}
+
+// Intent: the caller context only bounds waiting for queue space. When space
+// is available, the batch is accepted even if the caller context is done.
+func TestDispatcherAcceptsWithDoneContextWhenQueueHasSpace(t *testing.T) {
+	handled := make(chan struct{}, 1)
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	defer dispatcher.Close(context.Background())
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.paid"},
+		handle: func(context.Context, event.Event) {
+			handled <- struct{}{}
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.NoError(t, dispatcher.Dispatch(ctx, testEvent{kind: "order.paid"}))
+	receiveWithin(t, "handler", handled)
+}
+
+// Intent: handlers run after the caller returns, so the handler context must
+// not inherit the caller's cancellation or values implicitly. The caller's
+// values stay reachable only through SourceContext.
+func TestDispatcherHandlerContextIsDetachedFromDispatchContext(t *testing.T) {
+	type observed struct {
+		err         error
+		inherited   any
+		sourceFound bool
+		sourceValue any
+		sourceErr   error
+	}
+	result := make(chan observed, 1)
+	release := make(chan struct{})
+	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	defer dispatcher.Close(context.Background())
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.paid"},
+		handle: func(ctx context.Context, _ event.Event) {
+			<-release
+			source, found := event.SourceContext(ctx)
+			o := observed{err: ctx.Err(), inherited: ctx.Value(contextKey("trace")), sourceFound: found}
+			if found {
+				o.sourceValue = source.Value(contextKey("trace"))
+				o.sourceErr = source.Err()
+			}
+			result <- o
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), contextKey("trace"), "request"))
+	require.NoError(t, dispatcher.Dispatch(ctx, testEvent{kind: "order.paid"}))
+	cancel()
+	close(release)
+
+	o := receiveWithin(t, "handler observation", result)
+	require.NoError(t, o.err)
+	require.Nil(t, o.inherited)
+	require.True(t, o.sourceFound)
+	require.Equal(t, "request", o.sourceValue)
+	require.NoError(t, o.sourceErr)
+}
+
+// Intent: the context factory can copy selected caller values explicitly.
+func TestDispatcherContextFactoryReadsSourceContext(t *testing.T) {
+	valueCh := make(chan any, 1)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithContextFactory(func(ctx context.Context, _ event.Event) context.Context {
+			source, _ := event.SourceContext(ctx)
+			return context.WithValue(ctx, contextKey("request_id"), source.Value(contextKey("request_id")))
+		}),
+	)
+	defer dispatcher.Close(context.Background())
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.paid"},
+		handle: func(ctx context.Context, _ event.Event) {
+			valueCh <- ctx.Value(contextKey("request_id"))
+		},
+	})
+
+	ctx := context.WithValue(context.Background(), contextKey("request_id"), "req-1")
+	require.NoError(t, dispatcher.Dispatch(ctx, testEvent{kind: "order.paid"}))
+	require.Equal(t, "req-1", receiveWithin(t, "factory value", valueCh))
+}
+
+// Intent: SourceContext reports false for contexts not created by a dispatcher.
+func TestSourceContextOutsideHandler(t *testing.T) {
+	_, found := event.SourceContext(context.Background())
+	require.False(t, found)
 }

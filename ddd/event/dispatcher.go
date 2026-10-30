@@ -16,12 +16,13 @@ const (
 type batch struct {
 	id     uint64
 	events []Event
+	source context.Context
 }
 
 type InMemoryDispatcher struct {
 	mu                      sync.Mutex
 	notEmpty                *sync.Cond
-	notFull                 *sync.Cond
+	spaceFreed              chan struct{}
 	queue                   []batch
 	closed                  bool
 	forced                  bool
@@ -51,6 +52,7 @@ func NewDispatcher(opts ...Option) *InMemoryDispatcher {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	d := &InMemoryDispatcher{
 		done:       make(chan struct{}),
+		spaceFreed: make(chan struct{}),
 		handlers:   make(map[Kind][]Handler),
 		logger:     slog.Default(),
 		delayClose: defaultDelayClose,
@@ -59,7 +61,6 @@ func NewDispatcher(opts ...Option) *InMemoryDispatcher {
 		rootCancel: rootCancel,
 	}
 	d.notEmpty = sync.NewCond(&d.mu)
-	d.notFull = sync.NewCond(&d.mu)
 
 	for _, opt := range opts {
 		opt(d)
@@ -85,36 +86,61 @@ func (d *InMemoryDispatcher) Subscribe(handler Handler) {
 	}
 }
 
-func (d *InMemoryDispatcher) Dispatch(event Event) error {
+func (d *InMemoryDispatcher) Dispatch(ctx context.Context, event Event) error {
 	if event == nil {
 		return nil
 	}
-	return d.DispatchAll([]Event{event})
+	return d.DispatchAll(ctx, []Event{event})
 }
 
-func (d *InMemoryDispatcher) DispatchAll(events []Event) error {
+// DispatchAll accepts events as one batch. When the queue is full it waits for
+// space until ctx is done; ctx does not reject a batch that can be queued
+// immediately.
+func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) error {
 	if len(events) == 0 {
 		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	copied := make([]Event, len(events))
 	copy(copied, events)
 
-	d.mu.Lock()
-	for len(d.queue) >= d.bufferSize && !d.closed {
-		d.notFull.Wait()
-	}
-	if d.closed {
+	for {
+		d.mu.Lock()
+		if d.closed {
+			d.mu.Unlock()
+			d.logger.Warn("domain event dispatch rejected", slog.Int("event_count", len(copied)))
+			return ErrDispatcherClosed
+		}
+		if len(d.queue) < d.bufferSize {
+			d.nextBatchID++
+			d.queue = append(d.queue, batch{
+				id:     d.nextBatchID,
+				events: copied,
+				source: context.WithoutCancel(ctx),
+			})
+			d.notEmpty.Signal()
+			d.mu.Unlock()
+			return nil
+		}
+		spaceFreed := d.spaceFreed
 		d.mu.Unlock()
-		d.logger.Warn("domain event dispatch rejected", slog.Int("event_count", len(copied)))
-		return ErrDispatcherClosed
-	}
 
-	d.nextBatchID++
-	d.queue = append(d.queue, batch{id: d.nextBatchID, events: copied})
-	d.notEmpty.Signal()
-	d.mu.Unlock()
-	return nil
+		select {
+		case <-spaceFreed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// signalSpaceFreedLocked wakes every DispatchAll waiting for queue space or
+// for the dispatcher to close.
+func (d *InMemoryDispatcher) signalSpaceFreedLocked() {
+	close(d.spaceFreed)
+	d.spaceFreed = make(chan struct{})
 }
 
 func (d *InMemoryDispatcher) Close(ctx context.Context) error {
@@ -170,7 +196,7 @@ func (d *InMemoryDispatcher) beginClose() bool {
 	}
 	d.closed = true
 	d.notEmpty.Broadcast()
-	d.notFull.Broadcast()
+	d.signalSpaceFreedLocked()
 	return true
 }
 
@@ -181,7 +207,7 @@ func (d *InMemoryDispatcher) interruptClose(err error) (CloseInterruptedContext,
 	d.forced = true
 	snapshot := d.closeInterruptedSnapshotLocked(err)
 	d.notEmpty.Broadcast()
-	d.notFull.Broadcast()
+	d.signalSpaceFreedLocked()
 	d.mu.Unlock()
 
 	d.rootCancel()
@@ -272,7 +298,7 @@ func (d *InMemoryDispatcher) nextBatch() (batch, bool) {
 	copy(d.queue, d.queue[1:])
 	d.queue[len(d.queue)-1] = batch{}
 	d.queue = d.queue[:len(d.queue)-1]
-	d.notFull.Signal()
+	d.signalSpaceFreedLocked()
 	return next, true
 }
 
@@ -292,11 +318,11 @@ func (d *InMemoryDispatcher) clearInFlight(batchID uint64) {
 
 func (d *InMemoryDispatcher) handleBatch(next batch) {
 	for _, event := range next.events {
-		d.handleEvent(next.id, event)
+		d.handleEvent(next, event)
 	}
 }
 
-func (d *InMemoryDispatcher) handleEvent(batchID uint64, event Event) {
+func (d *InMemoryDispatcher) handleEvent(next batch, event Event) {
 	if event == nil {
 		return
 	}
@@ -307,21 +333,22 @@ func (d *InMemoryDispatcher) handleEvent(batchID uint64, event Event) {
 
 	if len(handlers) == 0 {
 		if d.unhandledEventHandler != nil {
-			d.unhandledEventHandler(UnhandledContext{BatchID: batchID, Event: event})
+			d.unhandledEventHandler(UnhandledContext{BatchID: next.id, Event: event})
 		} else {
 			d.logger.Warn("domain event has no handler",
-				slog.Uint64("batch_id", batchID),
+				slog.Uint64("batch_id", next.id),
 				slog.Any("event_kind", event.Kind()))
 		}
 		return
 	}
 
 	for _, handler := range handlers {
-		d.handleOne(batchID, handler, event)
+		d.handleOne(next, handler, event)
 	}
 }
 
-func (d *InMemoryDispatcher) handleOne(batchID uint64, handler Handler, event Event) {
+func (d *InMemoryDispatcher) handleOne(next batch, handler Handler, event Event) {
+	batchID := next.id
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			stack := debug.Stack()
@@ -343,20 +370,24 @@ func (d *InMemoryDispatcher) handleOne(batchID uint64, handler Handler, event Ev
 		}
 	}()
 
-	ctx, cancel := d.handlerContext(batchID, event)
+	ctx, cancel := d.handlerContext(next, event)
 	defer cancel()
 	handler.Handle(ctx, event)
 }
 
-func (d *InMemoryDispatcher) handlerContext(batchID uint64, event Event) (context.Context, context.CancelFunc) {
+func (d *InMemoryDispatcher) handlerContext(next batch, event Event) (context.Context, context.CancelFunc) {
 	var (
 		ctx    context.Context
 		cancel context.CancelFunc
 	)
+	batchID := next.id
 	if d.handlerTimeout > 0 {
 		ctx, cancel = context.WithTimeout(d.rootCtx, d.handlerTimeout)
 	} else {
 		ctx, cancel = context.WithCancel(d.rootCtx)
+	}
+	if next.source != nil {
+		ctx = context.WithValue(ctx, sourceContextKey{}, next.source)
 	}
 
 	if d.contextFactory != nil {

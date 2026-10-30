@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Changed: `event.Dispatcher.Dispatch` and `DispatchAll` take a
+  `context.Context`. When the in-memory queue is full, the caller waits only
+  until ctx is done and gets `ctx.Err()`; before, it blocked indefinitely.
+  Handlers still run detached from the caller: they do not inherit its
+  cancellation, deadline, or values.
+- Added: `event.SourceContext` returns the caller's context, without its
+  cancellation, from a handler context, so selected values such as trace or
+  request IDs can be copied explicitly, for example in `WithContextFactory`.
+
 - Changed: `fsm.Transit` returns a `*TransitionError` with `Guarded` set when
   transitions exist but no condition matches. It used to return nil, so a
   behavior could change the aggregate while the state silently stayed the same.

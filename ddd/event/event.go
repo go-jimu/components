@@ -68,10 +68,31 @@ type Handler interface {
 }
 
 // Dispatcher accepts domain event batches for handling.
+//
+// Dispatch and DispatchAll only bound admission with ctx: when the dispatcher
+// has to wait for capacity, it stops waiting and returns ctx.Err() once ctx is
+// done, without accepting the batch. Accepted events are handled after the
+// caller returns, so handlers never inherit the cancellation, deadline, or
+// values of ctx. Use SourceContext to read caller values explicitly.
 type Dispatcher interface {
-	Dispatch(Event) error
-	DispatchAll([]Event) error
+	Dispatch(context.Context, Event) error
+	DispatchAll(context.Context, []Event) error
 	Close(context.Context) error
+}
+
+type sourceContextKey struct{}
+
+// SourceContext returns the context passed to Dispatch or DispatchAll for the
+// event being handled, detached from its cancellation and deadline. It reports
+// false for contexts not created by a dispatcher.
+//
+// Handler contexts deliberately do not inherit caller values, because some of
+// them, such as an open transaction, are only valid during the caller's
+// request. Copy the values a handler needs, such as trace or request
+// identifiers, from SourceContext, typically inside WithContextFactory.
+func SourceContext(ctx context.Context) (context.Context, bool) {
+	source, ok := ctx.Value(sourceContextKey{}).(context.Context)
+	return source, ok
 }
 
 // Subscriber registers handlers for domain events.
