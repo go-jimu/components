@@ -172,3 +172,22 @@ func TestCollectionIgnoresNilEvent(t *testing.T) {
 	require.Equal(t, 1, collection.Len())
 	require.Equal(t, []event.Event{testEvent{kind: "order.paid", name: "only"}}, collection.Drain())
 }
+
+type exampleAggregate struct {
+	Events event.Events
+}
+
+// Intent: an aggregate can hold Events as a plain field without initializing
+// it, so a zero-value or freshly loaded aggregate never panics on Add.
+func TestEventsZeroValueIsReady(t *testing.T) {
+	var aggregate exampleAggregate
+
+	aggregate.Events.Add(testEvent{kind: "order.paid", name: "first"})
+	require.Equal(t, 1, aggregate.Events.Len())
+	require.Equal(t, []event.Event{testEvent{kind: "order.paid", name: "first"}}, aggregate.Events.Drain())
+	require.Equal(t, 0, aggregate.Events.Len())
+
+	var collection event.Collection = &aggregate.Events
+	collection.Add(testEvent{kind: "order.shipped"})
+	require.Len(t, collection.Drain(), 1)
+}

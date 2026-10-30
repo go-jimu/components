@@ -53,6 +53,7 @@ type Keyed interface {
 
 // Collection stores pending domain events raised by an aggregate. Drain removes
 // the pending events but leaves the collection ready to accept later events.
+// Events is the implementation; its zero value is ready to use.
 // Its methods are safe for concurrent use, but they do not synchronize other
 // aggregate state or mutable values referenced by an Event.
 type Collection interface {

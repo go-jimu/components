@@ -1,8 +1,8 @@
 // Package event provides domain events for use inside one bounded context:
-// facts an aggregate raises, collected in a Collection and dispatched after the
-// aggregate is persisted. Each Handler is a follow-up transaction that owns its
-// own error policy. Integration messages that cross a boundary belong in
-// ddd/message.
+// facts an aggregate raises, collected in an Events field and dispatched after
+// the aggregate is persisted. Each Handler is a follow-up transaction that
+// owns its own error policy. Integration messages that cross a boundary belong
+// in ddd/message.
 //
 // # Dispatch
 //

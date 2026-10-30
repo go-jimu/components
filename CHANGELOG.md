@@ -6,6 +6,10 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
+- Added: `event.Events`, the `Collection` implementation, is exported and
+  ready at its zero value, so an aggregate can hold it as a plain field instead
+  of an interface that must be initialized with `NewCollection`.
+
 - Fixed: `config.Watch` keeps every observer registered for a key; a later
   `Watch` used to replace the earlier one. Observers are also notified when a
   reloaded value changes type, which used to be skipped.
