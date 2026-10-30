@@ -6,8 +6,8 @@ This release contains breaking changes to `ddd/event`, `ddd/message`, `fsm`,
 and `config/loader`, and removes `ddd/message/outbox`. See the Changed and
 Removed entries below.
 
-- Changed: CI tests only Go 1.25, the minimum `go.mod` requires; Go 1.24 is
-  no longer supported.
+- Changed: CI tests Go 1.25 through 1.27. Go 1.25 is the minimum `go.mod`
+  requires; Go 1.24 is no longer supported.
 
 - Added: `event.Events`, the `Collection` implementation, is exported and
   ready at its zero value, so an aggregate can hold it as a plain field instead
