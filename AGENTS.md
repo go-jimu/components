@@ -15,8 +15,6 @@ examples are executable and should be treated as the preferred usage shape.
   `encoding/json`, `encoding/yaml`, `encoding/toml`, or `encoding/proto`.
 - Use `ddd/event` for same bounded-context domain events.
 - Use `ddd/message` for protobuf integration messages and in-process routing.
-- Use `ddd/message/outbox` for transaction-time message recording and
-  at-least-once relay publishing.
 - Use `taskqueue` for provider-neutral background task contracts.
 - Use `validation` for lightweight specification and notification helpers.
 - Use `sloghelper` with the standard library `log/slog` for new logging code.

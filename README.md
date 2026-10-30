@@ -17,7 +17,6 @@ package has no runtime API.
 | Model polymorphic states | `github.com/go-jimu/components/fsm` | Put behavior on concrete state types; use `fsm.Transit` after behavior succeeds. |
 | Same bounded-context domain events | `github.com/go-jimu/components/ddd/event` | New domain event code should use this instead of `mediator`. |
 | Cross-boundary integration messages | `github.com/go-jimu/components/ddd/message` | Protobuf-first message DTOs and handler routing; broker runtime belongs to providers. |
-| Reliable integration message publishing | `github.com/go-jimu/components/ddd/message/outbox` | Transaction-time recording plus relay primitives. |
 | Transport-neutral task queue contracts | `github.com/go-jimu/components/taskqueue` | Task envelopes, processors, routing, schedules, middleware, and worker interfaces. |
 | Notification/specification validation helpers | `github.com/go-jimu/components/validation` | Specification combinators and error notification collection. |
 | `log/slog` helpers | `github.com/go-jimu/components/sloghelper` | Preferred logging helper package for new code. |

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Removed: `ddd/message/outbox`. It was never validated in production, and its
+  relay could not renew claim locks: `RunOptions.Claim.LockedUntil` was an
+  absolute time reused on every run, so `Relay.Run` failed once it passed.
+
 - Changed: `config/loader` no longer merges environment variables as an override
   layer. Reference them from configuration files with `${NAME:default}`
   placeholders, resolved from `<prefix>NAME`. The old layer could not address
