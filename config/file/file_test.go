@@ -107,12 +107,12 @@ func testWatchFile(t *testing.T, path string) {
 	s := NewSource(path)
 	watch, err := s.Watch()
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	defer f.Close()
 	_, err = f.WriteString(_testJSONUpdate)
@@ -156,12 +156,13 @@ func testWatchDir(t *testing.T, path, file string) {
 	s := NewSource(path)
 	watch, err := s.Watch()
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
+	defer watch.Stop() //nolint:errcheck // the test only needs the inotify instance released
 
 	f, err := os.OpenFile(file, os.O_RDWR, 0)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	defer f.Close()
 	_, err = f.WriteString(_testJSONUpdate)
