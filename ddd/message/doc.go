@@ -5,7 +5,7 @@
 // Application code depends on this package only: it publishes through
 // Publisher and subscribes Handler values through Subscriber. A provider
 // adapter, such as github.com/go-jimu/contrib/message/kafka, implements those
-// interfaces and is imported only by runtime composition code. Providers map
+// interfaces and is imported in runtime composition only. Providers map
 // Kind, ID, OccurredAt, Key, and Headers onto their own broker envelopes, such
 // as topics and record headers, and own the broker runtime: polling,
 // acknowledgement, offset commit, retry, redelivery, and dead-letter routing.
@@ -72,9 +72,6 @@
 //     continue safely. Context cancellation or expiration is a normal shutdown
 //     and returns nil, matching taskqueue.Runner.
 //
-// The package returns these errors, all comparable with errors.Is:
-// ErrEmptyKind, ErrNilPayload, and ErrEmptyID from New; ErrNilHandler,
-// ErrNoListening, and ErrEmptyKind from Router.Subscribe; ErrUnhandledKind
-// from Router.Handle; ErrUnknownKind and ErrNilPayloadFactory from
-// PayloadRegistry; ErrNilPayloadResolver from a nil PayloadResolverFunc.
+// Each function documents the Err* values it returns; compare them with
+// errors.Is.
 package message

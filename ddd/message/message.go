@@ -18,8 +18,8 @@ type Kind string
 
 // Message is a protobuf integration DTO plus transport-neutral metadata.
 // Construct it with New; the zero value has no kind or payload. A Message is
-// immutable and safe to share, but its payload is the caller's proto.Message
-// and must not be modified after New.
+// immutable and safe to share; its payload is the caller's proto.Message, so
+// treat the payload as read-only after New.
 type Message struct {
 	id         string
 	kind       Kind

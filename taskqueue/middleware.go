@@ -10,7 +10,9 @@ import (
 // Middleware wraps a task processor function.
 type Middleware func(ProcessorFunc) ProcessorFunc
 
-// Chain wraps processor with middleware in declaration order.
+// Chain wraps processor with middleware in declaration order: the first
+// middleware is the outermost, so Chain(p, a, b) runs a, then b, then p. Nil
+// middleware is skipped.
 func Chain(processor ProcessorFunc, middleware ...Middleware) ProcessorFunc {
 	for i := len(middleware) - 1; i >= 0; i-- {
 		if middleware[i] != nil {

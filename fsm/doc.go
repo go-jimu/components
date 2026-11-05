@@ -2,24 +2,12 @@
 // polymorphism: a business object delegates each behavior to its current State,
 // and each concrete state implements that behavior its own way.
 //
-// Business methods run behavior first, transition second. The current state's
-// behavior method, which takes the business object as a parameter, performs or
-// rejects the request; after it succeeds, Transit moves the object to the next
-// state. States hold only their label, so restoring an object from a stored
-// label is BuildState and copying an object is safe.
-//
 // A StateMachine holds the transition table: from + action -> to edges, each
-// optionally guarded by a Condition, and a StateBuilder per state. Build it
-// once and keep it in a package-level variable with MustFreeze, which runs
-// Check and panics on a miswired machine.
-//
-// Transit evaluates the candidate edges in the order they were added, builds
-// the first matching target state, and hands it to StateContext.SetState,
-// which the business object implements to type-check the state and keep domain
-// side effects local. When no edge exists, or edges exist but no Condition
-// matches, Transit returns a *TransitionError and the state stays unchanged.
-// The behavior has already changed the business object by then, so callers
-// discard an object whose business method returned an error.
+// optionally guarded by a Condition, and a StateBuilder per state. Transit
+// evaluates the candidate edges for the current state and action in the order
+// they were added, builds the first matching target state, and hands it to
+// StateContext.SetState. When no edge exists, or no Condition matches, Transit
+// returns a *TransitionError and the state stays unchanged.
 //
 // A StateMachine guards its own tables with a mutex; the consumer owns
 // concurrency control around the business object.
@@ -37,8 +25,8 @@
 //   - A base state returns an error from every behavior, and each concrete
 //     state embeds it and overrides only the behaviors it supports or rejects
 //     more specifically.
-//   - Every business method calls its state's behavior first and Transit
-//     second, through an unexported helper such as
+//   - Behavior first, transition second: every business method calls its
+//     state's behavior, then Transit, through an unexported helper such as
 //     func (o *Order) transition(a fsm.Action) error { return fsm.Transit(o, orderMachine, a) }.
 //   - Public business methods take natural parameters, such as
 //     order.Pay(amount, method); the machine stays inside the object.

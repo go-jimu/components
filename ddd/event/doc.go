@@ -14,10 +14,16 @@
 //	}
 //	return dispatcher.DispatchAll(ctx, order.Events.Drain())
 //
-// Composition code builds one dispatcher with NewDispatcher, subscribes every
-// Handler before traffic starts, and calls Close during shutdown after the
-// servers that dispatch events have stopped. An event whose Kind has no
-// subscribed handler goes to WithUnhandledEventHandler, or is logged.
+// The aggregate is already saved when DispatchAll runs, so a dispatch error
+// means only that the follow-ups will not run: report it and treat the saved
+// state as the use case's outcome.
+//
+// Runtime composition builds one dispatcher with NewDispatcher, subscribes
+// every Handler before traffic starts, and calls Close during shutdown: after
+// the servers, message consumers, and task workers whose code dispatches
+// events have stopped, and before the clients its handlers use, such as
+// publishers and enqueuers, are closed. An event whose Kind has no subscribed
+// handler goes to WithUnhandledEventHandler, or is logged.
 //
 // # Handlers
 //
@@ -55,8 +61,9 @@
 // InMemoryDispatcher handles events on a pool of workers, five by default, so
 // a Handler and the hooks set by options run on several goroutines at once:
 // make them safe for concurrent use. Ordering is per key, usually the ID of
-// the aggregate that raised the event: events with the same key, from Keyed or WithKeyFunc, run one at a time in
-// acceptance order. Events with different keys, or no key, run concurrently.
+// the aggregate that raised the event: events with the same key, from Keyed
+// or WithKeyFunc, run one at a time in acceptance order. Events with different
+// keys, or no key, run concurrently.
 // The handlers of one event run in subscription order.
 //
 // Acceptance order is not commit order: two requests that commit in one order
@@ -75,21 +82,6 @@
 // holding its worker; when every worker does this on a full queue, they wait
 // on each other. Dispatch follow-ups from the use case, or pass a ctx with a
 // deadline.
-//
-// # Shutdown
-//
-// Close keeps accepting events for the WithDelayClose period (5s by default),
-// then rejects new events with ErrDispatcherClosed and waits until every
-// accepted event is handled. It returns nil once they are, or ctx.Err() when
-// ctx ends first; then it cancels the contexts of running handlers and reports
-// the unconfirmed events to WithCloseInterruptedHandler.
-//
-// # Errors
-//
-// Dispatch and DispatchAll return nil when the events are accepted,
-// ErrDispatcherClosed after Close has started rejecting events, or ctx.Err()
-// when ctx ends while they wait for queue space. In both error cases no event
-// of the call was accepted.
 //
 // # Durability
 //

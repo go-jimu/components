@@ -49,7 +49,12 @@ func NewSchemaRegistry() *SchemaRegistry {
 	}
 }
 
-// Register associates a task definition with a factory for its payload schema.
+// Register associates a task definition with a factory that returns a new
+// pointer to its payload type, such as func() any { return &WelcomeEmail{} }.
+// Registering a task type again replaces its schema. It returns ErrEmptyType,
+// ErrNilPayloadFactory, ErrInvalidPayloadFactory for a non-pointer, or
+// ErrDuplicatePayloadType when the payload type is registered under another
+// task type.
 func (r *SchemaRegistry) Register(def Definition, factory func() any) error {
 	if def.Type == "" {
 		return ErrEmptyType
@@ -136,7 +141,9 @@ func (r *SchemaRegistry) NewProtoTask(payload any, opts ...Option) (Task, error)
 	return r.NewTask(ProtoCodec, payload, opts...)
 }
 
-// Decode resolves task.Type() and decodes task payload into that schema.
+// Decode resolves task.Type() and decodes the payload into a fresh value from
+// its factory, returned as that pointer, such as *WelcomeEmail. It returns
+// ErrUnknownType for an unregistered type and the DecodePayload errors.
 func (r *SchemaRegistry) Decode(task Task) (any, error) {
 	return r.DecodeWithCodec(task, task.PayloadCodec())
 }

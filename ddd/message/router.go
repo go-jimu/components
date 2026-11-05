@@ -7,7 +7,7 @@ import (
 
 // Publisher sends integration messages through a provider. Publish returns
 // nil once the provider has accepted msg; an error means msg may not have been
-// sent, and its identity is provider-specific. Implementations are safe for
+// sent, and each provider documents which errors it returns. Implementations are safe for
 // concurrent use.
 type Publisher interface {
 	Publish(context.Context, Message) error

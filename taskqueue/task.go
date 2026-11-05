@@ -62,7 +62,9 @@ func New(def Definition, payload []byte, opts ...Option) (Task, error) {
 	}, nil
 }
 
-// NewEncodedTask constructs a task by encoding payload with a registered codec.
+// NewEncodedTask constructs a task by encoding payload with a registered codec
+// and records the codec name for DecodePayload. It returns ErrEmptyType,
+// ErrEmptyPayloadCodec, ErrUnknownPayloadCodec, or the codec's encoding error.
 func NewEncodedTask(def Definition, codecName string, payload any, opts ...Option) (Task, error) {
 	if def.Type == "" {
 		return Task{}, ErrEmptyType
@@ -88,7 +90,8 @@ func NewJSONTask(def Definition, payload any, opts ...Option) (Task, error) {
 	return NewEncodedTask(def, JSONCodec, payload, opts...)
 }
 
-// NewProtoTask constructs a task by protobuf-encoding payload.
+// NewProtoTask constructs a task by protobuf-encoding payload, which must be a
+// generated proto.Message; any other payload returns an encoding error.
 func NewProtoTask(def Definition, payload any, opts ...Option) (Task, error) {
 	return NewEncodedTask(def, ProtoCodec, payload, opts...)
 }
@@ -151,16 +154,9 @@ func (t Task) PayloadCodec() string {
 	return t.payloadCodec
 }
 
-// ID returns the caller-assigned task identity, or "" when the provider should
-// assign one.
-//
-// A provider keeps at most one task per ID while it retains that task, which
-// may include retries, archived failures, and completed tasks kept for
-// inspection. Enqueueing a task whose ID is still retained fails with
-// ErrDuplicateTask. Use an ID that names one unit of work, such as
-// "welcome-email:user-1", not a recurring one. ID deduplicates by identity;
-// WithUnique deduplicates by content for a time window. ID does not order
-// tasks.
+// ID returns the caller-assigned task identity set by WithID, or "" when the
+// provider should assign one. "Task ID" in the package documentation states
+// how providers retain IDs and when Enqueue returns ErrDuplicateTask.
 //
 // Adapters need not restore ID on the worker side; a processor reads the
 // provider's task ID from ExecutionInfoFromContext instead.

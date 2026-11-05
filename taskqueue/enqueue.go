@@ -52,8 +52,9 @@ func NewEnqueueOptions(opts ...EnqueueOption) EnqueueOptions {
 // returns ErrInvalidEnqueueOption for a negative delay, max retry, timeout, or
 // unique TTL, and when Delay and ProcessAt are both set; otherwise nil.
 //
-// Zero values mean the provider default. Delay and ProcessAt are alternative
-// ways to describe initial processing time and must not both be set. Enqueue
+// Options left unset mean the provider default; WithMaxRetry(0) is set and
+// means no retries. Delay and ProcessAt are alternative
+// ways to describe initial processing time; set at most one of them. Enqueue
 // does not call Validate for the caller; see Enqueuer.
 func (o EnqueueOptions) Validate() error {
 	if o.delay < 0 {

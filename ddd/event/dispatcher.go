@@ -238,9 +238,10 @@ func (d *InMemoryDispatcher) signalSpaceFreedLocked() {
 // WithDelayClose period, then rejects new events with ErrDispatcherClosed and
 // waits until every accepted event has been handled, returning nil.
 //
-// When ctx ends first, Close cancels the contexts of running handlers, drops
-// the events not yet started, reports both to WithCloseInterruptedHandler, and
-// returns ctx.Err().
+// When ctx ends first, even during the delay, Close cancels the contexts of
+// running handlers, drops the events not yet started, reports both to
+// WithCloseInterruptedHandler, and returns ctx.Err(). Give Close a ctx that
+// outlasts the delay plus the time to drain the queue.
 func (d *InMemoryDispatcher) Close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
