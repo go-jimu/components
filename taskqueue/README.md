@@ -137,7 +137,7 @@ when it answers each item:
 - [ ] How long a task ID is retained, with ID conflicts returned as
       `ErrDuplicateTask`.
 - [ ] How each enqueue policy maps to provider options, and which fields
-      define `WithUnique` duplicates.
+      define `WithUnique` duplicates, returned as `ErrDuplicateTask`.
 - [ ] How processor errors are retried, skipped, dead-lettered, or recorded,
       and what `ErrSkipRetry` does.
 - [ ] Whether processors and periodic tasks can be registered after the worker

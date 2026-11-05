@@ -81,7 +81,8 @@
 // ErrDuplicateTask for an ID that is still retained; treat it as "this work is
 // already scheduled or was kept after it ran". Each adapter documents how long it retains an ID. WithID
 // deduplicates by identity; WithUnique(ttl) deduplicates by content for a time
-// window. Neither orders tasks.
+// window, and Enqueue reports a suppressed duplicate as ErrDuplicateTask too.
+// Neither orders tasks.
 //
 // # Periodic tasks
 //
@@ -114,7 +115,8 @@
 // An adapter's documentation states how it encodes TaskType, Queue, ID,
 // Headers, PayloadCodec, and payload bytes; how long it retains a task ID,
 // returning ErrDuplicateTask for conflicts; how each enqueue option maps to
-// the provider and which fields define a WithUnique duplicate; how processor
+// the provider and which fields define a WithUnique duplicate, also returned
+// as ErrDuplicateTask; how processor
 // errors are retried, archived, or dropped, and what ErrSkipRetry does;
 // whether registration works after start; and how failures after startup
 // surface. README.md expands this into a checklist.

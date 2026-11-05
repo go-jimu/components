@@ -10,7 +10,8 @@ import (
 //
 // Enqueue returns nil once the provider has stored the task. It returns an
 // error matching ErrDuplicateTask when task.ID() is still retained by the
-// provider; other errors are provider-specific.
+// provider or WithUnique suppressed a duplicate; other errors are
+// provider-specific.
 //
 // The caller validates the policy: Enqueue implementations are not required
 // to call EnqueueOptions.Validate, and may pass an inconsistent policy, such
@@ -114,7 +115,7 @@ func WithDeadline(deadline time.Time) EnqueueOption {
 
 // WithUnique asks the provider to suppress duplicates of the task's content
 // for ttl when supported. The adapter documents which fields define a
-// duplicate and which error it returns.
+// duplicate; Enqueue returns an error matching ErrDuplicateTask for one.
 func WithUnique(ttl time.Duration) EnqueueOption {
 	return func(cfg *EnqueueOptions) {
 		cfg.uniqueTTL = ttl

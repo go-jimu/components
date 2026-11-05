@@ -69,10 +69,11 @@ var (
 	// tasks use WithUnique instead.
 	ErrPeriodicTaskID = errors.New("periodic task must not set a task ID")
 
-	// ErrDuplicateTask reports that a task with the same ID is still retained
-	// by the provider; the work it names is already scheduled or was kept
-	// after it ran. Enqueue returns an error matching it. Provider adapters
-	// return it, optionally wrapping their own error, on an ID conflict.
+	// ErrDuplicateTask reports that the provider already holds the work: a
+	// task with the same ID is still retained, or WithUnique suppressed a
+	// duplicate of the task's content. Enqueue returns an error matching it.
+	// Provider adapters return it, optionally wrapping their own error, in
+	// both cases.
 	ErrDuplicateTask = errors.New("task with the same ID already exists")
 
 	// ErrSkipRetry marks a processor failure as permanent. Wrap it in the
