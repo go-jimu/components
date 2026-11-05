@@ -1,5 +1,18 @@
 # Change log
 
+## v0.12.1
+
+- Fixed: `config.Value.Int` returns an error for a `uint` or `uint64` above
+  `math.MaxInt64`, as it already did for such a string; it used to wrap the
+  value to a negative number.
+- Changed: the `fsm` README and example check the errors that
+  `RegisterStateBuilder` and `AddTransition` return.
+
+- Changed: CI runs golangci-lint v2 (`make lint` locally) on a short
+  `.golangci.yml` that extends the `standard` linters, and the existing
+  issues are fixed. The `ci-ok` job passes only when every other job does;
+  it is the check to require in branch protection.
+
 ## v0.12.0
 
 This release aligns the logs of `ddd/event`, `ddd/message`, and `taskqueue`

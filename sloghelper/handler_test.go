@@ -12,13 +12,16 @@ import (
 	"github.com/go-jimu/components/sloghelper"
 )
 
+// testCtxKey keys the context values these tests read back.
+type testCtxKey string
+
 func TestNewHandler(t *testing.T) {
 	var called int64
-	ctx := context.WithValue(context.Background(), "foo", "bar")
+	ctx := context.WithValue(context.Background(), testCtxKey("foo"), "bar")
 	hdl := slog.NewJSONHandler(os.Stdout, nil)
 	ch := sloghelper.NewHandler(
 		hdl,
-		sloghelper.WithHandleFunc(func(ctx context.Context, r *slog.Record) {
+		sloghelper.WithHandleFunc(func(_ context.Context, r *slog.Record) {
 			r.AddAttrs(slog.Int64("called", atomic.AddInt64(&called, 1)))
 		}))
 	logger := slog.New(ch)

@@ -24,7 +24,7 @@ var (
 // reported by json.Unmarshal.
 func scanJSON(data []byte, v interface{}) error {
 	target := reflect.TypeOf(v)
-	if target == nil || target.Kind() != reflect.Ptr {
+	if target == nil || target.Kind() != reflect.Pointer {
 		return json.Unmarshal(data, v)
 	}
 
@@ -42,7 +42,7 @@ func scanJSON(data []byte, v interface{}) error {
 }
 
 func coerce(value interface{}, t reflect.Type) interface{} {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t == durationType {
@@ -195,7 +195,7 @@ func collectFields(t reflect.Type, depth int, path map[reflect.Type]bool) []json
 		}
 		name, opts, _ := strings.Cut(tag, ",")
 		ft := f.Type
-		for ft.Kind() == reflect.Ptr {
+		for ft.Kind() == reflect.Pointer {
 			ft = ft.Elem()
 		}
 		if f.Anonymous && name == "" && ft.Kind() == reflect.Struct {

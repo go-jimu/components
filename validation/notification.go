@@ -61,6 +61,8 @@ func (e *ErrChain) Errors() []error {
 	return append([]error(nil), e.errors...)
 }
 
+// NewSimpleNotification returns an empty Notification. Use one Notification
+// per validation run from a single goroutine; it holds no lock.
 func NewSimpleNotification() Notification {
 	return &notification{}
 }

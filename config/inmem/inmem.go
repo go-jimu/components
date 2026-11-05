@@ -10,6 +10,9 @@ type inmem struct {
 
 var _ config.Source = (*inmem)(nil)
 
+// NewSource returns a Source that loads data as one entry under key, decoded
+// by the codec registered for format, such as "json" or "yaml". Its
+// watcher never reports a change.
 func NewSource(key string, data []byte, format string) config.Source {
 	return &inmem{
 		key:    key,

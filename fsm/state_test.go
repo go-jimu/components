@@ -11,13 +11,13 @@ func TestStateMachineCheckReportsOrderWiringErrors(t *testing.T) {
 	exampleStateArchived := fsm.StateLabel("order.archived")
 	exampleStateReturned := fsm.StateLabel("order.returned")
 	sm := fsm.NewStateMachine("order_check")
-	sm.RegisterStateBuilder(exampleStateUnpaid, newExampleUnpaidOrderState)
-	sm.RegisterStateBuilder(exampleStateCanceled, newExampleCanceledOrderState)
-	sm.RegisterStateBuilder(exampleStateArchived, func() fsm.State {
+	require.NoError(t, sm.RegisterStateBuilder(exampleStateUnpaid, newExampleUnpaidOrderState))
+	require.NoError(t, sm.RegisterStateBuilder(exampleStateCanceled, newExampleCanceledOrderState))
+	require.NoError(t, sm.RegisterStateBuilder(exampleStateArchived, func() fsm.State {
 		return fsm.NewSimpleState(exampleStateArchived)
-	})
-	sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil)
-	sm.AddTransition(exampleStateUnpaid, exampleStateReturned, exampleActionCancel, nil)
+	}))
+	require.NoError(t, sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil))
+	require.NoError(t, sm.AddTransition(exampleStateUnpaid, exampleStateReturned, exampleActionCancel, nil))
 
 	var err error
 	require.NotPanics(t, func() {
@@ -94,27 +94,27 @@ func TestOrderTransitionCallsConditionsAfterStateBehavior(t *testing.T) {
 	var partialToCanceledCalls int
 
 	sm := fsm.NewStateMachine(machineName)
-	sm.RegisterStateBuilder(exampleStateUnpaid, newExampleUnpaidOrderState)
-	sm.RegisterStateBuilder(exampleStatePaid, newExamplePaidOrderState)
-	sm.RegisterStateBuilder(exampleStatePartialRefunded, newExamplePartialRefundedOrderState)
-	sm.RegisterStateBuilder(exampleStateCanceled, newExampleCanceledOrderState)
-	sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil)
-	sm.AddTransition(exampleStatePaid, exampleStatePartialRefunded, exampleActionRefund, func(sc fsm.StateContext) bool {
+	require.NoError(t, sm.RegisterStateBuilder(exampleStateUnpaid, newExampleUnpaidOrderState))
+	require.NoError(t, sm.RegisterStateBuilder(exampleStatePaid, newExamplePaidOrderState))
+	require.NoError(t, sm.RegisterStateBuilder(exampleStatePartialRefunded, newExamplePartialRefundedOrderState))
+	require.NoError(t, sm.RegisterStateBuilder(exampleStateCanceled, newExampleCanceledOrderState))
+	require.NoError(t, sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil))
+	require.NoError(t, sm.AddTransition(exampleStatePaid, exampleStatePartialRefunded, exampleActionRefund, func(sc fsm.StateContext) bool {
 		paidToPartialCalls++
 		return sc.(*exampleOrder).hasRemainingRefundAmount()
-	})
-	sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionRefund, func(sc fsm.StateContext) bool {
+	}))
+	require.NoError(t, sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionRefund, func(sc fsm.StateContext) bool {
 		paidToCanceledCalls++
 		return sc.(*exampleOrder).isFullyRefunded()
-	})
-	sm.AddTransition(exampleStatePartialRefunded, exampleStatePartialRefunded, exampleActionRefund, func(sc fsm.StateContext) bool {
+	}))
+	require.NoError(t, sm.AddTransition(exampleStatePartialRefunded, exampleStatePartialRefunded, exampleActionRefund, func(sc fsm.StateContext) bool {
 		partialToPartialCalls++
 		return sc.(*exampleOrder).hasRemainingRefundAmount()
-	})
-	sm.AddTransition(exampleStatePartialRefunded, exampleStateCanceled, exampleActionRefund, func(sc fsm.StateContext) bool {
+	}))
+	require.NoError(t, sm.AddTransition(exampleStatePartialRefunded, exampleStateCanceled, exampleActionRefund, func(sc fsm.StateContext) bool {
 		partialToCanceledCalls++
 		return sc.(*exampleOrder).isFullyRefunded()
-	})
+	}))
 	order := newExampleOrder()
 	order.machine = fsm.MustFreeze(sm)
 	_, err := order.Pay(42, "card")

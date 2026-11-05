@@ -57,7 +57,7 @@ func Logging(logger *slog.Logger) Middleware {
 		return func(ctx context.Context, msg Message) error {
 			startedAt := time.Now()
 			err := next(ctx, msg)
-			attrs := make([]slog.Attr, 0, 5) //nolint:mnd // the attributes below
+			attrs := make([]slog.Attr, 0, 5)
 			attrs = append(attrs,
 				slog.String("message_kind", string(msg.Kind())),
 				slog.String("message_id", msg.ID()),

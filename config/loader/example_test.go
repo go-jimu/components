@@ -15,20 +15,23 @@ type exampleOptions struct {
 
 func ExampleLoad() {
 	oldProfile, hadProfile := os.LookupEnv(loader.ProfilesActiveFromEnvVar)
-	os.Unsetenv(loader.ProfilesActiveFromEnvVar)
+	if err := os.Unsetenv(loader.ProfilesActiveFromEnvVar); err != nil {
+		panic(err)
+	}
+	// Restoring the environment and removing dir are best-effort cleanup.
 	defer func() {
 		if hadProfile {
-			os.Setenv(loader.ProfilesActiveFromEnvVar, oldProfile)
+			_ = os.Setenv(loader.ProfilesActiveFromEnvVar, oldProfile)
 			return
 		}
-		os.Unsetenv(loader.ProfilesActiveFromEnvVar)
+		_ = os.Unsetenv(loader.ProfilesActiveFromEnvVar)
 	}()
 
 	dir, err := os.MkdirTemp("", "components-loader-example")
 	if err != nil {
 		panic(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	if err := os.WriteFile(filepath.Join(dir, "defaults.yml"), []byte("name: default\nage: 18\n"), 0o600); err != nil {
 		panic(err)

@@ -33,7 +33,6 @@ func TestEnvWithPrefix(t *testing.T) {
 		filename = filepath.Join(path, "test.json")
 		data     = []byte(_testJSON)
 	)
-	defer os.Remove(path)
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		t.Error(err)
 	}
@@ -53,7 +52,7 @@ func TestEnvWithPrefix(t *testing.T) {
 	}
 
 	for k, v := range envs {
-		os.Setenv(k, v)
+		t.Setenv(k, v)
 	}
 
 	c := config.New(config.WithSource(
@@ -103,28 +102,28 @@ func TestEnvWithPrefix(t *testing.T) {
 			v := c.Value(test.path)
 			if v.Load() != nil {
 				var actual interface{}
-				switch test.expect.(type) {
+				switch expect := test.expect.(type) {
 				case int:
 					if actual, err = v.Int(); err == nil {
-						if !reflect.DeepEqual(test.expect.(int), int(actual.(int64))) {
+						if !reflect.DeepEqual(expect, int(actual.(int64))) {
 							t.Errorf("expect %v, actual %v", test.expect, actual)
 						}
 					}
 				case string:
 					if actual, err = v.String(); err == nil {
-						if !reflect.DeepEqual(test.expect.(string), actual.(string)) {
+						if !reflect.DeepEqual(expect, actual.(string)) {
 							t.Errorf(`expect %v, actual %v`, test.expect, actual)
 						}
 					}
 				case bool:
 					if actual, err = v.Bool(); err == nil {
-						if !reflect.DeepEqual(test.expect.(bool), actual.(bool)) {
+						if !reflect.DeepEqual(expect, actual.(bool)) {
 							t.Errorf(`expect %v, actual %v`, test.expect, actual)
 						}
 					}
 				case float64:
 					if actual, err = v.Float(); err == nil {
-						if !reflect.DeepEqual(test.expect.(float64), actual.(float64)) {
+						if !reflect.DeepEqual(expect, actual.(float64)) {
 							t.Errorf(`expect %v, actual %v`, test.expect, actual)
 						}
 					}
@@ -151,7 +150,6 @@ func TestEnvWithoutPrefix(t *testing.T) {
 		filename = filepath.Join(path, "test.json")
 		data     = []byte(_testJSON)
 	)
-	defer os.Remove(path)
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		t.Error(err)
 	}
@@ -167,7 +165,7 @@ func TestEnvWithoutPrefix(t *testing.T) {
 	}
 
 	for k, v := range envs {
-		os.Setenv(k, v)
+		t.Setenv(k, v)
 	}
 
 	c := config.New(config.WithSource(
@@ -217,28 +215,28 @@ func TestEnvWithoutPrefix(t *testing.T) {
 			v := c.Value(test.path)
 			if v.Load() != nil {
 				var actual interface{}
-				switch test.expect.(type) {
+				switch expect := test.expect.(type) {
 				case int:
 					if actual, err = v.Int(); err == nil {
-						if !reflect.DeepEqual(test.expect.(int), int(actual.(int64))) {
+						if !reflect.DeepEqual(expect, int(actual.(int64))) {
 							t.Errorf("expect %v, actual %v", test.expect, actual)
 						}
 					}
 				case string:
 					if actual, err = v.String(); err == nil {
-						if !reflect.DeepEqual(test.expect.(string), actual.(string)) {
+						if !reflect.DeepEqual(expect, actual.(string)) {
 							t.Errorf(`expect %v, actual %v`, test.expect, actual)
 						}
 					}
 				case bool:
 					if actual, err = v.Bool(); err == nil {
-						if !reflect.DeepEqual(test.expect.(bool), actual.(bool)) {
+						if !reflect.DeepEqual(expect, actual.(bool)) {
 							t.Errorf(`expect %v, actual %v`, test.expect, actual)
 						}
 					}
 				case float64:
 					if actual, err = v.Float(); err == nil {
-						if !reflect.DeepEqual(test.expect.(float64), actual.(float64)) {
+						if !reflect.DeepEqual(expect, actual.(float64)) {
 							t.Errorf(`expect %v, actual %v`, test.expect, actual)
 						}
 					}

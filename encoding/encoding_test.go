@@ -3,7 +3,6 @@ package encoding_test
 import (
 	"encoding/xml"
 	"fmt"
-	"runtime/debug"
 	"sync"
 	"testing"
 
@@ -12,11 +11,11 @@ import (
 
 type codec struct{}
 
-func (c codec) Marshal(v interface{}) ([]byte, error) {
+func (c codec) Marshal(_ interface{}) ([]byte, error) {
 	panic("implement me")
 }
 
-func (c codec) Unmarshal(data []byte, v interface{}) error {
+func (c codec) Unmarshal(_ []byte, _ interface{}) error {
 	panic("implement me")
 }
 
@@ -41,7 +40,7 @@ func (codec2) Name() string {
 
 func TestRegisterCodec(t *testing.T) {
 	f := func() { encoding.RegisterCodec(nil) }
-	funcDidPanic, panicValue, _ := didPanic(f)
+	funcDidPanic, panicValue := didPanic(f)
 	if !funcDidPanic {
 		t.Fatalf("func should panic\n\tPanic value:\t%#v", panicValue)
 	}
@@ -51,7 +50,7 @@ func TestRegisterCodec(t *testing.T) {
 	f = func() {
 		encoding.RegisterCodec(codec{})
 	}
-	funcDidPanic, panicValue, _ = didPanic(f)
+	funcDidPanic, panicValue = didPanic(f)
 	if !funcDidPanic {
 		t.Fatalf("func should panic\n\tPanic value:\t%#v", panicValue)
 	}
@@ -70,16 +69,14 @@ func TestRegisterCodec(t *testing.T) {
 // methods, and represents a simple func that takes no arguments, and returns nothing.
 type PanicTestFunc func()
 
-// didPanic returns true if the function passed to it panics. Otherwise, it returns false.
-func didPanic(f PanicTestFunc) (bool, interface{}, string) {
+// didPanic reports whether f panics, and the value it panicked with.
+func didPanic(f PanicTestFunc) (bool, interface{}) {
 	didPanic := false
 	var message interface{}
-	var stack string
 	func() {
 		defer func() {
 			if message = recover(); message != nil {
 				didPanic = true
-				stack = string(debug.Stack())
 			}
 		}()
 
@@ -87,7 +84,7 @@ func didPanic(f PanicTestFunc) (bool, interface{}, string) {
 		f()
 	}()
 
-	return didPanic, message, stack
+	return didPanic, message
 }
 
 // namedCodec is a Codec whose name can be chosen by the test.

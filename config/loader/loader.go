@@ -64,8 +64,9 @@ func Load(v any, opts ...Option) error {
 		config.WithSource(sources...),
 		config.WithLookup(envLookup(o.EnvVarsPrefix)),
 	)
-	// Load starts source watchers; a one-shot load must stop them.
-	defer conf.Close()
+	// Load starts source watchers; a one-shot load must stop them. A watcher
+	// that fails to stop does not change the values already scanned into v.
+	defer func() { _ = conf.Close() }()
 	if err = conf.Load(); err != nil {
 		return err
 	}

@@ -33,7 +33,7 @@ func Error(err error) slog.Attr {
 		return slog.Any(ErrorKey, err)
 	}
 
-	group := make([]slog.Attr, 0, 2) //nolint:gomnd //no why
+	group := make([]slog.Attr, 0, 2)
 	group = append(group, slog.String("msg", err.Error()))
 
 	var st StackTracer

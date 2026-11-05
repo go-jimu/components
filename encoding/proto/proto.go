@@ -47,12 +47,12 @@ var protoMessageType = reflect.TypeOf((*proto.Message)(nil)).Elem()
 func getProtoMessage(v interface{}) (proto.Message, error) {
 	val := reflect.ValueOf(v)
 	if msg, ok := v.(proto.Message); ok {
-		if val.Kind() == reflect.Ptr && val.IsNil() {
+		if val.Kind() == reflect.Pointer && val.IsNil() {
 			return nil, fmt.Errorf("cannot marshal nil %T", v)
 		}
 		return msg, nil
 	}
-	if val.Kind() != reflect.Ptr || val.IsNil() {
+	if val.Kind() != reflect.Pointer || val.IsNil() {
 		return nil, fmt.Errorf("not proto message: %T", v)
 	}
 	return getProtoMessage(val.Elem().Interface())
@@ -62,7 +62,7 @@ func getProtoMessage(v interface{}) (proto.Message, error) {
 // encoding/json, it allocates a nil message that v points to.
 func getUnmarshalTarget(v interface{}) (proto.Message, error) {
 	val := reflect.ValueOf(v)
-	for val.Kind() == reflect.Ptr {
+	for val.Kind() == reflect.Pointer {
 		if val.IsNil() {
 			return nil, fmt.Errorf("cannot unmarshal into nil %T", v)
 		}
@@ -70,7 +70,7 @@ func getUnmarshalTarget(v interface{}) (proto.Message, error) {
 			return msg, nil
 		}
 		elem := val.Elem()
-		if elem.Kind() == reflect.Ptr && elem.IsNil() && elem.Type().Implements(protoMessageType) {
+		if elem.Kind() == reflect.Pointer && elem.IsNil() && elem.Type().Implements(protoMessageType) {
 			elem.Set(reflect.New(elem.Type().Elem()))
 		}
 		val = elem

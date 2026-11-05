@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -94,7 +95,7 @@ func (v *atomicValue) Int() (int64, error) {
 	case int64:
 		return val, nil
 	case uint:
-		return int64(val), nil
+		return uint64ToInt64(uint64(val))
 	case uint8:
 		return int64(val), nil
 	case uint16:
@@ -102,7 +103,7 @@ func (v *atomicValue) Int() (int64, error) {
 	case uint32:
 		return int64(val), nil
 	case uint64:
-		return int64(val), nil
+		return uint64ToInt64(val)
 	case float32:
 		return int64(val), nil
 	case float64:
@@ -111,6 +112,15 @@ func (v *atomicValue) Int() (int64, error) {
 		return strconv.ParseInt(val, 10, 64)
 	}
 	return 0, v.typeAssertError()
+}
+
+// uint64ToInt64 rejects values above math.MaxInt64, as ParseInt does for a
+// string.
+func uint64ToInt64(u uint64) (int64, error) {
+	if u > math.MaxInt64 {
+		return 0, fmt.Errorf("value %d overflows int64", u)
+	}
+	return int64(u), nil
 }
 
 func (v *atomicValue) Slice() ([]Value, error) {

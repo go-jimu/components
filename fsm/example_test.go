@@ -220,25 +220,29 @@ func newExampleCanceledOrderState() fsm.State {
 
 func newExampleOrderStateMachine() fsm.StateMachine {
 	sm := fsm.NewStateMachine(exampleStateMachineName)
-	sm.RegisterStateBuilder(exampleStateUnpaid, newExampleUnpaidOrderState)
-	sm.RegisterStateBuilder(exampleStatePaid, newExamplePaidOrderState)
-	sm.RegisterStateBuilder(exampleStatePartialRefunded, newExamplePartialRefundedOrderState)
-	sm.RegisterStateBuilder(exampleStateCanceled, newExampleCanceledOrderState)
-	sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil)
-	sm.AddTransition(exampleStatePaid, exampleStatePartialRefunded, exampleActionRefund, func(sc fsm.StateContext) bool {
-		return sc.(*exampleOrder).hasRemainingRefundAmount()
-	})
-	sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionRefund, func(sc fsm.StateContext) bool {
-		return sc.(*exampleOrder).isFullyRefunded()
-	})
-	sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionCancel, nil)
-	sm.AddTransition(exampleStatePartialRefunded, exampleStatePartialRefunded, exampleActionRefund, func(sc fsm.StateContext) bool {
-		return sc.(*exampleOrder).hasRemainingRefundAmount()
-	})
-	sm.AddTransition(exampleStatePartialRefunded, exampleStateCanceled, exampleActionRefund, func(sc fsm.StateContext) bool {
-		return sc.(*exampleOrder).isFullyRefunded()
-	})
-	sm.AddTransition(exampleStatePartialRefunded, exampleStateCanceled, exampleActionCancel, nil)
+	if err := errors.Join(
+		sm.RegisterStateBuilder(exampleStateUnpaid, newExampleUnpaidOrderState),
+		sm.RegisterStateBuilder(exampleStatePaid, newExamplePaidOrderState),
+		sm.RegisterStateBuilder(exampleStatePartialRefunded, newExamplePartialRefundedOrderState),
+		sm.RegisterStateBuilder(exampleStateCanceled, newExampleCanceledOrderState),
+		sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil),
+		sm.AddTransition(exampleStatePaid, exampleStatePartialRefunded, exampleActionRefund, func(sc fsm.StateContext) bool {
+			return sc.(*exampleOrder).hasRemainingRefundAmount()
+		}),
+		sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionRefund, func(sc fsm.StateContext) bool {
+			return sc.(*exampleOrder).isFullyRefunded()
+		}),
+		sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionCancel, nil),
+		sm.AddTransition(exampleStatePartialRefunded, exampleStatePartialRefunded, exampleActionRefund, func(sc fsm.StateContext) bool {
+			return sc.(*exampleOrder).hasRemainingRefundAmount()
+		}),
+		sm.AddTransition(exampleStatePartialRefunded, exampleStateCanceled, exampleActionRefund, func(sc fsm.StateContext) bool {
+			return sc.(*exampleOrder).isFullyRefunded()
+		}),
+		sm.AddTransition(exampleStatePartialRefunded, exampleStateCanceled, exampleActionCancel, nil),
+	); err != nil {
+		panic(err)
+	}
 	return sm
 }
 

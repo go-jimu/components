@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 )
@@ -66,6 +67,26 @@ func TestAtomicValue_Int(t *testing.T) {
 		_, err := v.Int()
 		if err == nil {
 			t.Fatal("err is nil")
+		}
+	}
+}
+
+// Intent: Int rejects an unsigned value above math.MaxInt64 instead of
+// wrapping it to a negative number, as it does for a string.
+func TestAtomicValue_IntRejectsUnsignedOverflow(t *testing.T) {
+	for _, x := range []interface{}{uint64(math.MaxInt64), uint(math.MaxInt64)} {
+		v := atomicValue{}
+		v.Store(x)
+		got, err := v.Int()
+		if err != nil || got != math.MaxInt64 {
+			t.Fatalf("Int(%T max int64) = %d, %v; want %d, nil", x, got, err, int64(math.MaxInt64))
+		}
+	}
+	for _, x := range []interface{}{uint64(math.MaxInt64) + 1, uint64(math.MaxUint64), uint(math.MaxUint)} {
+		v := atomicValue{}
+		v.Store(x)
+		if got, err := v.Int(); err == nil {
+			t.Fatalf("Int(%T %v) = %d, nil; want an overflow error", x, x, got)
 		}
 	}
 }
@@ -290,7 +311,11 @@ func TestWithResolveActualTypesConvertsWholePlaceholders(t *testing.T) {
 	if err := c.Load(); err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	t.Cleanup(func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 
 	if port := c.Value("port").Load(); port != int64(8080) {
 		t.Fatalf("port = %#v, want int64(8080)", port)

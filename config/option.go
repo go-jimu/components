@@ -41,19 +41,20 @@ func WithSource(s ...Source) Option {
 	}
 }
 
-// WithDecoder with config decoder.
-// DefaultDecoder behavior:
-// If KeyValue.Format is non-empty, then KeyValue.Value will be deserialized into map[string]interface{}
-// and stored in the config cache(map[string]interface{})
-// if KeyValue.Format is empty,{KeyValue.Key : KeyValue.Value} will be stored in config cache(map[string]interface{})
+// WithDecoder replaces the decoder that turns each loaded KeyValue into
+// configuration entries. The default decoder decodes Value with the encoding
+// codec named by Format into the configuration map; when Format is empty, it
+// stores Value under Key, splitting a dotted Key into nested maps.
 func WithDecoder(d Decoder) Option {
 	return func(o *options) {
 		o.decoder = d
 	}
 }
 
-// WithResolveActualTypes with config resolver.
-// bool input will enable conversion of config to data types
+// WithResolveActualTypes selects the default resolver for ${NAME:default}
+// placeholders, replacing one set by WithResolver. With enableConvertToType,
+// a value that is a single placeholder takes the type of its resolved text,
+// such as a number or a bool.
 func WithResolveActualTypes(enableConvertToType bool) Option {
 	return func(o *options) {
 		o.resolver = nil
@@ -155,7 +156,7 @@ func resolver(input map[string]interface{}, mapper func(name string) string, toT
 
 func mapper(input map[string]interface{}, lookup Lookup) func(name string) string {
 	mapper := func(name string) string {
-		args := strings.SplitN(strings.TrimSpace(name), ":", 2) //nolint:gomnd
+		args := strings.SplitN(strings.TrimSpace(name), ":", 2)
 		if lookup != nil {
 			if v, ok := lookup(args[0]); ok {
 				return v

@@ -1,6 +1,7 @@
 package taskqueue
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -71,7 +72,7 @@ func TestEnqueueOptionsValidateRejectsInvalidPolicy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.opts.Validate(); err != ErrInvalidEnqueueOption {
+			if err := tt.opts.Validate(); !errors.Is(err, ErrInvalidEnqueueOption) {
 				t.Fatalf("Validate error = %v, want ErrInvalidEnqueueOption", err)
 			}
 		})

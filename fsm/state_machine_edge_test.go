@@ -28,7 +28,7 @@ func (context *recordingOrderContext) SetState(next fsm.State) error {
 
 func TestOrderTransitionReturnsErrorWhenTargetBuilderMissing(t *testing.T) {
 	sm := fsm.NewStateMachine("missing_builder")
-	sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil)
+	require.NoError(t, sm.AddTransition(exampleStateUnpaid, exampleStatePaid, exampleActionPay, nil))
 	context := newRecordingOrderContext(exampleStateUnpaid)
 
 	var err error
@@ -43,12 +43,12 @@ func TestOrderTransitionReturnsErrorWhenTargetBuilderMissing(t *testing.T) {
 
 func TestOrderTransitionReportsErrorWhenNoConditionMatches(t *testing.T) {
 	sm := fsm.NewStateMachine("condition_noop")
-	sm.RegisterStateBuilder(exampleStateCanceled, func() fsm.State {
+	require.NoError(t, sm.RegisterStateBuilder(exampleStateCanceled, func() fsm.State {
 		return fsm.NewSimpleState(exampleStateCanceled)
-	})
-	sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionRefund, func(fsm.StateContext) bool {
+	}))
+	require.NoError(t, sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionRefund, func(fsm.StateContext) bool {
 		return false
-	})
+	}))
 	context := newRecordingOrderContext(exampleStatePaid)
 
 	err := fsm.Transit(context, sm, exampleActionRefund)
@@ -66,10 +66,10 @@ func TestOrderTransitionReportsErrorWhenNoConditionMatches(t *testing.T) {
 func TestOrderTransitionsReturnsConditionsWithoutCallingThem(t *testing.T) {
 	var conditionCalls int
 	sm := fsm.NewStateMachine("condition_is_context_responsibility")
-	sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionRefund, func(fsm.StateContext) bool {
+	require.NoError(t, sm.AddTransition(exampleStatePaid, exampleStateCanceled, exampleActionRefund, func(fsm.StateContext) bool {
 		conditionCalls++
 		return true
-	})
+	}))
 
 	transitions := sm.Transitions(exampleStatePaid, exampleActionRefund)
 
