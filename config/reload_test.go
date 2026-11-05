@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -69,7 +70,7 @@ func TestWatchNotifiesEveryObserver(t *testing.T) {
 	require.NoError(t, c.Load())
 	defer c.Close()
 
-	first, second := make(chan int64, 1), make(chan int64, 1)
+	first, second := make(chan int64, 16), make(chan int64, 16)
 	require.NoError(t, c.Watch("port", func(_ string, v config.Value) {
 		n, _ := v.Int()
 		first <- n
@@ -81,12 +82,7 @@ func TestWatchNotifiesEveryObserver(t *testing.T) {
 	writeFile(t, base, "port: 8080\n")
 
 	for name, ch := range map[string]chan int64{"first": first, "second": second} {
-		select {
-		case n := <-ch:
-			assert.Equal(t, int64(8080), n, name)
-		case <-time.After(3 * time.Second):
-			t.Fatalf("%s observer was not notified", name)
-		}
+		awaitNotification(t, ch, name+" observer of 8080", func(n int64) bool { return n == 8080 })
 	}
 }
 
@@ -101,19 +97,14 @@ func TestWatchNotifiesWhenValueTypeChanges(t *testing.T) {
 	require.NoError(t, c.Load())
 	defer c.Close()
 
-	notified := make(chan string, 1)
+	notified := make(chan string, 16)
 	require.NoError(t, c.Watch("port", func(_ string, v config.Value) {
 		s, _ := v.String()
 		notified <- s
 	}))
 	writeFile(t, base, "port: auto\n")
 
-	select {
-	case s := <-notified:
-		assert.Equal(t, "auto", s)
-	case <-time.After(3 * time.Second):
-		t.Fatal("observer was not notified of the type change")
-	}
+	awaitNotification(t, notified, "of the type change", func(s string) bool { return s == "auto" })
 	port, err := c.Value("port").String()
 	require.NoError(t, err)
 	assert.Equal(t, "auto", port)
@@ -147,8 +138,7 @@ func TestLoadAgainKeepsReloading(t *testing.T) {
 // from Load. A file source would race: its watcher can read the file while
 // os.WriteFile has truncated it and report the key as removed first.
 func TestLoadAgainNotifiesChangedValues(t *testing.T) {
-	source := &quietSource{}
-	source.set("port: 80\n")
+	source := newScriptedSource("port: 80\n")
 
 	c := config.New(config.WithSource(source))
 	require.NoError(t, c.Load())
@@ -170,42 +160,136 @@ func TestLoadAgainNotifiesChangedValues(t *testing.T) {
 	}
 }
 
-// quietSource serves YAML that the test changes between loads; its watcher
-// never reports a change.
-type quietSource struct {
-	mu   sync.Mutex
-	data string
+// scriptedSource serves YAML that the test changes between loads. Its watcher
+// reports a change only when the test calls push, so a test controls exactly
+// which reloads happen.
+type scriptedSource struct {
+	mu     sync.Mutex
+	data   string
+	pushes chan string
 }
 
-func (s *quietSource) set(data string) {
+func newScriptedSource(data string) *scriptedSource {
+	return &scriptedSource{data: data, pushes: make(chan string)}
+}
+
+func (s *scriptedSource) set(data string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data = data
 }
 
-func (s *quietSource) Load() ([]*config.KeyValue, error) {
+// push makes the watcher report data, as a file watcher reports a write.
+func (s *scriptedSource) push(t *testing.T, data string) {
+	t.Helper()
+	select {
+	case s.pushes <- data:
+	case <-time.After(3 * time.Second):
+		t.Fatal("watcher did not take the change")
+	}
+}
+
+func (s *scriptedSource) Load() ([]*config.KeyValue, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return []*config.KeyValue{{Key: "quiet.yaml", Value: []byte(s.data), Format: "yaml"}}, nil
+	return []*config.KeyValue{scriptedKeyValue(s.data)}, nil
 }
 
-func (s *quietSource) Watch() (config.Watcher, error) {
-	return &quietWatcher{stop: make(chan struct{})}, nil
+func (s *scriptedSource) Watch() (config.Watcher, error) {
+	return &scriptedWatcher{pushes: s.pushes, stop: make(chan struct{})}, nil
 }
 
-type quietWatcher struct {
-	stop chan struct{}
-	once sync.Once
+func scriptedKeyValue(data string) *config.KeyValue {
+	return &config.KeyValue{Key: "scripted.yaml", Value: []byte(data), Format: "yaml"}
 }
 
-func (w *quietWatcher) Next() ([]*config.KeyValue, error) {
-	<-w.stop
-	return nil, context.Canceled
+type scriptedWatcher struct {
+	pushes chan string
+	stop   chan struct{}
+	once   sync.Once
 }
 
-func (w *quietWatcher) Stop() error {
+func (w *scriptedWatcher) Next() ([]*config.KeyValue, error) {
+	select {
+	case data := <-w.pushes:
+		return []*config.KeyValue{scriptedKeyValue(data)}, nil
+	case <-w.stop:
+		return nil, context.Canceled
+	}
+}
+
+func (w *scriptedWatcher) Stop() error {
 	w.once.Do(func() { close(w.stop) })
 	return nil
+}
+
+// A Value obtained before its key briefly disappears, as when a watcher reads
+// a file that os.WriteFile has truncated, keeps tracking the key.
+func TestValueTracksKeyAcrossTransientRemoval(t *testing.T) {
+	source := newScriptedSource("host: a\naddr: ${host}:80\n")
+	c := config.New(config.WithSource(source))
+	require.NoError(t, c.Load())
+	defer c.Close()
+	addr := c.Value("addr")
+
+	source.push(t, "")
+	assert.Eventually(t, func() bool {
+		_, err := addr.String()
+		return errors.Is(err, config.ErrNotFound)
+	}, 3*time.Second, 10*time.Millisecond)
+
+	source.push(t, "host: b\naddr: ${host}:80\n")
+	assert.Eventually(t, func() bool {
+		v, err := addr.String()
+		return err == nil && v == "b:80"
+	}, 3*time.Second, 10*time.Millisecond)
+}
+
+// A Value obtained before its type changes keeps tracking the key.
+func TestValueTracksKeyAcrossTypeChange(t *testing.T) {
+	source := newScriptedSource("port: 80\n")
+	c := config.New(config.WithSource(source))
+	require.NoError(t, c.Load())
+	defer c.Close()
+	port := c.Value("port")
+
+	source.push(t, "port: auto\n")
+
+	assert.Eventually(t, func() bool {
+		v, err := port.String()
+		return err == nil && v == "auto"
+	}, 3*time.Second, 10*time.Millisecond)
+}
+
+// A key with a null value reads as a value of no type instead of panicking.
+func TestValueOfNullKey(t *testing.T) {
+	c := config.New(config.WithSource(newScriptedSource("port:\nname: app\n")))
+	require.NoError(t, c.Load())
+	defer c.Close()
+
+	v := c.Value("port")
+
+	assert.Nil(t, v.Load())
+	_, err := v.Int()
+	assert.Error(t, err)
+}
+
+// awaitNotification reads notifications until one matches. A file source can
+// report intermediate states first: os.WriteFile truncates the file before
+// writing it, and the watcher may read it in between.
+func awaitNotification[T any](t *testing.T, notified <-chan T, what string, match func(T) bool) {
+	t.Helper()
+	timeout := time.After(3 * time.Second)
+	for {
+		select {
+		case v := <-notified:
+			if match(v) {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("observer was not notified %s", what)
+		}
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {
@@ -224,30 +308,27 @@ func TestReloadReportsRemovedKeys(t *testing.T) {
 	require.NoError(t, c.Load())
 	defer c.Close()
 
-	notified := make(chan config.Value, 2)
+	type portNote struct {
+		port int64
+		err  error
+	}
+	notified := make(chan portNote, 16)
 	require.NoError(t, c.Watch("port", func(_ string, v config.Value) {
-		notified <- v
+		n, err := v.Int()
+		notified <- portNote{port: n, err: err}
 	}))
 
 	writeFile(t, base, "name: app\n")
-	select {
-	case v := <-notified:
-		assert.Nil(t, v.Load())
-	case <-time.After(3 * time.Second):
-		t.Fatal("observer was not notified of the removal")
-	}
+	awaitNotification(t, notified, "of the removal", func(n portNote) bool {
+		return errors.Is(n.err, config.ErrNotFound)
+	})
 	_, err := c.Value("port").Int()
 	require.ErrorIs(t, err, config.ErrNotFound)
 
 	writeFile(t, base, "port: 8080\nname: app\n")
-	select {
-	case v := <-notified:
-		n, err := v.Int()
-		require.NoError(t, err)
-		assert.Equal(t, int64(8080), n)
-	case <-time.After(3 * time.Second):
-		t.Fatal("observer was not notified when the key came back")
-	}
+	awaitNotification(t, notified, "when the key came back", func(n portNote) bool {
+		return n.err == nil && n.port == 8080
+	})
 	port, err := c.Value("port").Int()
 	require.NoError(t, err)
 	assert.Equal(t, int64(8080), port)

@@ -33,6 +33,10 @@ type Observer func(string, Value)
 type Config interface {
 	Load() error
 	Scan(v interface{}) error
+	// Value returns the value at key. The returned Value keeps tracking key
+	// across reloads, including type changes and a removal (read as
+	// ErrNotFound) followed by the key coming back. For a key that does not
+	// exist, Value returns a Value that only reports ErrNotFound.
 	Value(key string) Value
 	Watch(key string, o Observer) error
 	Close() error
@@ -156,11 +160,10 @@ type change struct {
 	observers []Observer
 }
 
-// refreshCache brings every cached value up to date with the reader. A value
-// whose type changed cannot be stored into the existing Value, so the cache
-// entry is replaced; Values obtained before the change keep the old value. A
-// removed key is cached as not found, so Value reports ErrNotFound and the
-// key's observers hear about the removal and about the key coming back.
+// refreshCache brings every cached value up to date with the reader, in
+// place, so a Value obtained earlier keeps tracking its key whatever the new
+// value's type. A removed key reads as ErrNotFound, and the key's observers
+// hear about the removal and about the key coming back.
 func (c *config) refreshCache() []change {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
@@ -168,19 +171,21 @@ func (c *config) refreshCache() []change {
 	var changes []change
 	c.cached.Range(func(key, value interface{}) bool {
 		k, _ := key.(string)
-		v, _ := value.(Value)
-		n, ok := c.reader.Value(k)
+		v, ok := value.(*atomicValue)
 		if !ok {
-			n = &errValue{err: ErrNotFound}
-		}
-		if reflect.DeepEqual(n.Load(), v.Load()) {
 			return true
 		}
-		if ok && reflect.TypeOf(n.Load()) == reflect.TypeOf(v.Load()) {
+		absent := v.load().err != nil
+		n, found := c.reader.Value(k)
+		switch {
+		case !found && absent:
+			return true
+		case !found:
+			v.storeNotFound()
+		case !absent && reflect.DeepEqual(n.Load(), v.Load()):
+			return true
+		default:
 			v.Store(n.Load())
-		} else {
-			c.cached.Store(k, n)
-			v = n
 		}
 		changes = append(changes, change{
 			key:       k,
