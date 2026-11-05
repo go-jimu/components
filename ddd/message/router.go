@@ -5,6 +5,10 @@ import (
 	"sync"
 )
 
+// Publisher sends integration messages through a provider. Publish returns
+// nil once the provider has accepted msg; an error means msg may not have been
+// sent, and each provider documents which errors it returns. Implementations are safe for
+// concurrent use.
 type Publisher interface {
 	Publish(context.Context, Message) error
 }
@@ -26,7 +30,8 @@ type Handler interface {
 	Handle(context.Context, Message) error
 }
 
-// Subscriber registers message handlers.
+// Subscriber registers message handlers. Subscribe returns an error when the
+// handler cannot be registered; see Router.Subscribe for the base errors.
 //
 // Subscribe is a handler registration operation only. It does not imply that a
 // broker consumer has started polling, reserved partitions, acknowledged
@@ -55,7 +60,8 @@ type Runner interface {
 }
 
 // Router registers handlers by Kind and dispatches messages to them
-// sequentially.
+// sequentially. Providers use it to implement Subscriber; its methods are
+// safe for concurrent use.
 type Router struct {
 	mu       sync.RWMutex
 	handlers map[Kind][]Handler
@@ -63,15 +69,19 @@ type Router struct {
 
 var _ Subscriber = (*Router)(nil)
 
+// NewRouter returns an empty Router.
 func NewRouter() *Router {
 	return &Router{
 		handlers: make(map[Kind][]Handler),
 	}
 }
 
-// Subscribe registers handler for each non-empty kind returned by Listening.
+// Subscribe registers handler for each kind returned by Listening, after
+// which Handle routes messages of those kinds to it.
 //
-// Duplicate kinds from the same handler are ignored.
+// Duplicate kinds from the same handler are ignored. It returns ErrNilHandler,
+// ErrNoListening, or ErrEmptyKind, and registers nothing, when handler is nil,
+// listens to no kinds, or lists an empty kind.
 func (r *Router) Subscribe(handler Handler) error {
 	if handler == nil {
 		return ErrNilHandler

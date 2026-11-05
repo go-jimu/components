@@ -9,8 +9,8 @@ import (
 )
 
 type exampleOptions struct {
-	Name string `yaml:"name"`
-	Age  int    `yaml:"age"`
+	Name string `json:"name"`
+	Age  int    `json:"age"`
 }
 
 func ExampleLoad() {

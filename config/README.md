@@ -47,10 +47,14 @@ addr, err := cfg.Value("server.http.addr").String()
 `WithSource` replaces the source list, so pass every source in one call. Later
 sources override earlier ones, also when a watched source reloads: a reload
 rebuilds the configuration from every source in order, then notifies the
-observers registered with `Watch`. A key that a reload removes reads as
-`ErrNotFound` from `Value`, and its observers receive a Value whose `Load` is
-nil; they are notified again if the key comes back. `Load` starts over from the sources on every
-call, so retry it after an error; the sources are watched once.
+observers registered with `Watch`. A Value returned by `Value` keeps tracking
+its key across reloads, including type changes and a key that is removed and
+comes back. While the key is removed, the Value reads as `ErrNotFound`, and its
+observers receive a Value whose `Load` is nil; they are notified again if the
+key comes back. `Value` on a key that does not exist returns a Value that only
+reports `ErrNotFound`; call `Value` again once the key exists. `Load` starts
+over from the sources on every call, so retry it after an error; the sources
+are watched once.
 
 ## Scanning
 

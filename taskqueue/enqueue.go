@@ -5,15 +5,29 @@ import (
 	"time"
 )
 
-// Enqueuer hands a task to a task queue provider.
+// Enqueuer hands a task to a task queue provider. Application code depends on
+// Enqueuer; runtime composition supplies a provider adapter.
+//
+// Enqueue returns nil once the provider has stored the task. It returns an
+// error matching ErrDuplicateTask when task.ID() is still retained by the
+// provider or WithUnique suppressed a duplicate; other errors are
+// provider-specific.
+//
+// The caller validates the policy: Enqueue implementations are not required
+// to call EnqueueOptions.Validate, and may pass an inconsistent policy, such
+// as WithDelay with WithProcessAt, to the provider with provider-specific
+// results. Check NewEnqueueOptions(opts...).Validate() first when options come
+// from configuration or input. Implementations are safe for concurrent use.
 type Enqueuer interface {
 	Enqueue(context.Context, Task, ...EnqueueOption) error
 }
 
-// EnqueueOption configures transport-neutral enqueue policy.
+// EnqueueOption configures transport-neutral enqueue policy. Later options
+// override earlier ones for the same field.
 type EnqueueOption func(*EnqueueOptions)
 
-// EnqueueOptions carries transport-neutral enqueue policy.
+// EnqueueOptions carries transport-neutral enqueue policy. Callers build it
+// with NewEnqueueOptions to validate a policy; adapters build it to read one.
 type EnqueueOptions struct {
 	delay       time.Duration
 	processAt   time.Time
@@ -35,10 +49,14 @@ func NewEnqueueOptions(opts ...EnqueueOption) EnqueueOptions {
 	return cfg
 }
 
-// Validate checks whether the enqueue policy is internally consistent.
+// Validate checks whether the enqueue policy is internally consistent. It
+// returns ErrInvalidEnqueueOption for a negative delay, max retry, timeout, or
+// unique TTL, and when Delay and ProcessAt are both set; otherwise nil.
 //
-// Zero values mean the provider default. Delay and ProcessAt are alternative
-// ways to describe initial processing time and must not both be set.
+// Options left unset mean the provider default; WithMaxRetry(0) is set and
+// means no retries. Delay and ProcessAt are alternative
+// ways to describe initial processing time; set at most one of them. Enqueue
+// does not call Validate for the caller; see Enqueuer.
 func (o EnqueueOptions) Validate() error {
 	if o.delay < 0 {
 		return ErrInvalidEnqueueOption
@@ -72,7 +90,8 @@ func WithProcessAt(processAt time.Time) EnqueueOption {
 	}
 }
 
-// WithMaxRetry asks the provider to override its default retry count.
+// WithMaxRetry sets how many times the provider retries a failed attempt,
+// overriding its default. 0 means no retries.
 func WithMaxRetry(maxRetry int) EnqueueOption {
 	return func(cfg *EnqueueOptions) {
 		cfg.maxRetry = maxRetry
@@ -94,7 +113,9 @@ func WithDeadline(deadline time.Time) EnqueueOption {
 	}
 }
 
-// WithUnique asks the provider to suppress duplicates for ttl when supported.
+// WithUnique asks the provider to suppress duplicates of the task's content
+// for ttl when supported. The adapter documents which fields define a
+// duplicate; Enqueue returns an error matching ErrDuplicateTask for one.
 func WithUnique(ttl time.Duration) EnqueueOption {
 	return func(cfg *EnqueueOptions) {
 		cfg.uniqueTTL = ttl

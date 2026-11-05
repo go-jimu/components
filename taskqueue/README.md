@@ -6,22 +6,12 @@ middleware, and worker lifecycle interfaces. Provider packages own the runtime:
 persistence, polling, acknowledgement, retries, dead-letter queues, locking,
 metrics, and scheduler ownership.
 
-Read **Rules** and **Consumer shape** to write application code. Read
-**Provider adapters** to write an adapter.
-
-## Rules
-
-- `TaskType` is the semantic contract: it routes to a processor and names the
-  payload schema. Providers map it to their own topics, streams, or keys.
-- `Queue` is an optional provider-facing lane name.
-- The payload schema is `TaskType` plus the registered Go payload type. The
-  payload codec (JSON, protobuf, YAML, TOML) is only the byte encoding.
-- A `Router` holds exactly one `Processor` per `TaskType`.
-- Provider execution metadata travels in context through `ExecutionInfo`;
-  payloads carry only business data.
-- `WithID` names one unit of work. See [Task ID](#task-id).
-- `PeriodicTask` is a recurring enqueue of one static envelope. See
-  [Periodic tasks](#periodic-tasks).
+The rules live in the package documentation, which `go doc -all
+github.com/go-jimu/components/taskqueue` prints: vocabulary, processor
+outcomes (retry, `ErrSkipRetry`), who validates enqueue policy, task IDs and
+`ErrDuplicateTask`, periodic tasks, and lifecycle. This README walks through
+the code and expands the provider adapter checklist; `example_test.go` runs
+each pattern.
 
 ## Consumer shape
 
@@ -41,6 +31,10 @@ err := router.Register(taskqueue.NewProcessor("email.welcome", func(ctx context.
 	return sendWelcomeEmail(ctx, payload.UserID)
 }))
 ```
+
+A processor with injected dependencies implements `Processor` on a struct
+instead; `ExampleProcessor` shows that form with `DecodeProto` and
+`ErrSkipRetry`.
 
 Create the envelope at the application boundary. `New` takes raw bytes,
 `NewJSONTask` and `NewProtoTask` encode one format, and `NewEncodedTask` takes
@@ -67,15 +61,10 @@ err = enqueuer.Enqueue(ctx, task, taskqueue.WithMaxRetry(3), taskqueue.WithTimeo
 
 ### Task ID
 
-`WithID` gives a task a caller-assigned identity. A provider keeps at most one
-task per ID while it retains that task, which can include retries, archived
-failures, and completed tasks kept for inspection; enqueueing a retained ID
-fails with `ErrDuplicateTask`. Name one unit of work, such as one user's welcome
-email, rather than a stream of work such as all of a user's tasks.
-
-`WithID` deduplicates by identity for as long as the provider retains the task.
-`WithUnique(ttl)` deduplicates by content for a time window. Neither orders
-tasks.
+`WithID` names one unit of work, and an ID conflict returns
+`ErrDuplicateTask`; see "Task ID" in the package documentation and
+`ExampleWithID`, which treats the conflict as "already scheduled". Each adapter
+documents how long it retains an ID.
 
 ## Schema registry
 
@@ -120,36 +109,23 @@ periodic, err := taskqueue.NewPeriodicTask(
 )
 ```
 
-Every value in a periodic task is reused on every fire, so it has to stay
-valid across fires:
-
-- Timing is relative: `WithDelay` and `WithTimeout`. `NewPeriodicTask` rejects
-  the absolute `WithProcessAt` and `WithDeadline`.
-- The task has no ID. A fixed ID would conflict with any earlier fire the
-  provider still retains, such as an archived failure, and the schedule would
-  stop producing work; `NewPeriodicTask` returns `ErrPeriodicTaskID`. Use
-  `WithUnique` to suppress overlapping fires.
-
-`PeriodicTask.Name` is the registration key within one registrar instance;
-adapters return `ErrDuplicatePeriodicTask` when a name is registered twice. `CronSchedule`
-checks the portable five-field shape and an optional IANA location, and leaves
-cron dialect details to the provider. `IntervalSchedule` is duration-based and
-takes no location.
+The constraints that keep a periodic task valid on every fire (relative
+timing only, no task ID) are under "Periodic tasks" in the package
+documentation.
 
 ## Enqueue policy
 
-`EnqueueOptions` carries provider-neutral policy; zero values mean provider
-defaults.
+Each `EnqueueOption` documents its meaning; zero values mean provider
+defaults. The caller validates the policy, because adapters are not required
+to:
 
-- `WithDelay`: process after a relative delay.
-- `WithProcessAt`: process at an absolute time.
-- `WithMaxRetry`: override the provider retry count.
-- `WithTimeout`: bound one handling attempt.
-- `WithDeadline`: stop processing after an absolute deadline.
-- `WithUnique`: suppress duplicates by content for a duration.
-
-`EnqueueOptions.Validate()` reports policies providers cannot interpret the
-same way, such as negative durations or `WithDelay` with `WithProcessAt`.
+```go
+opts := []taskqueue.EnqueueOption{taskqueue.WithDelay(delay), taskqueue.WithMaxRetry(3)}
+if err := taskqueue.NewEnqueueOptions(opts...).Validate(); err != nil {
+	return err // matches taskqueue.ErrInvalidEnqueueOption
+}
+err = enqueuer.Enqueue(ctx, task, opts...)
+```
 
 ## Provider adapters
 
@@ -161,7 +137,7 @@ when it answers each item:
 - [ ] How long a task ID is retained, with ID conflicts returned as
       `ErrDuplicateTask`.
 - [ ] How each enqueue policy maps to provider options, and which fields
-      define `WithUnique` duplicates.
+      define `WithUnique` duplicates, returned as `ErrDuplicateTask`.
 - [ ] How processor errors are retried, skipped, dead-lettered, or recorded,
       and what `ErrSkipRetry` does.
 - [ ] Whether processors and periodic tasks can be registered after the worker

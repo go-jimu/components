@@ -4,6 +4,48 @@
 // owns its own error policy. Integration messages that cross a boundary belong
 // in ddd/message.
 //
+// # Usage
+//
+// An aggregate records facts in an Events field; a use case saves the
+// aggregate, then hands the drained events to the dispatcher:
+//
+//	if err := repo.Save(ctx, order); err != nil {
+//		return err
+//	}
+//	return dispatcher.DispatchAll(ctx, order.Events.Drain())
+//
+// The aggregate is already saved when DispatchAll runs, so a dispatch error
+// means only that the follow-ups will not run: report it and treat the saved
+// state as the use case's outcome.
+//
+// Runtime composition builds one dispatcher with NewDispatcher, subscribes
+// every Handler before traffic starts, and calls Close during shutdown: after
+// the servers, message consumers, and task workers whose code dispatches
+// events have stopped, and before the clients its handlers use, such as
+// publishers and enqueuers, are closed. An event whose Kind has no subscribed
+// handler goes to WithUnhandledEventHandler, or is logged.
+//
+// # Handlers
+//
+// A Handler returns the kinds it reacts to from Listening, and Handle receives
+// every accepted event of those kinds. Handle type-asserts the concrete event
+// type it was written for and returns early for any other type, so a second
+// type that reuses the Kind cannot crash it:
+//
+//	func (h SendReceipt) Handle(ctx context.Context, e event.Event) {
+//		paid, ok := e.(OrderPaid)
+//		if !ok {
+//			return
+//		}
+//		...
+//	}
+//
+// Handle returns no error: the dispatcher neither retries nor reports handler
+// failures. The handler owns each outcome: retry inside Handle, enqueue a
+// durable task, compensate, or log the error. The dispatcher recovers a
+// panicking handler, reports it to WithPanicHandler (or logs it), and moves on
+// to the next handler; the event is not handled again.
+//
 // # Dispatch
 //
 // Dispatch and DispatchAll report admission only: whether the dispatcher
@@ -18,9 +60,10 @@
 //
 // InMemoryDispatcher handles events on a pool of workers, five by default, so
 // a Handler and the hooks set by options run on several goroutines at once:
-// make them safe for concurrent use. Ordering is per key, usually the ID of the aggregate that raised the event:
-// events with the same key, from Keyed or WithKeyFunc, run one at a time in
-// acceptance order. Events with different keys, or no key, run concurrently.
+// make them safe for concurrent use. Ordering is per key, usually the ID of
+// the aggregate that raised the event: events with the same key, from Keyed
+// or WithKeyFunc, run one at a time in acceptance order. Events with different
+// keys, or no key, run concurrently.
 // The handlers of one event run in subscription order.
 //
 // Acceptance order is not commit order: two requests that commit in one order
@@ -44,5 +87,6 @@
 //
 // Delivery is best-effort and in memory: events still queued when the process
 // exits are lost. Put follow-up work that must survive a crash behind a
-// durable mechanism or into the use case itself.
+// durable mechanism, such as a taskqueue task enqueued by the handler, or into
+// the use case itself.
 package event

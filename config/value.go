@@ -28,11 +28,46 @@ type Value interface {
 	Load() interface{}
 	Store(interface{})
 }
+
+// atomicValue is a Value whose content can change type, become null, or
+// become not found without the atomicValue being replaced, so a Value returned
+// by Config.Value keeps tracking its key across every reload.
 type atomicValue struct {
-	atomic.Value
+	box atomic.Value // always a valueBox, so any content can be stored
+}
+
+// valueBox is the content of an atomicValue: a value of any type, including
+// nil, or err while the key is absent.
+type valueBox struct {
+	v   interface{}
+	err error
+}
+
+func (v *atomicValue) load() valueBox {
+	b, _ := v.box.Load().(valueBox)
+	return b
+}
+
+// Load returns the current value, or nil while the key is absent.
+func (v *atomicValue) Load() interface{} {
+	return v.load().v
+}
+
+// Store replaces the current value; val may be of any type, including nil.
+func (v *atomicValue) Store(val interface{}) {
+	v.box.Store(valueBox{v: val})
+}
+
+// storeNotFound marks the key as absent: accessors return ErrNotFound until
+// the next Store.
+func (v *atomicValue) storeNotFound() {
+	v.box.Store(valueBox{err: ErrNotFound})
 }
 
 func (v *atomicValue) typeAssertError() error {
+	if err := v.load().err; err != nil {
+		return err
+	}
 	return fmt.Errorf("type assert to %v failed", reflect.TypeOf(v.Load()))
 }
 
@@ -173,6 +208,9 @@ func (v *atomicValue) Duration() (time.Duration, error) {
 }
 
 func (v *atomicValue) Scan(obj interface{}) error {
+	if err := v.load().err; err != nil {
+		return err
+	}
 	data, err := json.Marshal(v.Load())
 	if err != nil {
 		return err

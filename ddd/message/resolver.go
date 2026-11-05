@@ -34,12 +34,16 @@ func (f PayloadResolverFunc) Resolve(kind Kind) (proto.Message, error) {
 	return payload, nil
 }
 
-// PayloadRegistry is an in-memory Kind-to-protobuf factory registry.
+// PayloadRegistry is an in-memory Kind-to-protobuf factory registry that
+// implements PayloadResolver. Register every kind a handler listens to before
+// the provider starts consuming. Its methods are safe for concurrent use.
 //
 // It is transport-neutral: Kafka topics, RabbitMQ routing keys, NATS subjects,
 // offsets, acknowledgements, retries, and dead-letter behavior belong to
 // provider/application code. The registry only maps a semantic message kind to
 // the protobuf DTO type needed to decode that kind's payload.
+//
+// Construct it with NewPayloadRegistry; the zero value is not usable.
 type PayloadRegistry struct {
 	mu        sync.RWMutex
 	factories map[Kind]func() proto.Message
@@ -50,7 +54,10 @@ func NewPayloadRegistry() *PayloadRegistry {
 	return &PayloadRegistry{factories: make(map[Kind]func() proto.Message)}
 }
 
-// Register associates kind with a factory that returns a new protobuf target.
+// Register associates kind with a factory that returns a new, empty protobuf
+// target on every call, such as func() proto.Message { return &userv1.UserRegisteredV1{} }.
+// Registering a kind again replaces its factory. It returns ErrEmptyKind or
+// ErrNilPayloadFactory for an empty kind or a nil factory.
 func (r *PayloadRegistry) Register(kind Kind, factory func() proto.Message) error {
 	if kind == "" {
 		return ErrEmptyKind
@@ -65,7 +72,9 @@ func (r *PayloadRegistry) Register(kind Kind, factory func() proto.Message) erro
 	return nil
 }
 
-// Resolve returns a fresh protobuf target for kind.
+// Resolve returns a fresh protobuf target for kind. It returns ErrUnknownKind
+// when kind is not registered and ErrNilPayloadFactory when the factory
+// returns nil.
 func (r *PayloadRegistry) Resolve(kind Kind) (proto.Message, error) {
 	r.mu.RLock()
 	factory := r.factories[kind]

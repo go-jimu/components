@@ -12,14 +12,25 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+// Options configures NewLog. The zero value logs at info level to stdout.
 type Options struct {
-	Level      string `json:"level" toml:"level" yaml:"level"`
-	Output     string `json:"output" toml:"output" yaml:"output"`
-	MaxSize    int    `json:"max_size" toml:"max_size" yaml:"max_size"`
-	MaxAge     int    `json:"max_age" toml:"max_age" yaml:"max_age"`
-	MaxBackups int    `json:"max_backups" toml:"max_backups" yaml:"max_backups"`
-	LocalTime  bool   `json:"local_time" toml:"local_time" yaml:"local_time"`
-	Compress   bool   `json:"compress" toml:"compress" yaml:"compress"`
+	// Level is debug, info, warn, or error, case-insensitive; empty means
+	// info.
+	Level string `json:"level" toml:"level" yaml:"level"`
+	// Output is "" or "console" for stdout, or a file path. A file rotates
+	// with the settings below.
+	Output string `json:"output" toml:"output" yaml:"output"`
+	// MaxSize is the size in megabytes at which a log file rotates; 0 means
+	// 100.
+	MaxSize int `json:"max_size" toml:"max_size" yaml:"max_size"`
+	// MaxAge is how many days rotated files are kept; 0 keeps them.
+	MaxAge int `json:"max_age" toml:"max_age" yaml:"max_age"`
+	// MaxBackups is how many rotated files are kept; 0 keeps them all.
+	MaxBackups int `json:"max_backups" toml:"max_backups" yaml:"max_backups"`
+	// LocalTime names rotated files with local time instead of UTC.
+	LocalTime bool `json:"local_time" toml:"local_time" yaml:"local_time"`
+	// Compress gzips rotated files.
+	Compress bool `json:"compress" toml:"compress" yaml:"compress"`
 }
 
 var (

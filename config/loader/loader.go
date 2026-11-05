@@ -20,6 +20,7 @@ type (
 		ProfilesAlias                     string // eg. test
 	}
 
+	// Option configures Load.
 	Option func(*loadOptions)
 )
 
@@ -31,11 +32,18 @@ var defaultLoadOption = loadOptions{
 }
 
 const (
-	// ProfilesActiveFromEnvVar Environment variable for switching profiles.
-	// When this environment variable is set, it will override `ProfilesAlias`.
+	// ProfilesActiveFromEnvVar names the environment variable that selects
+	// the profile alias. When it is set, it overrides WithProfilesAlias.
 	ProfilesActiveFromEnvVar = "JIMU_PROFILES_ACTIVE"
 )
 
+// Load reads the defaults file and the active profile file, merges them, and
+// scans the result into v, a pointer to a struct with json tags.
+//
+// It returns an error when the configuration directory cannot be read, when
+// a profile alias is active without WithConfigFilePrefix, or when a file
+// cannot be parsed or scanned into v. When no file matches, it returns nil and
+// leaves v unchanged, so set defaults in v before calling Load.
 func Load(v any, opts ...Option) error {
 	o := new(loadOptions)
 	*o = defaultLoadOption
@@ -112,6 +120,9 @@ func searchConfigInDir(opts *loadOptions) ([]config.Source, error) {
 	return extends, nil
 }
 
+// WithConfigurationDirectory sets the directory to search, "./configs" by
+// default, and the defaults file name without extension, "defaults" by
+// default.
 func WithConfigurationDirectory(dir string, defaults string) Option {
 	return func(opt *loadOptions) {
 		opt.ConfigurationDirectory = dir
@@ -119,12 +130,17 @@ func WithConfigurationDirectory(dir string, defaults string) Option {
 	}
 }
 
+// WithConfigFilePrefix sets the profile file prefix: alias "dev" with prefix
+// "app" reads "app_dev.<ext>". It is required when an alias is active.
 func WithConfigFilePrefix(prefix string) Option {
 	return func(opt *loadOptions) {
 		opt.ConfigFilePrefix = strings.TrimSpace(prefix)
 	}
 }
 
+// WithEnvVarsPrefix sets the prefix used to resolve ${NAME} placeholders:
+// with prefix "app", ${NAME} reads APP_NAME. The prefix is upper-cased and
+// gets a trailing "_". An empty prefix reads NAME itself, the default.
 func WithEnvVarsPrefix(prefix string) Option {
 	return func(opt *loadOptions) {
 		if prefix != "" {
@@ -138,6 +154,8 @@ func WithEnvVarsPrefix(prefix string) Option {
 	}
 }
 
+// WithProfilesAlias activates the profile alias, lower-cased, such as "dev".
+// The JIMU_PROFILES_ACTIVE environment variable overrides it when set.
 func WithProfilesAlias(alias string) Option {
 	return func(opt *loadOptions) {
 		if alias != "" {
@@ -148,6 +166,9 @@ func WithProfilesAlias(alias string) Option {
 	}
 }
 
+// WithProfilesActiveFromEnvVar activates the alias named by the
+// JIMU_PROFILES_ACTIVE environment variable when it is set. Load always
+// applies it after the caller's options, so callers need not pass it.
 func WithProfilesActiveFromEnvVar() Option {
 	return func(opt *loadOptions) {
 		profiles := os.Getenv(ProfilesActiveFromEnvVar)

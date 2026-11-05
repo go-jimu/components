@@ -2,24 +2,35 @@ package config
 
 import (
 	"errors"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 )
 
+// failingWatcher fails every Next and records when each call happened.
 type failingWatcher struct {
-	calls atomic.Int32
+	mu    sync.Mutex
+	calls []time.Time
 }
 
 func (w *failingWatcher) Next() ([]*KeyValue, error) {
-	w.calls.Add(1)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.calls = append(w.calls, time.Now())
 	return nil, errors.New("source unavailable")
 }
 
 func (w *failingWatcher) Stop() error { return nil }
 
-// A failing watcher is retried with growing delays, and Close ends the retry
-// loop even while it waits.
+func (w *failingWatcher) callTimes() []time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]time.Time(nil), w.calls...)
+}
+
+// A failing watcher is retried no sooner than the retry delay, and Close ends
+// the retry loop even while it waits. The checks bound time from below, so a
+// slow machine cannot fail them.
 func TestWatchBacksOffAndStopsOnClose(t *testing.T) {
 	c, _ := New().(*config)
 	w := &failingWatcher{}
@@ -29,16 +40,25 @@ func TestWatchBacksOffAndStopsOnClose(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
-	if calls := w.calls.Load(); calls != 1 {
-		t.Fatalf("Next called %d times within the first retry delay, want 1", calls)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(w.callTimes()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("watch never called Next")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if calls := w.callTimes(); len(calls) > 1 {
+		if gap := calls[1].Sub(calls[0]); gap < watchRetryInitial {
+			t.Fatalf("Next retried after %v, want at least %v", gap, watchRetryInitial)
+		}
 	}
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("watch kept retrying after Close")
 	}
 }
