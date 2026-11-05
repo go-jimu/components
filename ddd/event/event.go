@@ -5,7 +5,9 @@ import (
 	"errors"
 )
 
-// Kind identifies the kind of a domain event inside one bounded context.
+// Kind identifies the kind of a domain event inside one bounded context and
+// routes it to the handlers that listen to it. Use one Kind per event type and
+// a stable name such as "order.paid".
 type Kind string
 
 // Event is a domain fact raised inside one bounded context.
@@ -66,16 +68,28 @@ type Collection interface {
 	Len() int
 }
 
-// Handler reacts to a domain event as a follow-up transaction. Handle owns its
-// failures: by the time it runs, the publisher has returned, so the handler is
-// the only party that knows whether to retry, compensate, or record a failure.
-// The dispatcher recovers panics as bugs and reports them to WithPanicHandler.
+// Handler reacts to a domain event as a follow-up transaction.
+//
+// Listening returns the kinds the handler is subscribed to; Subscribe reads it
+// once. Handle receives each accepted event of those kinds, type-asserts the
+// concrete event type it expects, and returns early for any other type.
+//
+// Handle owns its failures: by the time it runs, the publisher has returned,
+// so the handler is the only party that knows whether to retry, compensate, or
+// record a failure. Nothing retries Handle. The dispatcher recovers panics as
+// bugs and reports them to WithPanicHandler.
+//
+// Handle runs on a dispatcher worker with a context owned by the dispatcher,
+// possibly concurrently with itself for events of different keys, so it must
+// be safe for concurrent use. Keep it responsive to ctx: Close and
+// WithHandlerTimeout cancel it.
 type Handler interface {
 	Listening() []Kind
 	Handle(context.Context, Event)
 }
 
-// Dispatcher accepts domain events for asynchronous handling.
+// Dispatcher accepts domain events for asynchronous handling. Its methods are
+// safe for concurrent use.
 //
 // DispatchAll accepts all of its events or none of them. Dispatch and
 // DispatchAll only bound admission with ctx: when the dispatcher has to wait
@@ -83,6 +97,10 @@ type Handler interface {
 // without accepting the events. Accepted events are handled after the
 // caller returns, so handlers never inherit the cancellation, deadline, or
 // values of ctx. Use SourceContext to read caller values explicitly.
+//
+// Dispatch and DispatchAll return nil, ErrDispatcherClosed, or ctx.Err().
+// Close stops admission and waits for accepted events; see the package
+// documentation for its sequence.
 type Dispatcher interface {
 	Dispatch(context.Context, Event) error
 	DispatchAll(context.Context, []Event) error
@@ -104,7 +122,9 @@ func SourceContext(ctx context.Context) (context.Context, bool) {
 	return source, ok
 }
 
-// Subscriber registers handlers for domain events.
+// Subscriber registers handlers for domain events. Subscribe every handler
+// before the first event of its kinds is dispatched: an event accepted before
+// its kind has a handler is reported as unhandled.
 type Subscriber interface {
 	Subscribe(Handler)
 }

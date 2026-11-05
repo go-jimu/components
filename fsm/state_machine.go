@@ -15,6 +15,9 @@ type simpleStateMachine struct {
 	frozen      bool
 }
 
+// NewStateMachine returns an empty, unfrozen StateMachine named name. It
+// panics when name is empty. Register builders and add transitions, then
+// freeze it with MustFreeze into a package-level variable.
 func NewStateMachine(name string) StateMachine {
 	if name == "" {
 		panic("name is required")

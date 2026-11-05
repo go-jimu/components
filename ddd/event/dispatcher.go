@@ -60,7 +60,8 @@ var (
 	_ Subscriber = (*InMemoryDispatcher)(nil)
 )
 
-// NewDispatcher creates an in-process dispatcher and starts its workers.
+// NewDispatcher creates an in-process dispatcher and starts its workers. The
+// workers run until Close returns; call Close once during shutdown.
 func NewDispatcher(opts ...Option) *InMemoryDispatcher {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	d := &InMemoryDispatcher{
@@ -97,6 +98,10 @@ func NewDispatcher(opts ...Option) *InMemoryDispatcher {
 	return d
 }
 
+// Subscribe registers handler for each kind returned by handler.Listening.
+// Handlers of one kind run in subscription order. A nil handler, and any
+// Subscribe after Close has started rejecting events, is ignored. It is safe
+// for concurrent use.
 func (d *InMemoryDispatcher) Subscribe(handler Handler) {
 	if handler == nil {
 		return
@@ -113,6 +118,7 @@ func (d *InMemoryDispatcher) Subscribe(handler Handler) {
 	}
 }
 
+// Dispatch is DispatchAll with one event.
 func (d *InMemoryDispatcher) Dispatch(ctx context.Context, event Event) error {
 	return d.DispatchAll(ctx, []Event{event})
 }
@@ -122,6 +128,9 @@ func (d *InMemoryDispatcher) Dispatch(ctx context.Context, event Event) error {
 // that can be queued immediately. Waiting calls are admitted first come, first
 // served, so a later call never overtakes an earlier one. More events than the
 // buffer size are accepted once the queue is empty. Nil events are skipped.
+//
+// It returns nil when the events are accepted, ErrDispatcherClosed once Close
+// has started rejecting events, and ctx.Err() when ctx ends while waiting.
 func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) error {
 	accepted := make([]queued, 0, len(events))
 	for _, event := range events {
@@ -225,6 +234,13 @@ func (d *InMemoryDispatcher) signalSpaceFreedLocked() {
 	d.spaceFreed = make(chan struct{})
 }
 
+// Close shuts the dispatcher down. It keeps accepting events for the
+// WithDelayClose period, then rejects new events with ErrDispatcherClosed and
+// waits until every accepted event has been handled, returning nil.
+//
+// When ctx ends first, Close cancels the contexts of running handlers, drops
+// the events not yet started, reports both to WithCloseInterruptedHandler, and
+// returns ctx.Err().
 func (d *InMemoryDispatcher) Close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()

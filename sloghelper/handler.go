@@ -16,8 +16,13 @@ type (
 		hooks   *hooks
 	}
 
+	// HandlerOption configures a Handler; pass it to NewHandler, Apply, or
+	// Handler.Apply.
 	HandlerOption func(*Handler)
 
+	// HandleFunc runs on every record before the wrapped handler sees it, for
+	// example to add attributes from ctx with r.AddAttrs. It runs on the
+	// logging goroutine, so make it fast and safe for concurrent use.
 	HandleFunc func(context.Context, *slog.Record)
 )
 
@@ -71,10 +76,13 @@ func (ch *Handler) clone(hdl slog.Handler) *Handler {
 	return &Handler{handler: hdl, hooks: ch.hooks}
 }
 
+// Enabled reports whether the wrapped handler handles level.
 func (ch *Handler) Enabled(ctx context.Context, level slog.Level) bool {
 	return ch.handler.Enabled(ctx, level)
 }
 
+// Handle runs the HandleFuncs in the order they were added, then passes r to
+// the wrapped handler and returns its error.
 func (ch *Handler) Handle(ctx context.Context, r slog.Record) error {
 	for _, fn := range ch.hooks.load() {
 		fn(ctx, &r)
@@ -82,11 +90,15 @@ func (ch *Handler) Handle(ctx context.Context, r slog.Record) error {
 	return ch.handler.Handle(ctx, r)
 }
 
+// WithAttrs returns a Handler that wraps the wrapped handler's WithAttrs and
+// shares this Handler's HandleFuncs.
 func (ch *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	hdl := ch.handler.WithAttrs(attrs)
 	return ch.clone(hdl)
 }
 
+// WithGroup returns a Handler that wraps the wrapped handler's WithGroup and
+// shares this Handler's HandleFuncs.
 func (ch *Handler) WithGroup(name string) slog.Handler {
 	hdl := ch.handler.WithGroup(name)
 	return ch.clone(hdl)
@@ -98,6 +110,7 @@ func (ch *Handler) Apply(opt HandlerOption) {
 	opt(ch)
 }
 
+// WithHandleFunc adds fn to the Handler's HandleFuncs. A nil fn is ignored.
 func WithHandleFunc(fn HandleFunc) HandlerOption {
 	return func(h *Handler) {
 		if fn != nil {

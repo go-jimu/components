@@ -9,7 +9,9 @@ type taskConfig struct {
 	payloadCodec string
 }
 
-// WithID sets a caller-assigned task identity. See Task.ID.
+// WithID sets a caller-assigned task identity that names one unit of work.
+// Enqueue returns ErrDuplicateTask while the provider retains a task with the
+// same ID. See Task.ID.
 func WithID(id string) Option {
 	return func(cfg *taskConfig) {
 		cfg.id = id

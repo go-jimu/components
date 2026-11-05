@@ -161,6 +161,9 @@ func (t Task) PayloadCodec() string {
 // "welcome-email:user-1", not a recurring one. ID deduplicates by identity;
 // WithUnique deduplicates by content for a time window. ID does not order
 // tasks.
+//
+// Adapters need not restore ID on the worker side; a processor reads the
+// provider's task ID from ExecutionInfoFromContext instead.
 func (t Task) ID() string {
 	return t.id
 }

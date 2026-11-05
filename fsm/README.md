@@ -267,40 +267,12 @@ the behavior already succeeded; the behavior method stays the place that
 accepts or rejects the business request. Guards call business methods on the
 aggregate, such as `HasRemainingRefundAmount`.
 
-- A nil `Condition` always matches.
-- Edges for the same `from + action` are evaluated in the order they were
-  added, and the first match wins, so add guarded edges before an unguarded
-  one.
-- When edges exist but no guard matches, `Transit` returns a `*TransitionError`
-  with `Guarded` set and the state stays unchanged. To stay in the current
-  state on purpose, add a self-transition such as
-  `PartialRefunded -> PartialRefunded`.
-- When no edge exists for the state and action, `Transit` returns a
-  `*TransitionError` without `Guarded`.
-
-The behavior has already changed the aggregate when `Transit` runs. When a
-business method returns an error, from the behavior or from `Transit`, discard
-the aggregate by rolling back the transaction; persist only aggregates whose
-business method succeeded.
+The guard order, the self-transition rule, the `*TransitionError` cases, and
+discarding the aggregate after an error are stated under "Rules for consumer
+code" and "Errors" in the package documentation (`go doc -all
+github.com/go-jimu/components/fsm`).
 
 ## Checklist
 
-Consumer code is done when every item holds:
-
-- [ ] Each state-specific decision lives in a concrete state's behavior method;
-      the business object holds no `if`/`switch` on its current state.
-- [ ] Behavior methods take the business object as a parameter; states hold
-      only their label.
-- [ ] A base state returns an error from every behavior, and each concrete
-      state overrides only the behaviors it supports or rejects more
-      specifically.
-- [ ] Every business method calls its state's behavior first and
-      `fsm.Transit` second, through an unexported helper.
-- [ ] Public business methods take natural parameters, such as
-      `order.Pay(amount, method)`; the machine stays inside the object.
-- [ ] The machine is a package-level variable built with `fsm.MustFreeze`, and
-      every transition target has a registered builder.
-- [ ] `SetState` type-checks the next state and is the only place the state
-      field changes after construction or restore.
-- [ ] Guarded edges for one `from + action` come before any unguarded edge.
-- [ ] Callers discard the aggregate when a business method returns an error.
+The checklist that marks consumer code as done is "Rules for consumer code"
+in the package documentation. This walkthrough satisfies every rule.

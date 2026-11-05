@@ -17,6 +17,9 @@ import (
 type Kind string
 
 // Message is a protobuf integration DTO plus transport-neutral metadata.
+// Construct it with New; the zero value has no kind or payload. A Message is
+// immutable and safe to share, but its payload is the caller's proto.Message
+// and must not be modified after New.
 type Message struct {
 	id         string
 	kind       Kind
@@ -27,6 +30,10 @@ type Message struct {
 }
 
 // New constructs a message with a non-empty kind and protobuf payload.
+//
+// It returns ErrEmptyKind for an empty kind, ErrNilPayload for a nil payload,
+// and ErrEmptyID when WithID sets an empty ID. Without WithID it generates a
+// random 32-character hex ID; without WithOccurredAt it uses the current time.
 func New(kind Kind, payload proto.Message, opts ...Option) (Message, error) {
 	if kind == "" {
 		return Message{}, ErrEmptyKind
@@ -99,7 +106,12 @@ func (m Message) Headers() map[string]string {
 	return cloneHeaders(m.headers)
 }
 
-// KindOf derives the protobuf full name for payload.
+// KindOf returns the Kind for payload: its protobuf full name, such as
+// "google.protobuf.StringValue". It returns "" for a nil payload. It reads only
+// the type, so KindOf(&T{}) names the contract of T.
+//
+// KindOf is the recommended Kind for protobuf payloads; see the package
+// documentation for when to write a Kind by hand.
 func KindOf(payload proto.Message) Kind {
 	if isNilPayload(payload) {
 		return ""

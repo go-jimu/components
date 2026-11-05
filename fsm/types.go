@@ -1,10 +1,12 @@
 package fsm
 
 type (
-	// Action define the action type.
+	// Action names a business operation that can move an object between
+	// states, such as "pay".
 	Action string
 
-	// StateLabel define the state type.
+	// StateLabel identifies a state. It is the value to persist and restore
+	// with BuildState.
 	StateLabel string
 
 	// State is one state of a business object. It holds no reference to the
@@ -14,7 +16,8 @@ type (
 		Label() StateLabel // get the state label
 	}
 
-	// StateBuilder define the state builder interface.
+	// StateBuilder returns a new state whose Label is the label it is
+	// registered under.
 	StateBuilder func() State
 
 	// Transition defines a transition edge.
@@ -23,13 +26,17 @@ type (
 		Condition Condition
 	}
 
-	// StateContext define the state context interface.
+	// StateContext is implemented by the business object. CurrentState
+	// returns its state; SetState type-checks next, stores it, and may record
+	// domain events. Transit calls SetState only after an edge matched.
 	StateContext interface {
 		CurrentState() State       // get the current state
 		SetState(next State) error // replace the current state
 	}
 
-	// Condition guards whether a specific transition edge is allowed.
+	// Condition guards one transition edge. Transit calls it with the
+	// business object after the behavior succeeded; a nil Condition always
+	// matches.
 	Condition func(StateContext) bool
 
 	// RuntimeStateMachine is the read-only state machine surface used at runtime.
