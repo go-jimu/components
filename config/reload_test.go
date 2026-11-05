@@ -1,8 +1,10 @@
 package config_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -140,13 +142,15 @@ func TestLoadAgainKeepsReloading(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond)
 }
 
-// Loading again reports values that changed since the previous Load.
+// Loading again reports values that changed since the previous Load. The
+// source never signals a change on its own, so the notification can only come
+// from Load. A file source would race: its watcher can read the file while
+// os.WriteFile has truncated it and report the key as removed first.
 func TestLoadAgainNotifiesChangedValues(t *testing.T) {
-	dir := t.TempDir()
-	base := filepath.Join(dir, "base.yaml")
-	writeFile(t, base, "port: 80\n")
+	source := &quietSource{}
+	source.set("port: 80\n")
 
-	c := config.New(config.WithSource(file.NewSource(base)))
+	c := config.New(config.WithSource(source))
 	require.NoError(t, c.Load())
 	defer c.Close()
 
@@ -155,7 +159,7 @@ func TestLoadAgainNotifiesChangedValues(t *testing.T) {
 		n, _ := v.Int()
 		notified <- n
 	}))
-	writeFile(t, base, "port: 8080\n")
+	source.set("port: 8080\n")
 	require.NoError(t, c.Load())
 
 	select {
@@ -164,6 +168,44 @@ func TestLoadAgainNotifiesChangedValues(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("observer was not notified")
 	}
+}
+
+// quietSource serves YAML that the test changes between loads; its watcher
+// never reports a change.
+type quietSource struct {
+	mu   sync.Mutex
+	data string
+}
+
+func (s *quietSource) set(data string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data = data
+}
+
+func (s *quietSource) Load() ([]*config.KeyValue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return []*config.KeyValue{{Key: "quiet.yaml", Value: []byte(s.data), Format: "yaml"}}, nil
+}
+
+func (s *quietSource) Watch() (config.Watcher, error) {
+	return &quietWatcher{stop: make(chan struct{})}, nil
+}
+
+type quietWatcher struct {
+	stop chan struct{}
+	once sync.Once
+}
+
+func (w *quietWatcher) Next() ([]*config.KeyValue, error) {
+	<-w.stop
+	return nil, context.Canceled
+}
+
+func (w *quietWatcher) Stop() error {
+	w.once.Do(func() { close(w.stop) })
+	return nil
 }
 
 func writeFile(t *testing.T, path, content string) {
