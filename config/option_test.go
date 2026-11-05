@@ -157,10 +157,10 @@ func TestDefaultResolver(t *testing.T) {
 			}
 			if v, ok := rd.Value(test.path); ok {
 				var actual interface{}
-				switch test.expect.(type) {
+				switch expect := test.expect.(type) {
 				case int:
 					if actual, err = v.Int(); err == nil {
-						if !reflect.DeepEqual(test.expect.(int), int(actual.(int64))) {
+						if !reflect.DeepEqual(expect, int(actual.(int64))) {
 							t.Fatal("expect is not equal to actual")
 						}
 					}
@@ -315,10 +315,10 @@ func TestNewDefaultResolver(t *testing.T) {
 			}
 			if v, ok := rd.Value(test.path); ok {
 				var actual interface{}
-				switch test.expect.(type) {
+				switch expect := test.expect.(type) {
 				case int:
 					if actual, err = v.Int(); err == nil {
-						if !reflect.DeepEqual(test.expect.(int), int(actual.(int64))) {
+						if !reflect.DeepEqual(expect, int(actual.(int64))) {
 							t.Fatal("expect is not equal to actual")
 						}
 					}
@@ -364,18 +364,14 @@ func TestExpand(t *testing.T) {
 		want    string
 	}{
 		{
-			input: "${a}",
-			mapping: func(s string) string {
-				return strings.ToUpper(s)
-			},
-			want: "A",
+			input:   "${a}",
+			mapping: strings.ToUpper,
+			want:    "A",
 		},
 		{
-			input: "a",
-			mapping: func(s string) string {
-				return strings.ToUpper(s)
-			},
-			want: "a",
+			input:   "a",
+			mapping: strings.ToUpper,
+			want:    "a",
 		},
 	}
 	for _, tt := range tests {
@@ -412,7 +408,7 @@ func TestExpandToType(t *testing.T) {
 
 func TestWithMergeFunc(t *testing.T) {
 	c := &options{}
-	a := func(dst, src interface{}) error {
+	a := func(_, _ interface{}) error {
 		return nil
 	}
 	WithMergeFunc(a)(c)

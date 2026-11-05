@@ -21,11 +21,11 @@ func NewSource(path string) config.Source {
 }
 
 func (f *file) loadFile(path string) (*config.KeyValue, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // G304: reading the configured path is this source's job
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // read-only: a close error loses no data
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return nil, err

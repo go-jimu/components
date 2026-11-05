@@ -67,20 +67,7 @@ const (
 		"event":"update"
 	}
 }`
-
-	//	_testYaml = `
-	//Foo:
-	//    bar :
-	//        - {name: nihao,age: 1}
-	//        - {name: nihao,age: 1}
-	//
-	//
-	//`
 )
-
-//func TestScan(t *testing.T) {
-//
-//}
 
 func TestFile(t *testing.T) {
 	var (
@@ -88,7 +75,6 @@ func TestFile(t *testing.T) {
 		file = filepath.Join(path, "test.json")
 		data = []byte(_testJSON)
 	)
-	defer os.Remove(path)
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		t.Error(err)
 	}
@@ -114,7 +100,11 @@ func testWatchFile(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	_, err = f.WriteString(_testJSONUpdate)
 	if err != nil {
 		t.Error(err)
@@ -164,7 +154,11 @@ func testWatchDir(t *testing.T, path, file string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	_, err = f.WriteString(_testJSONUpdate)
 	if err != nil {
 		t.Error(err)
@@ -194,7 +188,6 @@ func testSource(t *testing.T, path string, data []byte) {
 
 func TestConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test_config.json")
-	defer os.Remove(path)
 	if err := os.WriteFile(path, []byte(_testJSON), 0o666); err != nil {
 		t.Error(err)
 	}
@@ -306,7 +299,6 @@ func testScan(t *testing.T, c config.Config) {
 
 func TestMergeDataRace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test_config.json")
-	defer os.Remove(path)
 	if err := os.WriteFile(path, []byte(_testJSON), 0o666); err != nil {
 		t.Error(err)
 	}

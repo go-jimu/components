@@ -149,7 +149,7 @@ func TestConfig(t *testing.T) {
 		t.Fatal("databaseDriver is not equal to val")
 	}
 
-	err = cf.Watch("endpoints", func(key string, value Value) {
+	err = cf.Watch("endpoints", func(_ string, _ Value) {
 	})
 	if err != nil {
 		t.Fatal(err)

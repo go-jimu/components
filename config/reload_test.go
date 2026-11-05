@@ -26,7 +26,7 @@ func TestReloadKeepsSourcePriority(t *testing.T) {
 
 	c := config.New(config.WithSource(file.NewSource(defaults), file.NewSource(profile)))
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 
 	version := c.Value("version")
 	writeFile(t, defaults, "name: default\nversion: 2\n")
@@ -48,7 +48,7 @@ func TestReloadResolvesPlaceholdersAgainstNewValues(t *testing.T) {
 
 	c := config.New(config.WithSource(file.NewSource(base)))
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 
 	addr := c.Value("addr")
 	writeFile(t, base, "host: b\naddr: ${host}:80\n")
@@ -68,7 +68,7 @@ func TestWatchNotifiesEveryObserver(t *testing.T) {
 
 	c := config.New(config.WithSource(file.NewSource(base)))
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 
 	first, second := make(chan int64, 16), make(chan int64, 16)
 	require.NoError(t, c.Watch("port", func(_ string, v config.Value) {
@@ -95,7 +95,7 @@ func TestWatchNotifiesWhenValueTypeChanges(t *testing.T) {
 
 	c := config.New(config.WithSource(file.NewSource(base)))
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 
 	notified := make(chan string, 16)
 	require.NoError(t, c.Watch("port", func(_ string, v config.Value) {
@@ -122,7 +122,7 @@ func TestLoadAgainKeepsReloading(t *testing.T) {
 	c := config.New(config.WithSource(file.NewSource(defaults), file.NewSource(profile)))
 	require.NoError(t, c.Load())
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 
 	version := c.Value("version")
 	writeFile(t, defaults, "name: default\nversion: 2\n")
@@ -142,7 +142,7 @@ func TestLoadAgainNotifiesChangedValues(t *testing.T) {
 
 	c := config.New(config.WithSource(source))
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 
 	notified := make(chan int64, 2)
 	require.NoError(t, c.Watch("port", func(_ string, v config.Value) {
@@ -229,7 +229,7 @@ func TestValueTracksKeyAcrossTransientRemoval(t *testing.T) {
 	source := newScriptedSource("host: a\naddr: ${host}:80\n")
 	c := config.New(config.WithSource(source))
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 	addr := c.Value("addr")
 
 	source.push(t, "")
@@ -250,7 +250,7 @@ func TestValueTracksKeyAcrossTypeChange(t *testing.T) {
 	source := newScriptedSource("port: 80\n")
 	c := config.New(config.WithSource(source))
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 	port := c.Value("port")
 
 	source.push(t, "port: auto\n")
@@ -265,7 +265,7 @@ func TestValueTracksKeyAcrossTypeChange(t *testing.T) {
 func TestValueOfNullKey(t *testing.T) {
 	c := config.New(config.WithSource(newScriptedSource("port:\nname: app\n")))
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 
 	v := c.Value("port")
 
@@ -306,7 +306,7 @@ func TestReloadReportsRemovedKeys(t *testing.T) {
 
 	c := config.New(config.WithSource(file.NewSource(base)))
 	require.NoError(t, c.Load())
-	defer c.Close()
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 
 	type portNote struct {
 		port int64

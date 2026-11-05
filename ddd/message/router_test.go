@@ -36,7 +36,7 @@ func newTestMessage(t *testing.T, kind message.Kind) message.Message {
 
 // Intent: broker adapters should be able to depend on the Subscriber
 // capability without knowing the concrete router type.
-func TestRouterImplementsSubscriber(t *testing.T) {
+func TestRouterImplementsSubscriber(_ *testing.T) {
 	var _ message.Subscriber = message.NewRouter()
 }
 

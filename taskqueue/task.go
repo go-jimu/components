@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	jimuencoding "github.com/go-jimu/components/encoding"
+	// Register the codecs named by the *Codec constants, so payload helpers
+	// find them without an import in the caller.
 	_ "github.com/go-jimu/components/encoding/json"
 	_ "github.com/go-jimu/components/encoding/proto"
 	_ "github.com/go-jimu/components/encoding/toml"

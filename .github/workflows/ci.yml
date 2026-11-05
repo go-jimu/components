@@ -75,11 +75,39 @@ jobs:
         # 1.25 is the minimum go.mod requires.
         go-version: [1.25.x, 1.26.x, 1.27.x]
         os: [ubuntu-latest]
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v7
+      - name: Set up Go 1.x
+        uses: actions/setup-go@v7
+        with:
+          go-version: 1.27.x
+          cache: false
+      # Bump the version here and in the Makefile together; .golangci.yml is
+      # written for golangci-lint v2.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+  # Branch protection requires this job alone, so changing the Go matrix or
+  # adding a job never leaves a pull request waiting on a renamed check. A
+  # required check that is skipped counts as passed, so this job always runs
+  # and fails unless every job it needs succeeded.
+  ci-ok:
+    if: ${{ always() }}
+    needs: [unittest, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every job to succeed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: exit 1
   # Releases a merged pull request: autotag reads the source branch from the
   # merge commit message, so release/* bumps the minor version and any other
   # branch the patch version. Direct pushes to master are tested, not released.
   auto_release:
-    needs: unittest
+    needs: [unittest, lint]
     runs-on: ubuntu-latest
     permissions:
       contents: write

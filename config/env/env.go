@@ -11,6 +11,12 @@ type env struct {
 	prefixs []string
 }
 
+// NewSource returns a Source that loads environment variables as key/value
+// entries. With prefixes, it keeps only the variables that start with one of
+// them and strips the first matching prefix plus one following "_", so
+// APP_NAME with prefix "APP" becomes key NAME. A variable equal to a prefix
+// is skipped. Without prefixes, it loads every variable unchanged. Its
+// watcher never reports a change.
 func NewSource(prefixs ...string) config.Source {
 	return &env{prefixs: prefixs}
 }
@@ -23,7 +29,7 @@ func (e *env) load(envStrings []string) []*config.KeyValue {
 	var kv []*config.KeyValue
 	for _, envstr := range envStrings {
 		var k, v string
-		subs := strings.SplitN(envstr, "=", 2) //nolint:gomnd
+		subs := strings.SplitN(envstr, "=", 2)
 		k = subs[0]
 		if len(subs) > 1 {
 			v = subs[1]

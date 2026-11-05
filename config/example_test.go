@@ -17,7 +17,11 @@ func ExampleNew() {
 	if err := cfg.Load(); err != nil {
 		panic(err)
 	}
-	defer cfg.Close()
+	defer func() {
+		if err := cfg.Close(); err != nil {
+			panic(err)
+		}
+	}()
 
 	addr, err := cfg.Value("server.addr").String()
 	if err != nil {

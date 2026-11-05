@@ -124,7 +124,9 @@ type CanceledOrderState struct{ BaseOrderState }
 ### 3. Build the machine once
 
 Register a builder for every state that appears in a transition, add the
-transitions, and freeze the result into a package-level variable. `MustFreeze`
+transitions, and freeze the result into a package-level variable.
+`RegisterStateBuilder` and `AddTransition` fail only on empty input or a frozen
+machine, so join their errors and panic like `MustFreeze` does. `MustFreeze`
 runs `Check` and panics on a miswired machine, so wiring errors surface at
 startup: a missing or unreferenced builder, or one that returns nil or a state
 with the wrong label. Call `Freeze` instead when you want the error returned.
@@ -134,34 +136,37 @@ var orderMachine = fsm.MustFreeze(newOrderStateMachine())
 
 func newOrderStateMachine() fsm.StateMachine {
 	sm := fsm.NewStateMachine("order")
-	sm.RegisterStateBuilder(StateUnpaid, func() fsm.State {
-		return &UnpaidOrderState{BaseOrderState{fsm.NewSimpleState(StateUnpaid)}}
-	})
-	sm.RegisterStateBuilder(StatePaid, func() fsm.State {
-		return &PaidOrderState{BaseOrderState{fsm.NewSimpleState(StatePaid)}}
-	})
-	sm.RegisterStateBuilder(StatePartialRefunded, func() fsm.State {
-		return &PartialRefundedOrderState{BaseOrderState{fsm.NewSimpleState(StatePartialRefunded)}}
-	})
-	sm.RegisterStateBuilder(StateCanceled, func() fsm.State {
-		return &CanceledOrderState{BaseOrderState{fsm.NewSimpleState(StateCanceled)}}
-	})
-
-	sm.AddTransition(StateUnpaid, StatePaid, ActionPay, nil)
-	sm.AddTransition(StatePaid, StatePartialRefunded, ActionRefund, func(sc fsm.StateContext) bool {
-		return sc.(*Order).HasRemainingRefundAmount()
-	})
-	sm.AddTransition(StatePaid, StateCanceled, ActionRefund, func(sc fsm.StateContext) bool {
-		return sc.(*Order).IsFullyRefunded()
-	})
-	sm.AddTransition(StatePaid, StateCanceled, ActionCancel, nil)
-	sm.AddTransition(StatePartialRefunded, StatePartialRefunded, ActionRefund, func(sc fsm.StateContext) bool {
-		return sc.(*Order).HasRemainingRefundAmount()
-	})
-	sm.AddTransition(StatePartialRefunded, StateCanceled, ActionRefund, func(sc fsm.StateContext) bool {
-		return sc.(*Order).IsFullyRefunded()
-	})
-	sm.AddTransition(StatePartialRefunded, StateCanceled, ActionCancel, nil)
+	if err := errors.Join(
+		sm.RegisterStateBuilder(StateUnpaid, func() fsm.State {
+			return &UnpaidOrderState{BaseOrderState{fsm.NewSimpleState(StateUnpaid)}}
+		}),
+		sm.RegisterStateBuilder(StatePaid, func() fsm.State {
+			return &PaidOrderState{BaseOrderState{fsm.NewSimpleState(StatePaid)}}
+		}),
+		sm.RegisterStateBuilder(StatePartialRefunded, func() fsm.State {
+			return &PartialRefundedOrderState{BaseOrderState{fsm.NewSimpleState(StatePartialRefunded)}}
+		}),
+		sm.RegisterStateBuilder(StateCanceled, func() fsm.State {
+			return &CanceledOrderState{BaseOrderState{fsm.NewSimpleState(StateCanceled)}}
+		}),
+		sm.AddTransition(StateUnpaid, StatePaid, ActionPay, nil),
+		sm.AddTransition(StatePaid, StatePartialRefunded, ActionRefund, func(sc fsm.StateContext) bool {
+			return sc.(*Order).HasRemainingRefundAmount()
+		}),
+		sm.AddTransition(StatePaid, StateCanceled, ActionRefund, func(sc fsm.StateContext) bool {
+			return sc.(*Order).IsFullyRefunded()
+		}),
+		sm.AddTransition(StatePaid, StateCanceled, ActionCancel, nil),
+		sm.AddTransition(StatePartialRefunded, StatePartialRefunded, ActionRefund, func(sc fsm.StateContext) bool {
+			return sc.(*Order).HasRemainingRefundAmount()
+		}),
+		sm.AddTransition(StatePartialRefunded, StateCanceled, ActionRefund, func(sc fsm.StateContext) bool {
+			return sc.(*Order).IsFullyRefunded()
+		}),
+		sm.AddTransition(StatePartialRefunded, StateCanceled, ActionCancel, nil),
+	); err != nil {
+		panic(err)
+	}
 	return sm
 }
 ```

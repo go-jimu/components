@@ -12,11 +12,11 @@ import (
 
 func TestNewLog(t *testing.T) {
 	var called int32
-	ctx := context.WithValue(context.Background(), "foobar", "helloworld")
+	ctx := context.WithValue(context.Background(), testCtxKey("foobar"), "helloworld")
 
 	logger := sloghelper.NewLog(sloghelper.Options{Output: "console", Level: "debug"})
 	sloghelper.Apply(sloghelper.WithHandleFunc(func(ctx context.Context, r *slog.Record) {
-		r.AddAttrs(slog.String("value", ctx.Value("foobar").(string)))
+		r.AddAttrs(slog.String("value", ctx.Value(testCtxKey("foobar")).(string)))
 		atomic.AddInt32(&called, 1)
 	}))
 	logger = logger.With(slog.String("sub_logger", "true"))
