@@ -49,8 +49,9 @@
 //     other errors, such as ErrUnknownType or ErrUnknownPayloadCodec, do not.
 //
 // To wrap a struct Processor in middleware, register
-// NewProcessor(p.TaskType(), Chain(p.Process, Recover(), Logging(logger))).
-// The first middleware passed to Chain is the outermost.
+// NewProcessor(p.TaskType(), Chain(p.Process, Logging(logger), Recover())).
+// The first middleware passed to Chain is the outermost, so Logging also logs
+// a panic that Recover turned into an error.
 //
 // Router.Process returns ErrUnhandledType for a task type with no processor.
 // The Recover middleware turns a panic into an error wrapping ErrPanic. A

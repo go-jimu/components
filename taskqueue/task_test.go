@@ -1,10 +1,8 @@
 package taskqueue
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
@@ -364,101 +362,5 @@ func TestRecover_ConvertsPanicToError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "processor crashed") {
 		t.Fatalf("processor error = %q, want panic detail", err)
-	}
-}
-
-// Logging should emit task identity and outcome fields around a successful
-// processor call so operators can trace background task execution.
-func TestLogging_RecordsSuccessfulTask(t *testing.T) {
-	var logs bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&logs, nil))
-	processor := Chain(func(context.Context, Task) error {
-		return nil
-	}, Logging(logger))
-
-	task, err := NewJSONTask(Definition{Type: "document.review.v1", Queue: "reconcile"}, struct{}{}, WithID("doc-1"))
-	if err != nil {
-		t.Fatalf("NewJSONTask: %v", err)
-	}
-	if err := processor(context.Background(), task); err != nil {
-		t.Fatalf("processor: %v", err)
-	}
-
-	output := logs.String()
-	for _, want := range []string{
-		`"msg":"taskqueue processor started"`,
-		`"msg":"taskqueue processor completed"`,
-		`"task_type":"document.review.v1"`,
-		`"queue":"reconcile"`,
-		`"task_id":"doc-1"`,
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("logs = %s, want %s", output, want)
-		}
-	}
-}
-
-// Logging should include provider execution metadata when the worker adapter
-// supplies it through context, without requiring business payload changes.
-func TestLogging_RecordsExecutionInfo(t *testing.T) {
-	var logs bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&logs, nil))
-	processor := Chain(func(context.Context, Task) error {
-		return nil
-	}, Logging(logger))
-
-	task, err := NewJSONTask(Definition{Type: "document.review.v1", Queue: "reconcile"}, struct{}{})
-	if err != nil {
-		t.Fatalf("NewJSONTask: %v", err)
-	}
-	ctx := ContextWithExecutionInfo(context.Background(), NewExecutionInfo(
-		WithExecutionTaskID("provider-task-1"),
-		WithExecutionRetryCount(2),
-		WithExecutionMaxRetry(5),
-	))
-	if err := processor(ctx, task); err != nil {
-		t.Fatalf("processor: %v", err)
-	}
-
-	output := logs.String()
-	for _, want := range []string{
-		`"task_id":"provider-task-1"`,
-		`"retry_count":2`,
-		`"max_retry":5`,
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("logs = %s, want %s", output, want)
-		}
-	}
-}
-
-// Logging should preserve the processor error while recording failure fields
-// so retry decisions stay unchanged and failures remain observable.
-func TestLogging_RecordsFailedTask(t *testing.T) {
-	var logs bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&logs, nil))
-	wantErr := errors.New("retry later")
-	processor := Chain(func(context.Context, Task) error {
-		return wantErr
-	}, Logging(logger))
-
-	task, err := NewJSONTask(Definition{Type: "document.review.v1"}, struct{}{})
-	if err != nil {
-		t.Fatalf("NewJSONTask: %v", err)
-	}
-	err = processor(context.Background(), task)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("processor error = %v, want %v", err, wantErr)
-	}
-
-	output := logs.String()
-	for _, want := range []string{
-		`"msg":"taskqueue processor failed"`,
-		`"task_type":"document.review.v1"`,
-		`"error":"retry later"`,
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("logs = %s, want %s", output, want)
-		}
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"time"
 
 	"github.com/go-jimu/components/ddd/message"
@@ -77,6 +79,41 @@ func ExampleRouter() {
 
 	// Output:
 	// msg-1 google.protobuf.StringValue customer-1=alice
+}
+
+// ExampleChain subscribes a handler wrapped in Logging. The provider calls the
+// wrapped Handle; a Router stands in for it here.
+func ExampleChain() {
+	// Debug level shows the Logging output; production keeps Info.
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey || a.Key == "elapsed_ms" {
+				return slog.Attr{} // drop values that change between runs
+			}
+			return a
+		},
+	}))
+
+	router := message.NewRouter()
+	seen := make([]string, 0, 1)
+	handler := message.Chain(customerCreatedHandler{seen: &seen}, message.Logging(logger))
+	if err := router.Subscribe(handler); err != nil {
+		panic(err)
+	}
+
+	payload := wrapperspb.String("alice")
+	msg, err := message.New(message.KindOf(payload), payload,
+		message.WithID("msg-1"), message.WithKey("customer-1"))
+	if err != nil {
+		panic(err)
+	}
+	if err = router.Handle(context.Background(), msg); err != nil {
+		panic(err)
+	}
+
+	// Output:
+	// level=DEBUG msg="message handled" message_kind=google.protobuf.StringValue message_id=msg-1 message_key=customer-1
 }
 
 // ExamplePayloadRegistry registers the payload factory before subscribing the

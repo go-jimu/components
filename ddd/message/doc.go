@@ -61,6 +61,17 @@
 // more than once, so make handlers idempotent, for example keyed by
 // Message.ID.
 //
+// # Middleware
+//
+// Chain wraps a Handler's Handle with Middleware, for logging, metrics, or
+// tracing, and keeps its Listening; subscribe the result in its place:
+//
+//	subscriber.Subscribe(message.Chain(handler, message.Logging(logger)))
+//
+// Logging logs every Handle call at Debug, a failure included: the provider
+// logs the failure again at the level its failure policy implies, such as
+// Warn for a retry and Error for a lost message.
+//
 // # Failures
 //
 // Failures come in two layers:

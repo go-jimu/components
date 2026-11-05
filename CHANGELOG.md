@@ -1,5 +1,42 @@
 # Change log
 
+## v0.12.0
+
+This release aligns the logs of `ddd/event`, `ddd/message`, and `taskqueue`
+on the conventions now written in the `sloghelper` package documentation
+(go-jimu/components#73). The `taskqueue.Logging` and `ddd/event` changes alter
+log levels, messages, and attributes: update log queries and alerts that rely
+on the old ones.
+
+- Added: the `sloghelper` package documentation states the logging
+  conventions shared by components and contrib adapters: snake_case
+  attribute names, `elapsed_ms`, `sloghelper.Error` for errors, the meaning
+  of each level, `WithLogger` injection, and logging with ctx.
+- Added: `message.Middleware`, `message.HandleFunc`, `message.Chain`, and
+  `message.Logging`. `Logging` logs each `Handle` call at Debug, failures
+  included, since the provider logs a failure at the level its policy implies.
+
+- Changed: `taskqueue.Logging` logs "started" and "completed" at Debug instead
+  of Info. A failure is Warn when the provider retries the task, and Error on
+  the last attempt, with `ErrSkipRetry`, after a panic, or when
+  `ExecutionInfo` lacks the retry budget; it was always Error. Failures carry
+  `final` when the retry budget is known. `elapsed` (a string) is replaced by
+  `elapsed_ms` (an integer), errors use `sloghelper.Error`, every log is
+  written with the processor's ctx, and `task_id` is no longer logged twice.
+- Changed: the documented middleware order is now
+  `Chain(p.Process, Logging(logger), Recover())`, so `Logging` sees a
+  recovered panic.
+- Changed: `ddd/event` logs `event_kind` as a string, logs with the ctx
+  passed to `Dispatch` or `Close`, and logs the close-interrupted error with
+  `sloghelper.Error`. A handler panic without `WithPanicHandler` is logged as
+  "domain event handler panicked" (was "panic occurred while handling event"),
+  with `event_handler` (was `handler`).
+
+- Changed: CI releases a merged pull request with `jacexh/action-autotag` and
+  creates a GitHub release: `release/*` branches bump the minor version, other
+  branches the patch version. Direct pushes to master are tested, not
+  released, and a newer master push no longer cancels a running release.
+
 ## v0.11.2
 
 - Fixed: a key removed from its source on reload now reads as `ErrNotFound`
