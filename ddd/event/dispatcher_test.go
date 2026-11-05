@@ -52,7 +52,12 @@ type logRecord struct {
 	level   slog.Level
 	message string
 	attrs   map[string]any
+	// trace is the logTraceKey value of the logging ctx, so tests can check
+	// that a log carries the ctx a HandleFunc reads attributes from.
+	trace any
 }
+
+type logTraceKey struct{}
 
 type recordingHandler struct {
 	records chan logRecord
@@ -62,7 +67,7 @@ func (h recordingHandler) Enabled(context.Context, slog.Level) bool {
 	return true
 }
 
-func (h recordingHandler) Handle(_ context.Context, record slog.Record) error {
+func (h recordingHandler) Handle(ctx context.Context, record slog.Record) error {
 	attrs := make(map[string]any)
 	record.Attrs(func(attr slog.Attr) bool {
 		attrs[attr.Key] = attr.Value.Any()
@@ -72,6 +77,7 @@ func (h recordingHandler) Handle(_ context.Context, record slog.Record) error {
 		level:   record.Level,
 		message: record.Message,
 		attrs:   attrs,
+		trace:   ctx.Value(logTraceKey{}),
 	}
 	return nil
 }
@@ -311,12 +317,43 @@ func TestDispatcherLogsUnhandledEventWithoutHook(t *testing.T) {
 	)
 	defer dispatcher.Close(context.Background())
 
-	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "unknown"}))
+	ctx := context.WithValue(context.Background(), logTraceKey{}, "trace-1")
+	require.NoError(t, dispatcher.Dispatch(ctx, testEvent{kind: "unknown"}))
 
 	record := receiveLogWithin(t, "unhandled event log", records)
 	require.Equal(t, slog.LevelWarn, record.level)
 	require.Equal(t, "domain event has no handler", record.message)
-	require.Equal(t, event.Kind("unknown"), record.attrs["event_kind"])
+	require.Equal(t, "unknown", record.attrs["event_kind"])
+	require.Equal(t, "trace-1", record.trace, "log ctx is the Dispatch ctx")
+}
+
+// Intent: without a panic hook, a handler panic is an error log that names the
+// event, the handler, and the stack, logged with the handler's ctx so trace
+// attributes from the Dispatch ctx reach it.
+func TestDispatcherLogsPanicWithoutHook(t *testing.T) {
+	records := make(chan logRecord, 4)
+	dispatcher := event.NewDispatcher(
+		event.WithDelayClose(0),
+		event.WithLogger(slog.New(recordingHandler{records: records})),
+	)
+	defer dispatcher.Close(context.Background())
+	dispatcher.Subscribe(handlerFunc{
+		kinds:  []event.Kind{"order.paid"},
+		handle: func(context.Context, event.Event) { panic("boom") },
+	})
+
+	ctx := context.WithValue(context.Background(), logTraceKey{}, "trace-2")
+	require.NoError(t, dispatcher.Dispatch(ctx, keyedEvent{testEvent: testEvent{kind: "order.paid"}, key: "order-1"}))
+
+	record := receiveLogWithin(t, "panic log", records)
+	require.Equal(t, slog.LevelError, record.level)
+	require.Equal(t, "domain event handler panicked", record.message)
+	require.Equal(t, "order.paid", record.attrs["event_kind"])
+	require.Equal(t, "order-1", record.attrs["event_key"])
+	require.Equal(t, "event_test.handlerFunc", record.attrs["event_handler"])
+	require.Equal(t, "boom", record.attrs["panic"])
+	require.Contains(t, record.attrs["stack_trace"], "TestDispatcherLogsPanicWithoutHook")
+	require.Equal(t, "trace-2", record.trace)
 }
 
 // Intent: a panic in one handler must not stop later handlers or later events,
@@ -413,7 +450,7 @@ func TestDispatcherLogsNilContextFactory(t *testing.T) {
 	record := receiveLogWithin(t, "nil context factory log", records)
 	require.Equal(t, slog.LevelWarn, record.level)
 	require.Equal(t, "domain event context factory returned nil", record.message)
-	require.Equal(t, event.Kind("order.paid"), record.attrs["event_kind"])
+	require.Equal(t, "order.paid", record.attrs["event_kind"])
 }
 
 // Intent: configured handler timeout should cancel long-running handler
@@ -481,7 +518,8 @@ func TestDispatcherLogsCloseContextError(t *testing.T) {
 	<-started
 	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	traced := context.WithValue(context.Background(), logTraceKey{}, "close-trace")
+	ctx, cancel := context.WithTimeout(traced, 10*time.Millisecond)
 	defer cancel()
 	require.ErrorIs(t, dispatcher.Close(ctx), context.DeadlineExceeded)
 	close(block)
@@ -491,7 +529,10 @@ func TestDispatcherLogsCloseContextError(t *testing.T) {
 		record = receiveLogWithin(t, "close context error log", records)
 	}
 	require.Equal(t, slog.LevelWarn, record.level)
-	require.ErrorIs(t, record.attrs["error"].(error), context.DeadlineExceeded)
+	require.Equal(t, "close-trace", record.trace, "log ctx is the Close ctx")
+	errAttr, ok := record.attrs["error"].([]slog.Attr)
+	require.True(t, ok, "error is logged with sloghelper.Error, got %T", record.attrs["error"])
+	require.Equal(t, context.DeadlineExceeded.Error(), errAttr[0].Value.String())
 	require.Equal(t, int64(1), record.attrs["in_flight_event_count"])
 	require.Equal(t, int64(1), record.attrs["pending_event_count"])
 	require.Equal(t, []event.Kind{event.Kind("order.paid")}, record.attrs["pending_event_kinds"])

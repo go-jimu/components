@@ -9,8 +9,12 @@ import (
 // Option configures an InMemoryDispatcher; pass options to NewDispatcher.
 type Option func(*InMemoryDispatcher)
 
-// WithLogger sets the logger for dispatcher lifecycle and runtime diagnostics.
-// The default is slog.Default(); a nil logger keeps the default.
+// WithLogger sets the logger for dispatcher lifecycle and runtime diagnostics:
+// rejected dispatches, events without a handler, handler panics without
+// WithPanicHandler, and close progress. Logs about an event carry the ctx
+// passed to Dispatch, and close logs the ctx passed to Close. The default is
+// slog.Default(); a nil logger keeps the default. Attribute names follow the
+// conventions in github.com/go-jimu/components/sloghelper.
 func WithLogger(logger *slog.Logger) Option {
 	return func(d *InMemoryDispatcher) {
 		if logger != nil {

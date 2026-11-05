@@ -1,17 +1,13 @@
 .PHONY: test
-test: 
-	@go test -race -covermode=atomic -v -coverprofile=coverage.txt $(extend) ./... ;
+test:
+	@go test -race -covermode=atomic -coverprofile=coverage.txt $(extend) ./...
 
 .PHONY: benchmark
-benchmark: 
-	@go test -bench=. -run=^Benchmark ./...;
-
-.PHONY: ci-tools
-ci-tools:
-	@go install gotest.tools/gotestsum@latest
+benchmark:
+	@go test -run='^$$' -bench=. $(extend) ./...
 
 .PHONY: tools
-tools: ci-tools
+tools:
 	go install github.com/cweill/gotests/gotests@latest
 	go install github.com/fatih/gomodifytags@latest
 	go install github.com/josharian/impl@latest

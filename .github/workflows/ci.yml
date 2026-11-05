@@ -1,97 +1,106 @@
 name: CI
+# A merged pull request is tested and released once, by the push to master it
+# creates. Pull request runs test the change only.
 on:
   push:
     branches:
     - master
-    tags:
-    - v*.*.*
   pull_request:
     branches:
     - master
+
+# Tests read the repository only; auto_release alone pushes a tag.
 permissions:
   contents: read
+
+# A new push to a pull request supersedes its running checks. Master runs
+# queue one at a time, so two releases never pick the same tag; a queued run
+# replaced by a newer one is released by that newer run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unittest:
-    permissions:
-      contents: read
-      checks: write
-    strategy:
-      matrix:
-        go-version: [ 1.25.x, 1.26.x, 1.27.x ]
-        os: [ ubuntu-latest ]
-      fail-fast: true
     runs-on: ${{matrix.os}}
     steps:
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
-    - name: Set up Go 1.x
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{matrix.go-version}}
-    - name: Install tools
-      run: make tools
-    - name: Unittest
-      run: gotestsum --junitfile report.xml --format pkgname --raw-command make test extend=-json
-    - name: Publish Test Report
-      uses: mikepenz/action-junit-report@v4
-      if: always()
-      with:
-        report_paths: report.xml
-    - name: Upload code coverage report
-      if: ${{ matrix.os == 'ubuntu-latest' && matrix.go-version == '1.25.x' }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: code-coverage-report
-        path: coverage.txt
-    - name: Benchmark
-      run: make benchmark
-
-  code-coverage:
-    runs-on: ubuntu-latest
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v7
+      - name: Set up Go 1.x
+        id: setup-go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{matrix.go-version}}
+          # Caching is done below: setup-go keys its cache on go.sum alone, so
+          # the first build cache saved for a go.sum is reused, never refreshed.
+          cache: false
+      # Each master run saves a fresh build cache under its commit; every run
+      # restores the newest one for its Go version and go.sum files.
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('**/go.sum') }}-
+            go-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-
+      - name: Unittest
+        run: make test
+      # One iteration each: benchmarks still compile and run, while timings
+      # from shared runners are not compared.
+      - name: Benchmark smoke
+        run: make benchmark extend=-benchtime=1x
+      - name: Save Go build cache
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+      - name: Code Coverage Report
+        if: ${{ matrix.go-version == '1.25.x' }}
+        uses: codecov/codecov-action@v7
+        with:
+          fail_ci_if_error: true
+          files: coverage.txt
+          flags: unittest
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+    strategy:
+      fail-fast: true
+      matrix:
+        # 1.25 is the minimum go.mod requires.
+        go-version: [1.25.x, 1.26.x, 1.27.x]
+        os: [ubuntu-latest]
+  # Releases a merged pull request: autotag reads the source branch from the
+  # merge commit message, so release/* bumps the minor version and any other
+  # branch the patch version. Direct pushes to master are tested, not released.
+  auto_release:
     needs: unittest
-    steps:
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
-    - name: Download code coverage report
-      uses: actions/download-artifact@v4
-      with:
-        name: code-coverage-report
-    - name: Code Coverage Report
-      uses: codecov/codecov-action@v4
-      with:
-        files: coverage.txt
-        verbose: true
-        flags: ${{ github.ref_name }}
-        fail_ci_if_error: true
-        token: ${{ secrets.CODECOV_TOKEN }}
-
-  auto-tag:
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    runs-on: ubuntu-latest
-    needs: unittest
-    # https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability
-    # https://docs.github.com/en/actions/learn-github-actions/expressions
-    if: ${{ github.ref == 'refs/heads/master' }}
-    env:
-      COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+    if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Merge pull request ') }}
     steps:
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
+    - name: Check out the merge commit
+      uses: actions/checkout@v7
       with:
-        fetch-depth: "0"
-    - run: |
-        git config --global user.name "Github Action Bot"
-        git config --global user.email "go-jimu@users.noreply.github.com"
-        type=patch
-        pattern="^Merge pull request #[0-9]+ from go-jimu/release.*"
-        echo "commit message: $COMMIT_MESSAGE"
-        if [[ $COMMIT_MESSAGE =~ $pattern ]]; then
-          echo "bump up minor version number"
-          type=minor
-        fi
-        ./scripts/auto_bump_version.sh $type
-        git push origin master --follow-tags
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Auto Tag
+      id: autotag
+      uses: jacexh/action-autotag@v1
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        default_bump: patch
+    - name: Create GitHub Release
+      if: ${{ steps.autotag.outputs.new_tag != '' }}
+      uses: softprops/action-gh-release@v3
+      with:
+        tag_name: ${{ steps.autotag.outputs.new_tag }}
+        name: ${{ steps.autotag.outputs.new_tag }}
+        generate_release_notes: true
+        token: ${{ secrets.GITHUB_TOKEN }}

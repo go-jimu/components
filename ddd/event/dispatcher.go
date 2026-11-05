@@ -8,6 +8,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/go-jimu/components/sloghelper"
 )
 
 const (
@@ -153,7 +155,7 @@ func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) er
 		if d.closed {
 			d.removeWaiterLocked(turn)
 			d.mu.Unlock()
-			d.logger.Warn("domain event dispatch rejected", slog.Int("event_count", len(accepted)))
+			d.logger.LogAttrs(ctx, slog.LevelWarn, "domain event dispatch rejected", slog.Int("event_count", len(accepted)))
 			return ErrDispatcherClosed
 		}
 		if d.isFirstWaiterLocked(turn) && d.fitsLocked(len(accepted)) {
@@ -261,27 +263,27 @@ func (d *InMemoryDispatcher) Close(ctx context.Context) error {
 			}
 			snapshot, started := d.interruptClose(ctx.Err())
 			if started {
-				d.logger.Info("domain event dispatcher closing started")
+				d.logger.LogAttrs(ctx, slog.LevelInfo, "domain event dispatcher closing started")
 			}
-			d.reportCloseInterrupted(snapshot)
+			d.reportCloseInterrupted(ctx, snapshot)
 			return ctx.Err()
 		}
 	}
 
 	closed := d.beginClose()
 	if closed {
-		d.logger.Info("domain event dispatcher closing started")
+		d.logger.LogAttrs(ctx, slog.LevelInfo, "domain event dispatcher closing started")
 	}
 
 	select {
 	case <-d.done:
 		if closed {
-			d.logger.Info("domain event dispatcher closed")
+			d.logger.LogAttrs(ctx, slog.LevelInfo, "domain event dispatcher closed")
 		}
 		return nil
 	case <-ctx.Done():
 		snapshot, _ := d.interruptClose(ctx.Err())
-		d.reportCloseInterrupted(snapshot)
+		d.reportCloseInterrupted(ctx, snapshot)
 		return ctx.Err()
 	}
 }
@@ -341,9 +343,9 @@ func compareSeq(a, b uint64) int {
 	}
 }
 
-func (d *InMemoryDispatcher) reportCloseInterrupted(snapshot CloseInterruptedContext) {
-	d.logger.Warn("domain event dispatcher close interrupted",
-		slog.Any("error", snapshot.Error),
+func (d *InMemoryDispatcher) reportCloseInterrupted(ctx context.Context, snapshot CloseInterruptedContext) {
+	d.logger.LogAttrs(ctx, slog.LevelWarn, "domain event dispatcher close interrupted",
+		sloghelper.Error(snapshot.Error),
 		slog.Int("in_flight_event_count", len(snapshot.InFlight)),
 		slog.Int("pending_event_count", len(snapshot.Pending)),
 		slog.Any("pending_event_kinds", eventKinds(snapshot.Pending)))
@@ -437,7 +439,7 @@ func (d *InMemoryDispatcher) handleEvent(item queued) {
 		if d.unhandledEventHandler != nil {
 			d.unhandledEventHandler(UnhandledContext{Event: event})
 		} else {
-			d.logger.Warn("domain event has no handler", eventAttrs(item)...)
+			d.logger.LogAttrs(item.logContext(), slog.LevelWarn, "domain event has no handler", eventAttrs(item)...)
 		}
 		return
 	}
@@ -461,11 +463,11 @@ func (d *InMemoryDispatcher) handleOne(item queued, handler Handler) {
 				})
 				return
 			}
-			d.logger.Error("panic occurred while handling event", append(eventAttrs(item),
-				slog.String("handler", fmt.Sprintf("%T", handler)),
+			d.logger.LogAttrs(item.logContext(), slog.LevelError, "domain event handler panicked", append(eventAttrs(item),
+				slog.String("event_handler", fmt.Sprintf("%T", handler)),
 				slog.Any("event", event),
 				slog.Any("panic", recovered),
-				slog.Any("stack_trace", string(stack)))...)
+				slog.String("stack_trace", string(stack)))...)
 		}
 	}()
 
@@ -490,14 +492,24 @@ func (d *InMemoryDispatcher) handlerContext(item queued) (context.Context, conte
 		if derived := d.contextFactory(ctx, item.event); derived != nil {
 			ctx = derived
 		} else {
-			d.logger.Warn("domain event context factory returned nil", eventAttrs(item)...)
+			d.logger.LogAttrs(item.logContext(), slog.LevelWarn,
+				"domain event context factory returned nil", eventAttrs(item)...)
 		}
 	}
 	return ctx, cancel
 }
 
-func eventAttrs(item queued) []any {
-	attrs := []any{slog.Any("event_kind", item.event.Kind())}
+// logContext is the ctx of the Dispatch call that queued item, without its
+// cancellation, so logs about item carry its trace attributes.
+func (item queued) logContext() context.Context {
+	if item.source == nil {
+		return context.Background()
+	}
+	return item.source
+}
+
+func eventAttrs(item queued) []slog.Attr {
+	attrs := []slog.Attr{slog.String("event_kind", string(item.event.Kind()))}
 	if item.key != "" {
 		attrs = append(attrs, slog.String("event_key", item.key))
 	}
