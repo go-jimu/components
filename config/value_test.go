@@ -342,3 +342,32 @@ func TestWithResolveActualTypesConvertsWholePlaceholders(t *testing.T) {
 		t.Fatalf("addr = %q, want %q", addr, "a:8080")
 	}
 }
+
+func TestAtomicValue_ConversionFailuresWrapErrTypeAssert(t *testing.T) {
+	stored := func(x interface{}) *atomicValue {
+		v := new(atomicValue)
+		v.Store(x)
+		return v
+	}
+	cases := map[string]func() error{
+		"Bool of a non-bool string": func() error { _, err := stored("maybe").Bool(); return err },
+		"Bool of a slice":           func() error { _, err := stored([]interface{}{}).Bool(); return err },
+		"Int of a non-number":       func() error { _, err := stored("ten").Int(); return err },
+		"Int of an overflow":        func() error { _, err := stored(uint64(math.MaxUint64)).Int(); return err },
+		"Float of a non-number":     func() error { _, err := stored("pi").Float(); return err },
+		"String of a map":           func() error { _, err := stored(map[string]interface{}{}).String(); return err },
+		"Duration of a bad string":  func() error { _, err := stored("soon").Duration(); return err },
+		"Slice of a string":         func() error { _, err := stored("a").Slice(); return err },
+		"Map of a string":           func() error { _, err := stored("a").Map(); return err },
+	}
+	for name, call := range cases {
+		if err := call(); !errors.Is(err, ErrTypeAssert) {
+			t.Errorf("%s = %v, want ErrTypeAssert", name, err)
+		}
+	}
+	absent := new(atomicValue)
+	absent.storeNotFound()
+	if _, err := absent.Int(); !errors.Is(err, ErrNotFound) || errors.Is(err, ErrTypeAssert) {
+		t.Errorf("Int of an absent key = %v, want ErrNotFound only", err)
+	}
+}

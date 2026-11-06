@@ -74,7 +74,8 @@
 // strings, Int truncates floats, String formats numbers and bools, and
 // Duration accepts "5s" or an integer number of nanoseconds. Slice and Map
 // wrap each element in a Value that does not track reloads. Value.Scan
-// decodes like Config.Scan. A failed conversion returns a descriptive error.
+// decodes like Config.Scan. A value that does not convert to the requested
+// kind returns ErrTypeAssert wrapped.
 //
 // # Scanning
 //
