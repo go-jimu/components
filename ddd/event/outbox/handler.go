@@ -60,6 +60,13 @@ func DeliveryFrom(ctx context.Context) (Delivery, bool) {
 	return r.delivery, true
 }
 
+// ContextWithDelivery returns ctx carrying d, for a unit test of a Handler
+// that reads DeliveryFrom. MarkDone on it returns ErrNoDelivery: only the
+// Relay runs a delivery.
+func ContextWithDelivery(ctx context.Context, d Delivery) context.Context {
+	return context.WithValue(ctx, deliveryKey{}, &running{delivery: d})
+}
+
 type markKey struct{ run *running }
 
 // MarkDone stores, in the transaction ctx is in, that the event Handle runs

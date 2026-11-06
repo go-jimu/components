@@ -931,3 +931,16 @@ func (d *recordingDispatcher) all() []event.Event {
 	defer d.mu.Unlock()
 	return slices.Clone(d.events)
 }
+
+func TestContextWithDelivery(t *testing.T) {
+	d := outbox.Delivery{RecordID: "r-1", Index: 2, Attempt: 3}
+	ctx := outbox.ContextWithDelivery(context.Background(), d)
+	if got, ok := outbox.DeliveryFrom(ctx); !ok || got != d {
+		t.Fatalf("DeliveryFrom = %+v, %v, want %+v", got, ok, d)
+	}
+	f := newFixture(t)
+	err := f.manager.Within(ctx, outbox.MarkDone)
+	if !errors.Is(err, outbox.ErrNoDelivery) {
+		t.Fatalf("MarkDone on a test delivery = %v, want ErrNoDelivery", err)
+	}
+}
