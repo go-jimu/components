@@ -40,7 +40,7 @@ func TestDispatcherInterfaceDoesNotRequireSubscription(_ *testing.T) {
 // Intent: the default constructor should return the concrete in-memory
 // component, not a generic bus abstraction.
 func TestNewDispatcherReturnsInMemoryDispatcher(t *testing.T) {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	var _ *event.InMemoryDispatcher = dispatcher //nolint:staticcheck // QF1011: the explicit type is the compile-time check
@@ -111,7 +111,7 @@ func receiveLogWithin(t *testing.T, name string, ch <-chan logRecord) logRecord 
 
 // Intent: dispatch reports admission acceptance, not handler success.
 func TestDispatcherDispatchAcceptedWhileOpen(t *testing.T) {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	called := make(chan event.Event, 1)
@@ -129,7 +129,7 @@ func TestDispatcherDispatchAcceptedWhileOpen(t *testing.T) {
 // Intent: empty batches have no domain facts to process and should be accepted
 // without waking handlers.
 func TestDispatcherDispatchAllEmptyBatchAccepted(t *testing.T) {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	require.NoError(t, dispatcher.DispatchAll(context.Background(), nil))
@@ -139,7 +139,7 @@ func TestDispatcherDispatchAllEmptyBatchAccepted(t *testing.T) {
 // Intent: once the dispatcher is closed, new event batches are rejected with a
 // dispatch error instead of reporting handler errors.
 func TestDispatcherRejectsAfterClose(t *testing.T) {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 	require.NoError(t, dispatcher.Close(context.Background()))
 
 	require.ErrorIs(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}), event.ErrDispatcherClosed)
@@ -148,45 +148,142 @@ func TestDispatcherRejectsAfterClose(t *testing.T) {
 		event.ErrDispatcherClosed)
 }
 
-// Intent: rejected dispatches happen in a background component, so they should
-// be logged as warnings with enough context to diagnose dropped batches.
+// Intent: nothing recovers a rejected dispatch, so each rejected event is
+// logged at Error with its kind and key, on the caller's ctx.
 func TestDispatcherLogsRejectedDispatch(t *testing.T) {
 	records := make(chan logRecord, 4)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithLogger(slog.New(recordingHandler{records: records})),
 	)
 	require.NoError(t, dispatcher.Close(context.Background()))
 
+	traced := context.WithValue(context.Background(), logTraceKey{}, "dispatch-trace")
 	require.ErrorIs(t,
-		dispatcher.DispatchAll(context.Background(), []event.Event{testEvent{kind: "order.paid"}}),
+		dispatcher.DispatchAll(traced, []event.Event{testEvent{kind: "order.paid"}, keyed("order-1", "shipped")}),
 		event.ErrDispatcherClosed)
 
-	record := receiveLogWithin(t, "rejected dispatch log", records)
-	for record.message != "domain event dispatch rejected" {
-		record = receiveLogWithin(t, "rejected dispatch log", records)
+	var rejected []logRecord
+	for len(rejected) < 2 {
+		record := receiveLogWithin(t, "rejected dispatch log", records)
+		if record.message == "domain event dispatch rejected" {
+			rejected = append(rejected, record)
+		}
 	}
-	require.Equal(t, slog.LevelWarn, record.level)
-	require.Equal(t, int64(1), record.attrs["event_count"])
+	for _, record := range rejected {
+		require.Equal(t, slog.LevelError, record.level)
+		require.Equal(t, "dispatch-trace", record.trace)
+	}
+	require.Equal(t, "order.paid", rejected[0].attrs["event_kind"])
+	require.NotContains(t, rejected[0].attrs, "event_key")
+	require.Equal(t, "order.event", rejected[1].attrs["event_kind"])
+	require.Equal(t, "order-1", rejected[1].attrs["event_key"])
 }
 
-// Intent: canceling close during the delay phase still starts shutdown so
-// future non-empty batches cannot be admitted after Close returns.
-func TestDispatcherRejectsAfterDelayCloseCancel(t *testing.T) {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(time.Hour))
+// Intent: an interrupted Close rejects every later dispatch, including the
+// follow-ups of handlers still returning from their canceled contexts.
+func TestDispatcherRejectsAfterInterruptedClose(t *testing.T) {
+	dispatcher := event.NewDispatcher()
+	started := make(chan struct{})
+	followUp := make(chan error, 1)
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.paid"},
+		handle: func(ctx context.Context, _ event.Event) {
+			close(started)
+			<-ctx.Done()
+			followUp <- dispatcher.Dispatch(ctx, testEvent{kind: "order.shipped"})
+		},
+	})
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
+	<-started
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	require.ErrorIs(t, dispatcher.Close(ctx), context.Canceled)
 
+	require.ErrorIs(t, receiveWithin(t, "follow-up dispatch", followUp), event.ErrDispatcherClosed)
 	require.ErrorIs(t,
 		dispatcher.DispatchAll(context.Background(), []event.Event{testEvent{kind: "order.paid"}}),
 		event.ErrDispatcherClosed)
 }
 
+// Intent: an idle dispatcher has nothing to drain, so Close returns at once
+// instead of holding the shutdown budget.
+func TestDispatcherCloseReturnsAtOnceWhenIdle(t *testing.T) {
+	dispatcher := event.NewDispatcher()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	require.NoError(t, dispatcher.Close(ctx))
+}
+
+// Intent: the follow-up events that running handlers dispatch during Close are
+// handled, through a chain of handlers, keyed or not, before Close returns
+// nil.
+func TestDispatcherCloseHandlesFollowUpEvents(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		chain func(step int) event.Event
+	}{
+		{name: "unkeyed", chain: func(step int) event.Event { return testEvent{kind: "order.event", id: step} }},
+		{name: "keyed", chain: func(step int) event.Event {
+			return keyedEvent{testEvent: testEvent{kind: "order.event", id: step}, key: "order-1"}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dispatcher := event.NewDispatcher(event.WithWorkers(3))
+			started := make(chan struct{})
+			release := make(chan struct{})
+			var (
+				mu          sync.Mutex
+				handled     []int
+				dispatchErr []error
+			)
+			dispatcher.Subscribe(handlerFunc{
+				kinds: []event.Kind{"order.event"},
+				handle: func(ctx context.Context, ev event.Event) {
+					step := eventID(ev)
+					if step == 0 {
+						close(started)
+						<-release
+					}
+					var err error
+					if step < 3 {
+						err = dispatcher.Dispatch(ctx, tc.chain(step+1))
+					}
+					mu.Lock()
+					handled = append(handled, step)
+					dispatchErr = append(dispatchErr, err)
+					mu.Unlock()
+				},
+			})
+			require.NoError(t, dispatcher.Dispatch(context.Background(), tc.chain(0)))
+			<-started
+
+			closed := make(chan error, 1)
+			go func() { closed <- dispatcher.Close(context.Background()) }()
+			select {
+			case err := <-closed:
+				t.Fatalf("Close returned %v while a handler was running", err)
+			case <-time.After(20 * time.Millisecond):
+			}
+			require.NoError(t, dispatcher.Dispatch(context.Background(), tc.chain(9)),
+				"Close accepts events until idle")
+			close(release)
+
+			require.NoError(t, receiveWithin(t, "Close", closed))
+			mu.Lock()
+			defer mu.Unlock()
+			require.ElementsMatch(t, []int{0, 1, 2, 3, 9}, handled)
+			for _, err := range dispatchErr {
+				require.NoError(t, err)
+			}
+			require.ErrorIs(t, dispatcher.Dispatch(context.Background(), tc.chain(0)), event.ErrDispatcherClosed)
+		})
+	}
+}
+
 // Intent: close waits for already accepted work to finish before returning.
 func TestDispatcherCloseDrainsAcceptedEvents(t *testing.T) {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -226,7 +323,6 @@ func TestDispatcherCloseDrainsAcceptedEvents(t *testing.T) {
 func TestDispatcherLogsCloseLifecycle(t *testing.T) {
 	records := make(chan logRecord, 2)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithLogger(slog.New(recordingHandler{records: records})),
 	)
 
@@ -243,7 +339,7 @@ func TestDispatcherLogsCloseLifecycle(t *testing.T) {
 // Intent: with one worker, every event is handled in the order it was
 // accepted, across DispatchAll calls.
 func TestDispatcherSingleWorkerHandlesInAcceptanceOrder(t *testing.T) {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1))
+	dispatcher := event.NewDispatcher(event.WithWorkers(1))
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	seen := make(chan string, 4)
@@ -272,7 +368,7 @@ func TestDispatcherSingleWorkerHandlesInAcceptanceOrder(t *testing.T) {
 // Intent: handlers for one event run in subscription order, which makes
 // in-process reactions deterministic.
 func TestDispatcherHandlersRunInSubscriptionOrder(t *testing.T) {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	seen := make(chan string, 2)
@@ -295,7 +391,6 @@ func TestDispatcherHandlersRunInSubscriptionOrder(t *testing.T) {
 func TestDispatcherUnhandledEventHook(t *testing.T) {
 	unhandled := make(chan event.UnhandledContext, 1)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithUnhandledEventHandler(func(ctx event.UnhandledContext) {
 			unhandled <- ctx
 		}),
@@ -312,7 +407,6 @@ func TestDispatcherUnhandledEventHook(t *testing.T) {
 func TestDispatcherLogsUnhandledEventWithoutHook(t *testing.T) {
 	records := make(chan logRecord, 4)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithLogger(slog.New(recordingHandler{records: records})),
 	)
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
@@ -333,7 +427,6 @@ func TestDispatcherLogsUnhandledEventWithoutHook(t *testing.T) {
 func TestDispatcherLogsPanicWithoutHook(t *testing.T) {
 	records := make(chan logRecord, 4)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithLogger(slog.New(recordingHandler{records: records})),
 	)
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
@@ -362,7 +455,6 @@ func TestDispatcherRecoversPanicAndContinues(t *testing.T) {
 	panicked := make(chan event.PanicContext, 2)
 	seen := make(chan string, 2)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithWorkers(1),
 		event.WithPanicHandler(func(ctx event.PanicContext) {
 			panicked <- ctx
@@ -405,7 +497,6 @@ type contextKey string
 func TestDispatcherContextFactory(t *testing.T) {
 	valueCh := make(chan string, 1)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithContextFactory(func(ctx context.Context, _ event.Event) context.Context {
 			return context.WithValue(ctx, contextKey("trace"), "dispatcher-context")
 		}),
@@ -429,7 +520,6 @@ func TestDispatcherLogsNilContextFactory(t *testing.T) {
 	records := make(chan logRecord, 4)
 	handled := make(chan struct{}, 1)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithLogger(slog.New(recordingHandler{records: records})),
 		event.WithContextFactory(func(context.Context, event.Event) context.Context {
 			return nil
@@ -458,8 +548,7 @@ func TestDispatcherLogsNilContextFactory(t *testing.T) {
 func TestDispatcherHandlerTimeout(t *testing.T) {
 	done := make(chan error, 1)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
-		event.WithHandlerTimeout(10*time.Millisecond),
+		event.WithHandlerTimeout(10 * time.Millisecond),
 	)
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
@@ -478,7 +567,7 @@ func TestDispatcherHandlerTimeout(t *testing.T) {
 // Intent: Close should return the caller's timeout when accepted work does not
 // finish within the close deadline.
 func TestDispatcherCloseReturnsContextErrorOnTimeout(t *testing.T) {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1))
+	dispatcher := event.NewDispatcher(event.WithWorkers(1))
 	block := make(chan struct{})
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.paid"},
@@ -495,28 +584,31 @@ func TestDispatcherCloseReturnsContextErrorOnTimeout(t *testing.T) {
 	close(block)
 }
 
-// Intent: when Close cannot wait for accepted work to drain, the background
-// dispatcher should emit a warning diagnostic for operators.
+// Intent: without WithCloseInterruptedHandler nothing recovers the events an
+// interrupted Close drops, so it logs a summary on the Close ctx and each
+// dropped event at Error with its kind, key, and state, on the ctx of the
+// Dispatch call that queued it.
 func TestDispatcherLogsCloseContextError(t *testing.T) {
-	records := make(chan logRecord, 4)
+	records := make(chan logRecord, 16)
 	started := make(chan struct{})
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithWorkers(1),
 		event.WithLogger(slog.New(recordingHandler{records: records})),
 	)
 	block := make(chan struct{})
 	dispatcher.Subscribe(handlerFunc{
-		kinds: []event.Kind{"order.paid"},
+		kinds: []event.Kind{"order.event"},
 		handle: func(context.Context, event.Event) {
 			close(started)
 			<-block
 		},
 	})
 
-	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
+	first := context.WithValue(context.Background(), logTraceKey{}, "first-trace")
+	require.NoError(t, dispatcher.Dispatch(first, keyed("order-1", "placed")))
 	<-started
-	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.paid"}))
+	second := context.WithValue(context.Background(), logTraceKey{}, "second-trace")
+	require.NoError(t, dispatcher.Dispatch(second, testEvent{kind: "order.event"}))
 
 	traced := context.WithValue(context.Background(), logTraceKey{}, "close-trace")
 	ctx, cancel := context.WithTimeout(traced, 10*time.Millisecond)
@@ -524,18 +616,70 @@ func TestDispatcherLogsCloseContextError(t *testing.T) {
 	require.ErrorIs(t, dispatcher.Close(ctx), context.DeadlineExceeded)
 	close(block)
 
-	record := receiveLogWithin(t, "close context error log", records)
+	record := receiveLogWithin(t, "close interrupted log", records)
 	for record.message != "domain event dispatcher close interrupted" {
-		record = receiveLogWithin(t, "close context error log", records)
+		record = receiveLogWithin(t, "close interrupted log", records)
 	}
-	require.Equal(t, slog.LevelWarn, record.level)
+	require.Equal(t, slog.LevelError, record.level)
 	require.Equal(t, "close-trace", record.trace, "log ctx is the Close ctx")
 	errAttr, ok := record.attrs["error"].([]slog.Attr)
 	require.True(t, ok, "error is logged with sloghelper.Error, got %T", record.attrs["error"])
 	require.Equal(t, context.DeadlineExceeded.Error(), errAttr[0].Value.String())
 	require.Equal(t, int64(1), record.attrs["in_flight_event_count"])
 	require.Equal(t, int64(1), record.attrs["pending_event_count"])
-	require.Equal(t, []event.Kind{event.Kind("order.paid")}, record.attrs["pending_event_kinds"])
+
+	inFlight := receiveLogWithin(t, "in-flight dropped log", records)
+	require.Equal(t, "domain event dropped", inFlight.message)
+	require.Equal(t, slog.LevelError, inFlight.level)
+	require.Equal(t, "first-trace", inFlight.trace, "log ctx is the Dispatch ctx")
+	require.Equal(t, "order.event", inFlight.attrs["event_kind"])
+	require.Equal(t, "order-1", inFlight.attrs["event_key"])
+	require.Equal(t, "in_flight", inFlight.attrs["event_state"])
+
+	pending := receiveLogWithin(t, "pending dropped log", records)
+	require.Equal(t, "domain event dropped", pending.message)
+	require.Equal(t, slog.LevelError, pending.level)
+	require.Equal(t, "second-trace", pending.trace)
+	require.NotContains(t, pending.attrs, "event_key")
+	require.Equal(t, "pending", pending.attrs["event_state"])
+}
+
+// Intent: with WithCloseInterruptedHandler the hook owns the dropped events,
+// so the dispatcher logs only a Warn summary, not each event at Error.
+func TestDispatcherCloseInterruptedHookOwnsDroppedEvents(t *testing.T) {
+	records := make(chan logRecord, 16)
+	started := make(chan struct{})
+	dispatcher := event.NewDispatcher(
+		event.WithWorkers(1),
+		event.WithLogger(slog.New(recordingHandler{records: records})),
+		event.WithCloseInterruptedHandler(func(event.CloseInterruptedContext) {}),
+	)
+	block := make(chan struct{})
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(context.Context, event.Event) {
+			close(started)
+			<-block
+		},
+	})
+	require.NoError(t, dispatcher.Dispatch(context.Background(), keyed("order-1", "placed")))
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, dispatcher.Close(ctx), context.DeadlineExceeded)
+	close(block)
+
+	record := receiveLogWithin(t, "close interrupted log", records)
+	for record.message != "domain event dispatcher close interrupted" {
+		record = receiveLogWithin(t, "close interrupted log", records)
+	}
+	require.Equal(t, slog.LevelWarn, record.level)
+	select {
+	case extra := <-records:
+		t.Fatalf("unexpected log after the summary: %s", extra.message)
+	case <-time.After(20 * time.Millisecond):
+	}
 }
 
 // Intent: when shutdown runs out of time, callers should receive a diagnostic
@@ -545,7 +689,6 @@ func TestDispatcherCloseInterruptedHookReportsAbandonedWork(t *testing.T) {
 	firstStarted := make(chan struct{})
 	block := make(chan struct{})
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithWorkers(1),
 		event.WithCloseInterruptedHandler(func(ctx event.CloseInterruptedContext) {
 			interrupted <- ctx
@@ -592,7 +735,7 @@ func TestDispatcherCloseTimeoutStopsTakingQueuedEvents(t *testing.T) {
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	secondStarted := make(chan struct{}, 1)
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1))
+	dispatcher := event.NewDispatcher(event.WithWorkers(1))
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.event"},
 		handle: func(_ context.Context, ev event.Event) {
@@ -629,7 +772,7 @@ func TestDispatcherDispatchReturnsContextErrorWhenQueueFull(t *testing.T) {
 	release := make(chan struct{})
 	var mu sync.Mutex
 	var handled []string
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1), event.WithBufferSize(1))
+	dispatcher := event.NewDispatcher(event.WithWorkers(1), event.WithBufferSize(1))
 
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.event"},
@@ -666,7 +809,7 @@ func TestDispatcherDispatchReturnsContextErrorWhenQueueFull(t *testing.T) {
 func TestDispatcherBlockedDispatchAcceptedWhenSpaceFrees(t *testing.T) {
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1), event.WithBufferSize(1))
+	dispatcher := event.NewDispatcher(event.WithWorkers(1), event.WithBufferSize(1))
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	dispatcher.Subscribe(handlerFunc{
@@ -702,7 +845,7 @@ func TestDispatcherBlockedDispatchAcceptedWhenSpaceFrees(t *testing.T) {
 // is available, the batch is accepted even if the caller context is done.
 func TestDispatcherAcceptsWithDoneContextWhenQueueHasSpace(t *testing.T) {
 	handled := make(chan struct{}, 1)
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	dispatcher.Subscribe(handlerFunc{
@@ -731,7 +874,7 @@ func TestDispatcherHandlerContextIsDetachedFromDispatchContext(t *testing.T) {
 	}
 	result := make(chan observed, 1)
 	release := make(chan struct{})
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	dispatcher.Subscribe(handlerFunc{
@@ -765,7 +908,6 @@ func TestDispatcherHandlerContextIsDetachedFromDispatchContext(t *testing.T) {
 func TestDispatcherContextFactoryReadsSourceContext(t *testing.T) {
 	valueCh := make(chan any, 1)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithContextFactory(func(ctx context.Context, _ event.Event) context.Context {
 			source, _ := event.SourceContext(ctx)
 			return context.WithValue(ctx, contextKey("request_id"), source.Value(contextKey("request_id")))
@@ -803,6 +945,16 @@ func keyed(key, name string) keyedEvent {
 	return keyedEvent{testEvent: testEvent{kind: "order.event", name: name}, key: key}
 }
 
+func eventID(ev event.Event) int {
+	switch e := ev.(type) {
+	case keyedEvent:
+		return e.id
+	case testEvent:
+		return e.id
+	}
+	return -1
+}
+
 func eventName(ev event.Event) string {
 	switch e := ev.(type) {
 	case keyedEvent:
@@ -825,7 +977,7 @@ func TestDispatcherSameKeyEventsRunSeriallyInOrder(t *testing.T) {
 		overlap bool
 	)
 	done := make(chan struct{})
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(4))
+	dispatcher := event.NewDispatcher(event.WithWorkers(4))
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	dispatcher.Subscribe(handlerFunc{
@@ -873,7 +1025,7 @@ func TestDispatcherSlowKeyDoesNotBlockOtherKeys(t *testing.T) {
 	slowStarted := make(chan struct{})
 	releaseSlow := make(chan struct{})
 	handled := make(chan string, 4)
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(2))
+	dispatcher := event.NewDispatcher(event.WithWorkers(2))
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	dispatcher.Subscribe(handlerFunc{
@@ -911,7 +1063,7 @@ func TestDispatcherUnkeyedEventsRunConcurrentlyByDefault(t *testing.T) {
 	const events = 5
 	started := make(chan struct{}, events)
 	release := make(chan struct{})
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 	defer close(release)
 
@@ -940,7 +1092,6 @@ func TestDispatcherKeyFunc(t *testing.T) {
 	release := make(chan struct{})
 	handled := make(chan string, 3)
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithWorkers(2),
 		event.WithKeyFunc(func(ev event.Event) string {
 			keys <- eventName(ev)
@@ -985,7 +1136,7 @@ func TestDispatcherDispatchAllIsAllOrNothing(t *testing.T) {
 	release := make(chan struct{})
 	var mu sync.Mutex
 	var handled []string
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1), event.WithBufferSize(2))
+	dispatcher := event.NewDispatcher(event.WithWorkers(1), event.WithBufferSize(2))
 
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.event"},
@@ -1022,7 +1173,7 @@ func TestDispatcherDispatchAllIsAllOrNothing(t *testing.T) {
 // empty instead of waiting forever.
 func TestDispatcherDispatchAllLargerThanBuffer(t *testing.T) {
 	var count atomic.Int32
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithBufferSize(1))
+	dispatcher := event.NewDispatcher(event.WithBufferSize(1))
 
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.event"},
@@ -1049,7 +1200,6 @@ func TestDispatcherCloseInterruptedReportsAllWorkers(t *testing.T) {
 	started := make(chan struct{}, 2)
 	block := make(chan struct{})
 	dispatcher := event.NewDispatcher(
-		event.WithDelayClose(0),
 		event.WithWorkers(2),
 		event.WithCloseInterruptedHandler(func(ctx event.CloseInterruptedContext) {
 			interrupted <- ctx
@@ -1087,7 +1237,7 @@ func TestDispatcherWaitingCallsAdmittedInArrivalOrder(t *testing.T) {
 	release := make(chan struct{})
 	var mu sync.Mutex
 	var handled []string
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1), event.WithBufferSize(2))
+	dispatcher := event.NewDispatcher(event.WithWorkers(1), event.WithBufferSize(2))
 
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.event"},
@@ -1136,7 +1286,7 @@ func TestDispatcherWaitingCallsAdmittedInArrivalOrder(t *testing.T) {
 func TestDispatcherAbandonedWaitPassesTurnOn(t *testing.T) {
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0), event.WithWorkers(1), event.WithBufferSize(1))
+	dispatcher := event.NewDispatcher(event.WithWorkers(1), event.WithBufferSize(1))
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	dispatcher.Subscribe(handlerFunc{
@@ -1180,7 +1330,7 @@ func (panickingKey) Key() string { panic("key failed") }
 // batch.
 func TestDispatcherPanickingKeyQueuesNothing(t *testing.T) {
 	handled := make(chan string, 2)
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.event"},

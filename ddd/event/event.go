@@ -81,8 +81,8 @@ type Collection interface {
 //
 // Handle runs on a dispatcher worker with a context owned by the dispatcher,
 // possibly concurrently with itself for events of different keys, so it must
-// be safe for concurrent use. Keep it responsive to ctx: Close and
-// WithHandlerTimeout cancel it.
+// be safe for concurrent use. Keep it responsive to ctx: an interrupted Close
+// and WithHandlerTimeout cancel it.
 type Handler interface {
 	Listening() []Kind
 	Handle(context.Context, Event)
@@ -99,8 +99,9 @@ type Handler interface {
 // values of ctx. Use SourceContext to read caller values explicitly.
 //
 // Dispatch and DispatchAll return nil, ErrDispatcherClosed, or ctx.Err().
-// Close stops admission and waits for accepted events; see the package
-// documentation for its sequence.
+// Close drains accepted events, and the follow-ups their handlers dispatch,
+// until the dispatcher is idle, then stops admission; see the package
+// documentation, "Shutdown".
 type Dispatcher interface {
 	Dispatch(context.Context, Event) error
 	DispatchAll(context.Context, []Event) error
