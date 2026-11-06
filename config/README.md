@@ -72,9 +72,14 @@ String values may contain `${name}` or `${name:default}` placeholders. A
 placeholder is resolved from the `WithLookup` function first, then from a
 configuration path such as `${server.host}`, then from the default.
 
-Reference environment variables through placeholders. A placeholder names the
-exact path it fills, which a flat variable name such as `SERVER_PORT` cannot do
-when merged as a source.
+Environment variables reach the configuration in two ways:
+
+- Placeholders: a `${NAME}` written in a file fills exactly the spot it sits
+  in, as below.
+- Override source: `env.NewOverrideSource("APP")`, listed last in
+  `WithSource`, maps `APP_DATABASE__MAX_CONN` to `database.max_conn` and
+  overrides it without touching the files. See the `config/env` package
+  documentation.
 
 ```yaml
 server:
@@ -86,11 +91,15 @@ server:
 `config/loader` resolves `${PORT}` from the environment variable
 `<prefix>PORT`, where the prefix comes from `loader.WithEnvVarsPrefix`. With
 `WithEnvVarsPrefix("app")`, `APP_PORT=9090` sets both `server.port` and the
-port part of `server.addr`.
+port part of `server.addr`. Add `loader.WithEnvOverrides()` to also merge
+`APP_*` variables as the last layer, so `APP_DATABASE__MAX_CONN=20` overrides
+`database.max_conn` with no placeholder in the files.
 
 ## Sources
 
 - `config/file` loads files or directories; the file extension selects the
   codec, case-insensitively.
-- `config/env` reads environment variables by prefix as a source.
+- `config/env` reads environment variables by prefix, either as nested
+  overrides (`NewOverrideSource`, `__` separates levels) or as flat keys for
+  placeholders (`NewSource`).
 - `config/inmem` supplies an in-memory source for tests or embedded defaults.

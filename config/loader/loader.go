@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-jimu/components/config"
+	"github.com/go-jimu/components/config/env"
 	"github.com/go-jimu/components/config/file"
 )
 
@@ -18,6 +19,7 @@ type (
 		ConfigFilePrefix                  string // eg. foobar
 		EnvVarsPrefix                     string // eg. APP_
 		ProfilesAlias                     string // eg. test
+		EnvOverrides                      bool
 	}
 
 	// Option configures Load.
@@ -41,8 +43,9 @@ const (
 // scans the result into v, a pointer to a struct with json tags.
 //
 // It returns an error when the configuration directory cannot be read, when
-// a profile alias is active without WithConfigFilePrefix, or when a file
-// cannot be parsed or scanned into v. When no file matches, it returns nil and
+// a profile alias is active without WithConfigFilePrefix, when WithEnvOverrides
+// is set without WithEnvVarsPrefix, or when a file cannot be parsed or scanned
+// into v. When no file matches, it returns nil and
 // leaves v unchanged, so set defaults in v before calling Load.
 func Load(v any, opts ...Option) error {
 	o := new(loadOptions)
@@ -52,14 +55,20 @@ func Load(v any, opts ...Option) error {
 		opt(o)
 	}
 
+	if o.EnvOverrides && o.EnvVarsPrefix == "" {
+		return fmt.Errorf("env vars prefix is required when env overrides are enabled")
+	}
+
 	sources, err := searchConfigInDir(o)
 	if err != nil {
 		return err
 	}
+	// The override source goes last so it wins over every file. Placeholders
+	// resolve after the merge, so an override replaces a ${NAME} value whole.
+	if o.EnvOverrides {
+		sources = append(sources, env.NewOverrideSource(o.EnvVarsPrefix))
+	}
 
-	// Environment variables only feed ${NAME:default} placeholders. They are
-	// not merged as an override layer, because their flat keys cannot address
-	// nested configuration paths.
 	conf := config.New(
 		config.WithSource(sources...),
 		config.WithLookup(envLookup(o.EnvVarsPrefix)),
@@ -139,9 +148,11 @@ func WithConfigFilePrefix(prefix string) Option {
 	}
 }
 
-// WithEnvVarsPrefix sets the prefix used to resolve ${NAME} placeholders:
-// with prefix "app", ${NAME} reads APP_NAME. The prefix is upper-cased and
-// gets a trailing "_". An empty prefix reads NAME itself, the default.
+// WithEnvVarsPrefix sets the environment variable prefix. With prefix "app",
+// ${NAME} placeholders read APP_NAME, and WithEnvOverrides reads APP_*
+// variables. The prefix is upper-cased and gets a trailing "_". An empty
+// prefix reads NAME itself for placeholders, the default; WithEnvOverrides
+// requires a non-empty prefix.
 func WithEnvVarsPrefix(prefix string) Option {
 	return func(opt *loadOptions) {
 		if prefix != "" {
@@ -152,6 +163,16 @@ func WithEnvVarsPrefix(prefix string) Option {
 			return
 		}
 		opt.EnvVarsPrefix = ""
+	}
+}
+
+// WithEnvOverrides merges prefixed environment variables as the last layer,
+// over the defaults and profile files: with WithEnvVarsPrefix("app"),
+// APP_DATABASE__MAX_CONN overrides database.max_conn. See "Environment
+// variables" in the package documentation. It is off by default.
+func WithEnvOverrides() Option {
+	return func(opt *loadOptions) {
+		opt.EnvOverrides = true
 	}
 }
 

@@ -185,3 +185,78 @@ func writeConfig(t *testing.T, dir, name, content string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
 }
+
+type overrideOption struct {
+	Name     string `json:"name"`
+	Database struct {
+		DSN     string `json:"dsn"`
+		MaxConn int    `json:"max_conn"`
+	} `json:"database"`
+	Server struct {
+		Port int `json:"port"`
+	} `json:"server"`
+}
+
+// WithEnvOverrides layers prefixed variables over defaults and profile files.
+func TestLoad_EnvOverridesWinOverProfileAndDefaults(t *testing.T) {
+	t.Setenv(loader.ProfilesActiveFromEnvVar, "")
+	t.Setenv("APP_DATABASE__MAX_CONN", "20")
+	t.Setenv("APP_SERVER__PORT", "9090")
+	t.Setenv("APP_NAME", "from-env")
+
+	dir := t.TempDir()
+	writeConfig(t, dir, "defaults.yml", `name: defaults
+database:
+  dsn: postgres://localhost/app
+  max_conn: 5
+server:
+  port: ${PORT:80}
+`)
+	writeConfig(t, dir, "app_dev.yml", "database:\n  max_conn: 10\n")
+
+	var opt overrideOption
+	err := loader.Load(&opt,
+		loader.WithConfigurationDirectory(dir, "defaults"),
+		loader.WithConfigFilePrefix("app"),
+		loader.WithProfilesAlias("dev"),
+		loader.WithEnvVarsPrefix("app"),
+		loader.WithEnvOverrides(),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "from-env", opt.Name)
+	assert.Equal(t, "postgres://localhost/app", opt.Database.DSN)
+	assert.Equal(t, 20, opt.Database.MaxConn)
+	assert.Equal(t, 9090, opt.Server.Port, "override replaces the ${PORT} value")
+}
+
+// Without WithEnvOverrides, prefixed variables only feed placeholders.
+func TestLoad_EnvOverridesOffByDefault(t *testing.T) {
+	t.Setenv(loader.ProfilesActiveFromEnvVar, "")
+	t.Setenv("APP_DATABASE__MAX_CONN", "20")
+
+	dir := t.TempDir()
+	writeConfig(t, dir, "defaults.yml", "database:\n  max_conn: 5\n")
+
+	var opt overrideOption
+	require.NoError(t, loader.Load(&opt,
+		loader.WithConfigurationDirectory(dir, "defaults"),
+		loader.WithEnvVarsPrefix("app"),
+	))
+	assert.Equal(t, 5, opt.Database.MaxConn)
+}
+
+// An empty prefix would pull every variable, such as USER, into the tree.
+func TestLoad_EnvOverridesRequirePrefix(t *testing.T) {
+	t.Setenv(loader.ProfilesActiveFromEnvVar, "")
+
+	dir := t.TempDir()
+	writeConfig(t, dir, "defaults.yml", "name: defaults\n")
+
+	var opt overrideOption
+	err := loader.Load(&opt,
+		loader.WithConfigurationDirectory(dir, "defaults"),
+		loader.WithEnvOverrides(),
+	)
+	require.Error(t, err)
+}
