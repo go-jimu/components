@@ -102,11 +102,25 @@ func WithKeyFunc(fn func(Event) string) Option {
 // WithBufferSize sets how many events the queue holds before DispatchAll waits.
 // The default is 1024; a size below 1 keeps the default.
 // A single call with more events than size is accepted once the queue is empty,
-// so the queue can briefly hold more.
+// and follow-up events from handlers never wait, so the queue can briefly hold
+// more.
 func WithBufferSize(size int) Option {
 	return func(d *InMemoryDispatcher) {
 		if size > 0 {
 			d.bufferSize = size
+		}
+	}
+}
+
+// WithAdmissionTimeout sets how long DispatchAll waits for queue space before
+// it rejects the events with ErrAdmissionTimeout and logs each one. The
+// default is 5s: a queue that stays full that long means the handlers cannot
+// keep up, and waiting longer only holds the caller. A timeout below or equal
+// to 0 keeps the default.
+func WithAdmissionTimeout(timeout time.Duration) Option {
+	return func(d *InMemoryDispatcher) {
+		if timeout > 0 {
+			d.admissionTimeout = timeout
 		}
 	}
 }

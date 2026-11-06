@@ -1,5 +1,21 @@
 # Change log
 
+## Unreleased
+
+- Changed: the ctx of `ddd/event` `Dispatch` and `DispatchAll` carries values
+  only, such as the caller's trace. Its cancellation and deadline no longer
+  reject events: a committed transaction's events used to be dropped, with no
+  log, when the request ended while the queue was full (go-jimu/components#81,
+  #82). A full queue now holds the caller up to `WithAdmissionTimeout`, 5s by
+  default, then rejects the events with the new `ErrAdmissionTimeout`.
+- Changed: the dispatcher logs every rejected event at Error with its kind,
+  key, and error, on the caller's ctx. Use cases ignore the `DispatchAll`
+  error and return their saved state, as the package example now shows; drop
+  any log of your own for it.
+- Fixed: a handler that dispatches follow-up events with its ctx no longer
+  waits for queue space, which only the workers free, so workers can no
+  longer wait on each other on a full queue.
+
 ## v0.12.3
 
 - Fixed: `sloghelper.Error` keeps the context and stack of an oops error

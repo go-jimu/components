@@ -19,6 +19,10 @@ type Event interface {
 // because it is closing or closed.
 var ErrDispatcherClosed = errors.New("domain event dispatcher is closed")
 
+// ErrAdmissionTimeout reports that a dispatcher rejected events because its
+// queue stayed full for the whole admission timeout.
+var ErrAdmissionTimeout = errors.New("domain event dispatcher queue stayed full")
+
 // UnhandledContext describes an event that has no registered handler.
 type UnhandledContext struct {
 	Event Event
@@ -91,14 +95,17 @@ type Handler interface {
 // Dispatcher accepts domain events for asynchronous handling. Its methods are
 // safe for concurrent use.
 //
-// DispatchAll accepts all of its events or none of them. Dispatch and
-// DispatchAll only bound admission with ctx: when the dispatcher has to wait
-// for capacity, it stops waiting and returns ctx.Err() once ctx is done,
-// without accepting the events. Accepted events are handled after the
-// caller returns, so handlers never inherit the cancellation, deadline, or
-// values of ctx. Use SourceContext to read caller values explicitly.
+// DispatchAll accepts all of its events or none of them. The ctx of Dispatch
+// and DispatchAll carries values only, such as the caller's trace: its
+// cancellation and deadline neither reject events nor reach handlers.
+// Accepted events are handled after the caller returns, on a context owned by
+// the dispatcher; use SourceContext to read caller values explicitly.
 //
-// Dispatch and DispatchAll return nil, ErrDispatcherClosed, or ctx.Err().
+// Dispatch and DispatchAll return nil when the events are accepted, and
+// ErrDispatcherClosed or an implementation-specific error, such as
+// ErrAdmissionTimeout, when they are rejected. The dispatcher reports every
+// rejected event itself; a use case ignores the error and returns its saved
+// state.
 // Close drains accepted events, and the follow-ups their handlers dispatch,
 // until the dispatcher is idle, then stops admission; see the package
 // documentation, "Shutdown".
@@ -116,8 +123,9 @@ type sourceContextKey struct{}
 //
 // Handler contexts deliberately do not inherit caller values, because some of
 // them, such as an open transaction, are only valid during the caller's
-// request. Copy the values a handler needs, such as trace or request
-// identifiers, from SourceContext, typically inside WithContextFactory.
+// request. Copy only observability values, such as the trace, from
+// SourceContext, typically inside WithContextFactory; data a handler needs to
+// do its work belongs in the event.
 func SourceContext(ctx context.Context) (context.Context, bool) {
 	source, ok := ctx.Value(sourceContextKey{}).(context.Context)
 	return source, ok

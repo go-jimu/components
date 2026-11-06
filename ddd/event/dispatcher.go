@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	defaultBufferSize = 1024
-	defaultWorkers    = 5
+	defaultBufferSize       = 1024
+	defaultWorkers          = 5
+	defaultAdmissionTimeout = 5 * time.Second
 )
 
 // queued is one accepted event waiting for, or being handled by, a worker.
@@ -52,6 +53,7 @@ type InMemoryDispatcher struct {
 	panicHandler            func(PanicContext)
 	closeInterruptedHandler func(CloseInterruptedContext)
 	bufferSize              int
+	admissionTimeout        time.Duration
 	rootCtx                 context.Context
 	rootCancel              context.CancelFunc
 }
@@ -66,16 +68,17 @@ var (
 func NewDispatcher(opts ...Option) *InMemoryDispatcher {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	d := &InMemoryDispatcher{
-		spaceFreed: make(chan struct{}),
-		inFlight:   make(map[uint64]queued),
-		busyKeys:   make(map[string]struct{}),
-		done:       make(chan struct{}),
-		handlers:   make(map[Kind][]Handler),
-		logger:     slog.Default(),
-		workers:    defaultWorkers,
-		bufferSize: defaultBufferSize,
-		rootCtx:    rootCtx,
-		rootCancel: rootCancel,
+		spaceFreed:       make(chan struct{}),
+		inFlight:         make(map[uint64]queued),
+		busyKeys:         make(map[string]struct{}),
+		done:             make(chan struct{}),
+		handlers:         make(map[Kind][]Handler),
+		logger:           slog.Default(),
+		workers:          defaultWorkers,
+		bufferSize:       defaultBufferSize,
+		admissionTimeout: defaultAdmissionTimeout,
+		rootCtx:          rootCtx,
+		rootCancel:       rootCancel,
 	}
 	d.ready = sync.NewCond(&d.mu)
 
@@ -123,15 +126,21 @@ func (d *InMemoryDispatcher) Dispatch(ctx context.Context, event Event) error {
 	return d.DispatchAll(ctx, []Event{event})
 }
 
-// DispatchAll accepts all events or none of them. When the queue cannot hold
-// them, it waits until it can or until ctx is done; ctx does not reject events
-// that can be queued immediately. Waiting calls are admitted first come, first
-// served, so a later call never overtakes an earlier one. More events than the
-// buffer size are accepted once the queue is empty. Nil events are skipped.
+// DispatchAll accepts all events or none of them. ctx carries values only,
+// such as the caller's trace: its cancellation and deadline never reject
+// events. When the queue cannot hold the events, DispatchAll waits for space
+// up to the admission timeout (WithAdmissionTimeout). Waiting calls are
+// admitted first come, first served, so a later call never overtakes an
+// earlier one. More events than the buffer size are accepted once the queue
+// is empty. Nil events are skipped.
 //
-// It returns nil when the events are accepted, ErrDispatcherClosed once the
-// dispatcher rejects events (see Close), and ctx.Err() when ctx ends while
-// waiting.
+// A handler that dispatches follow-up events with the ctx Handle received
+// never waits: the events are accepted at once, beyond the buffer size if
+// needed, because only the workers free queue space.
+//
+// It returns nil when the events are accepted, and ErrDispatcherClosed or
+// ErrAdmissionTimeout when they are rejected. A rejected event is logged at
+// Error with its kind and key, on ctx, so the caller does not report it again.
 func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) error {
 	accepted := make([]queued, 0, len(events))
 	for _, event := range events {
@@ -147,19 +156,26 @@ func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) er
 		ctx = context.Background()
 	}
 	source := context.WithoutCancel(ctx)
+	followUp := ctx.Value(followUpKey{}) == d
 
-	var turn uint64 // 0 until this call joins the line for queue space
+	var (
+		turn  uint64      // 0 until this call joins the line for queue space
+		timer *time.Timer // bounds the wait from the moment the call joins
+	)
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	for {
 		d.mu.Lock()
 		if d.closed {
 			d.removeWaiterLocked(turn)
 			d.mu.Unlock()
-			for _, item := range accepted {
-				d.logger.LogAttrs(ctx, slog.LevelError, "domain event dispatch rejected", eventAttrs(item)...)
-			}
+			d.reject(ctx, ErrDispatcherClosed, accepted)
 			return ErrDispatcherClosed
 		}
-		if d.isFirstWaiterLocked(turn) && d.fitsLocked(len(accepted)) {
+		if followUp || d.isFirstWaiterLocked(turn) && d.fitsLocked(len(accepted)) {
 			d.removeWaiterLocked(turn)
 			for _, item := range accepted {
 				d.nextSeq++
@@ -179,20 +195,31 @@ func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) er
 			d.nextTicket++
 			turn = d.nextTicket
 			d.waiters = append(d.waiters, turn)
+			timer = time.NewTimer(d.admissionTimeout)
 		}
 		spaceFreed := d.spaceFreed
 		d.mu.Unlock()
 
 		select {
 		case <-spaceFreed:
-		case <-ctx.Done():
+		case <-timer.C:
 			d.mu.Lock()
 			d.removeWaiterLocked(turn)
 			// The waiter behind this one may now be first.
 			d.signalSpaceFreedLocked()
 			d.mu.Unlock()
-			return ctx.Err()
+			d.reject(ctx, ErrAdmissionTimeout, accepted)
+			return ErrAdmissionTimeout
 		}
+	}
+}
+
+// reject logs each event of a rejected DispatchAll at Error: nothing will
+// handle it, and the caller relies on the dispatcher to report it.
+func (d *InMemoryDispatcher) reject(ctx context.Context, err error, items []queued) {
+	for _, item := range items {
+		d.logger.LogAttrs(ctx, slog.LevelError, "domain event dispatch rejected",
+			append(eventAttrs(item), sloghelper.Error(err))...)
 	}
 }
 
@@ -496,6 +523,7 @@ func (d *InMemoryDispatcher) handlerContext(item queued) (context.Context, conte
 		ctx, cancel = context.WithCancel(d.rootCtx)
 	}
 	ctx = context.WithValue(ctx, sourceContextKey{}, item.source)
+	ctx = context.WithValue(ctx, followUpKey{}, d)
 
 	if d.contextFactory != nil {
 		if derived := d.contextFactory(ctx, item.event); derived != nil {
@@ -507,6 +535,11 @@ func (d *InMemoryDispatcher) handlerContext(item queued) (context.Context, conte
 	}
 	return ctx, cancel
 }
+
+// followUpKey marks a handler context with the dispatcher running the
+// handler, so DispatchAll can accept that handler's follow-up events without
+// waiting for the space only workers free.
+type followUpKey struct{}
 
 // logContext is the ctx of the Dispatch call that queued item, without its
 // cancellation, so logs about item carry its trace attributes.

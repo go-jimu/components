@@ -765,22 +765,27 @@ func TestDispatcherCloseTimeoutStopsTakingQueuedEvents(t *testing.T) {
 	}
 }
 
-// Intent: a full queue must not block the caller beyond its own context, and
-// rejected events must not be queued.
-func TestDispatcherDispatchReturnsContextErrorWhenQueueFull(t *testing.T) {
+// Intent: a queue that stays full rejects the events after the admission
+// timeout, queues none of them, and logs each one at Error on the caller's
+// ctx, so the caller has nothing left to report.
+func TestDispatcherRejectsWhenQueueStaysFull(t *testing.T) {
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
+	records := make(chan logRecord, 16)
 	var mu sync.Mutex
 	var handled []string
-	dispatcher := event.NewDispatcher(event.WithWorkers(1), event.WithBufferSize(1))
+	dispatcher := event.NewDispatcher(
+		event.WithWorkers(1),
+		event.WithBufferSize(1),
+		event.WithAdmissionTimeout(20*time.Millisecond),
+		event.WithLogger(slog.New(recordingHandler{records: records})),
+	)
 
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.event"},
 		handle: func(_ context.Context, ev event.Event) {
 			mu.Lock()
-			if te, ok := ev.(testEvent); ok {
-				handled = append(handled, te.name)
-			}
+			handled = append(handled, eventName(ev))
 			mu.Unlock()
 			select {
 			case started <- struct{}{}:
@@ -794,14 +799,125 @@ func TestDispatcherDispatchReturnsContextErrorWhenQueueFull(t *testing.T) {
 	receiveWithin(t, "first handler start", started)
 	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "queued"}))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	err := dispatcher.Dispatch(ctx, testEvent{kind: "order.event", name: "rejected"})
-	require.ErrorIs(t, err, context.DeadlineExceeded)
+	traced := context.WithValue(context.Background(), logTraceKey{}, "dispatch-trace")
+	err := dispatcher.Dispatch(traced, keyed("order-1", "rejected"))
+	require.ErrorIs(t, err, event.ErrAdmissionTimeout)
+
+	record := receiveLogWithin(t, "rejected dispatch log", records)
+	for record.message != "domain event dispatch rejected" {
+		record = receiveLogWithin(t, "rejected dispatch log", records)
+	}
+	require.Equal(t, slog.LevelError, record.level)
+	require.Equal(t, "dispatch-trace", record.trace)
+	require.Equal(t, "order.event", record.attrs["event_kind"])
+	require.Equal(t, "order-1", record.attrs["event_key"])
+	errAttr, ok := record.attrs["error"].([]slog.Attr)
+	require.True(t, ok, "error is logged with sloghelper.Error, got %T", record.attrs["error"])
+	require.Equal(t, event.ErrAdmissionTimeout.Error(), errAttr[0].Value.String())
 
 	close(release)
 	require.NoError(t, dispatcher.Close(context.Background()))
 	require.Equal(t, []string{"in-flight", "queued"}, handled)
+}
+
+// Intent: the caller's ctx carries values only. A committed transaction's
+// events must not be dropped because the request ended, so a canceled ctx
+// still waits for queue space and is accepted when it frees.
+func TestDispatcherWaitIgnoresCallerCancellation(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	handled := make(chan string, 4)
+	dispatcher := event.NewDispatcher(event.WithWorkers(1), event.WithBufferSize(1))
+	var releaseOnce sync.Once
+	releaseAll := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(func() {
+		releaseAll()
+		require.NoError(t, dispatcher.Close(context.Background()))
+	})
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(_ context.Context, ev event.Event) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			handled <- eventName(ev)
+		},
+	})
+
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "in-flight"}))
+	receiveWithin(t, "first handler start", started)
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "queued"}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- dispatcher.Dispatch(ctx, testEvent{kind: "order.event", name: "canceled-caller"})
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-result:
+		t.Fatalf("dispatch returned %v when its ctx was canceled", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	releaseAll()
+	require.NoError(t, receiveWithin(t, "canceled caller dispatch", result))
+	require.Equal(t, "in-flight", receiveWithin(t, "first event", handled))
+	require.Equal(t, "queued", receiveWithin(t, "second event", handled))
+	require.Equal(t, "canceled-caller", receiveWithin(t, "third event", handled))
+}
+
+// Intent: only the workers free queue space, so a handler that waited for it
+// could wait on itself. Follow-ups dispatched with the handler's ctx, or one
+// derived from it, are accepted at once, beyond the buffer size.
+func TestDispatcherFollowUpsFromHandlersNeverWait(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	followUp := make(chan error, 1)
+	handled := make(chan string, 8)
+	dispatcher := event.NewDispatcher(
+		event.WithWorkers(1),
+		event.WithBufferSize(1),
+		event.WithAdmissionTimeout(time.Minute),
+	)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, dispatcher.Close(ctx))
+	})
+
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.placed"},
+		handle: func(ctx context.Context, _ event.Event) {
+			close(started)
+			<-release
+			type derivedKey struct{}
+			followUp <- dispatcher.DispatchAll(context.WithValue(ctx, derivedKey{}, "derived"), []event.Event{
+				testEvent{kind: "order.event", name: "follow-up-1"},
+				testEvent{kind: "order.event", name: "follow-up-2"},
+			})
+		},
+	})
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(_ context.Context, ev event.Event) {
+			handled <- eventName(ev)
+		},
+	})
+
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.placed"}))
+	<-started
+	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "queued"}))
+	close(release)
+
+	require.NoError(t, receiveWithin(t, "follow-up dispatch", followUp))
+	require.Equal(t, "queued", receiveWithin(t, "queued event", handled))
+	require.Equal(t, "follow-up-1", receiveWithin(t, "first follow-up", handled))
+	require.Equal(t, "follow-up-2", receiveWithin(t, "second follow-up", handled))
 }
 
 // Intent: a waiting dispatch should be accepted as soon as the worker frees
@@ -841,8 +957,8 @@ func TestDispatcherBlockedDispatchAcceptedWhenSpaceFrees(t *testing.T) {
 	require.NoError(t, receiveWithin(t, "blocked dispatch result", result))
 }
 
-// Intent: the caller context only bounds waiting for queue space. When space
-// is available, the batch is accepted even if the caller context is done.
+// Intent: the caller's ctx carries values only, so a done ctx does not reject
+// events the queue can hold.
 func TestDispatcherAcceptsWithDoneContextWhenQueueHasSpace(t *testing.T) {
 	handled := make(chan struct{}, 1)
 	dispatcher := event.NewDispatcher()
@@ -1136,7 +1252,11 @@ func TestDispatcherDispatchAllIsAllOrNothing(t *testing.T) {
 	release := make(chan struct{})
 	var mu sync.Mutex
 	var handled []string
-	dispatcher := event.NewDispatcher(event.WithWorkers(1), event.WithBufferSize(2))
+	dispatcher := event.NewDispatcher(
+		event.WithWorkers(1),
+		event.WithBufferSize(2),
+		event.WithAdmissionTimeout(20*time.Millisecond),
+	)
 
 	dispatcher.Subscribe(handlerFunc{
 		kinds: []event.Kind{"order.event"},
@@ -1156,13 +1276,11 @@ func TestDispatcherDispatchAllIsAllOrNothing(t *testing.T) {
 	receiveWithin(t, "first handler start", started)
 	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "queued"}))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	err := dispatcher.DispatchAll(ctx, []event.Event{
+	err := dispatcher.DispatchAll(context.Background(), []event.Event{
 		testEvent{kind: "order.event", name: "fits"},
 		testEvent{kind: "order.event", name: "does-not-fit"},
 	})
-	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, event.ErrAdmissionTimeout)
 
 	close(release)
 	require.NoError(t, dispatcher.Close(context.Background()))
@@ -1281,12 +1399,16 @@ func TestDispatcherWaitingCallsAdmittedInArrivalOrder(t *testing.T) {
 	require.Equal(t, []string{"in-flight", "queued-1", "queued-2", "batch-1", "batch-2", "single"}, handled)
 }
 
-// Intent: a waiting call that gives up passes its place on, so the call behind
-// it is admitted when space frees.
-func TestDispatcherAbandonedWaitPassesTurnOn(t *testing.T) {
+// Intent: a waiting call that times out passes its place on, so the call
+// behind it is admitted when space frees.
+func TestDispatcherTimedOutWaitPassesTurnOn(t *testing.T) {
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	dispatcher := event.NewDispatcher(event.WithWorkers(1), event.WithBufferSize(1))
+	dispatcher := event.NewDispatcher(
+		event.WithWorkers(1),
+		event.WithBufferSize(1),
+		event.WithAdmissionTimeout(200*time.Millisecond),
+	)
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
 
 	dispatcher.Subscribe(handlerFunc{
@@ -1304,20 +1426,22 @@ func TestDispatcherAbandonedWaitPassesTurnOn(t *testing.T) {
 	receiveWithin(t, "first handler start", started)
 	require.NoError(t, dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "queued"}))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	abandoned := make(chan error, 1)
+	timedOut := make(chan error, 1)
 	go func() {
-		abandoned <- dispatcher.Dispatch(ctx, testEvent{kind: "order.event", name: "abandoned"})
+		timedOut <- dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "timed-out"})
 	}()
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	next := make(chan error, 1)
 	go func() {
 		next <- dispatcher.Dispatch(context.Background(), testEvent{kind: "order.event", name: "next"})
 	}()
-	time.Sleep(20 * time.Millisecond)
 
-	cancel()
-	require.ErrorIs(t, receiveWithin(t, "abandoned dispatch", abandoned), context.Canceled)
+	select {
+	case err := <-timedOut:
+		require.ErrorIs(t, err, event.ErrAdmissionTimeout)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the first waiter to time out")
+	}
 	close(release)
 	require.NoError(t, receiveWithin(t, "next dispatch", next))
 }
