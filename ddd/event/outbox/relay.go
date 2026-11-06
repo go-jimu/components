@@ -50,7 +50,7 @@ func (o *Outbox) Run(ctx context.Context) error {
 	}
 	defer func() {
 		o.running.Store(false)
-		r.releaseHints()
+		r.releaseHints() // hints sent while running records finished
 		cancel()
 		close(done)
 	}()
@@ -71,7 +71,15 @@ type relay struct {
 
 func (r *relay) run() {
 	o := r.outbox
-	defer r.running.Wait()
+	o.taking.Store(true)
+	defer func() {
+		// Stop leasing at insert and release the handed-over records before
+		// waiting for running ones, which may take until their handlers
+		// return.
+		o.taking.Store(false)
+		r.releaseHints()
+		r.running.Wait()
+	}()
 	r.startup()
 	poll := time.NewTicker(o.cfg.pollInterval)
 	defer poll.Stop()
@@ -150,6 +158,12 @@ func (r *relay) claim() {
 // them without waiting for their lease to expire.
 func (r *relay) startAll(records []Record) {
 	for i, rec := range records {
+		// select picks at random among ready cases, so check for a stop first:
+		// a free worker must not win over Close.
+		if r.loopCtx.Err() != nil || r.outbox.closed() {
+			r.release(records[i:])
+			return
+		}
 		select {
 		case r.slots <- struct{}{}:
 		case <-r.loopCtx.Done():

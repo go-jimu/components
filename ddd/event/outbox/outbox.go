@@ -32,8 +32,11 @@ type Outbox struct {
 	runDone  chan struct{}
 	cancel   context.CancelFunc
 
-	hints     chan []Record
-	running   atomic.Bool
+	hints   chan []Record
+	running atomic.Bool
+	// taking is true while the Relay's loop takes records; it clears when
+	// the loop exits, before running records finish.
+	taking    atomic.Bool
 	closing   chan struct{}
 	closeOnce sync.Once
 }
@@ -164,10 +167,9 @@ func (o *Outbox) closed() bool {
 	}
 }
 
-// relaying reports whether this Outbox's Relay takes new records: it runs and
-// is not shutting down.
+// relaying reports whether this Outbox's Relay takes new records.
 func (o *Outbox) relaying() bool {
-	return o.running.Load() && !o.closed()
+	return o.taking.Load() && !o.closed()
 }
 
 type batchKey struct{ outbox *Outbox }

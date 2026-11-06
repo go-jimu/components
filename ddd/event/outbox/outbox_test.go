@@ -615,6 +615,75 @@ func TestCloseReturnsAtDeadline(t *testing.T) {
 	})
 }
 
+// TestCloseStartsNothingQueued repeats its scenario because select picks
+// among ready cases at random: a regression shows in some runs only.
+func TestCloseStartsNothingQueued(t *testing.T) {
+	for i := range 10 {
+		t.Run(fmt.Sprint(i), closeStartsNothingQueued)
+	}
+}
+
+func closeStartsNothingQueued(t *testing.T) {
+	f := newFixture(t, outbox.WithWorkers(8))
+	h := newHandler("projector", OrderPaid{}.Kind())
+	f.subscribe(h)
+	gate := &gatedStore{Store: f.store, entered: make(chan struct{}), open: make(chan struct{})}
+	registry := outbox.NewRegistry()
+	_ = outbox.Register[OrderPaid](registry)
+	o, err := outbox.New(gate, registry, outbox.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Subscribe(h); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- o.Run(context.Background()) }()
+	<-gate.entered // the Relay takes records but its loop has not started
+	for i := range 20 {
+		err := f.manager.Within(context.Background(), func(ctx context.Context) error {
+			return o.Dispatch(ctx, OrderPaid{OrderID: fmt.Sprintf("o-%d", i)})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- o.Close(context.Background()) }()
+	f.waitFor("Close to start", func() bool {
+		return errors.Is(f.manager.Within(context.Background(), func(ctx context.Context) error {
+			return o.Dispatch(ctx, OrderPaid{OrderID: "probe"})
+		}), event.ErrDispatcherClosed)
+	})
+	close(gate.open)
+	if err := <-closed; err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+	if n := len(h.events()); n != 0 {
+		t.Fatalf("started %d records after Close", n)
+	}
+	for _, r := range f.store.Records() {
+		if r.LeaseOwner != "" {
+			t.Fatalf("record %s still leased after Close", r.ID)
+		}
+	}
+}
+
+// gatedStore blocks RetryFailed, the Relay's first call, until open closes.
+type gatedStore struct {
+	*outboxtest.Store
+	entered, open chan struct{}
+}
+
+func (s *gatedStore) RetryFailed(ctx context.Context, now time.Time) (int, error) {
+	close(s.entered)
+	<-s.open
+	return s.Store.RetryFailed(ctx, now)
+}
+
 // hangingStore blocks RetryFailed until ctx ends, as a database that stopped
 // answering.
 type hangingStore struct {
@@ -703,6 +772,53 @@ func TestCloseReleasesRecordsNotStarted(t *testing.T) {
 	}
 	if n := len(h.events()); n != 1 {
 		t.Fatalf("handler ran %d events, want only o-1", n)
+	}
+}
+
+// TestStoppingRelayLeasesNothing covers a Relay whose ctx has ended while a
+// handler that ignores ctx still runs: it takes no new records, and the ones
+// handed over to it are released without waiting for that handler.
+func TestStoppingRelayLeasesNothing(t *testing.T) {
+	f := newFixture(t, outbox.WithWorkers(1), outbox.WithPollInterval(time.Hour), outbox.WithLease(time.Hour))
+	h := newHandler("projector", OrderPaid{}.Kind())
+	started, release := make(chan struct{}), make(chan struct{})
+	h.fail = func(_ event.Event, call int) error {
+		if call == 0 {
+			close(started)
+			<-release // ignores its ctx
+		}
+		return nil
+	}
+	f.subscribe(h)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- f.outbox.Run(ctx) }()
+	f.waitFor("the Relay to start", func() bool { return outbox.Running(f.outbox) })
+	for _, id := range []string{"o-1", "o-2", "o-3"} { // o-2 waits for the worker, o-3 in the hand-over queue
+		if err := f.dispatch(OrderPaid{OrderID: id}); err != nil {
+			t.Fatal(err)
+		}
+		if id == "o-1" {
+			<-started
+		}
+	}
+	cancel()
+	f.waitFor("the loop to stop taking records", func() bool { return !outbox.Running(f.outbox) })
+	if err := f.dispatch(OrderPaid{OrderID: "o-4"}); err != nil {
+		t.Fatal(err)
+	}
+	f.waitFor("o-2 and o-3 to be released while o-1 runs", func() bool {
+		released := 0
+		for _, r := range f.store.Records() {
+			if r.LeaseOwner == "" {
+				released++
+			}
+		}
+		return released == 3 // o-2, o-3, and o-4 inserted unleased
+	})
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("Run = %v", err)
 	}
 }
 

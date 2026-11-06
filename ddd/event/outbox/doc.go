@@ -109,7 +109,8 @@
 // under the Relay's WithOwner. A record committed while its Outbox's Relay
 // runs is leased to that Relay at insert and handed to it after commit, so it
 // runs as soon as a worker is free; other records wait for a claim, and so
-// does a handed-over record whose lease expires before a worker takes it.
+// does a handed-over record whose lease expires before a worker takes it. A
+// record that commits as its Relay stops may wait for its lease to expire.
 //
 // Once a lease expires, another Relay may claim the record. The first
 // Relay's updates then return ErrLeaseLost, so one Relay stores the outcome,
@@ -157,8 +158,10 @@
 // Relay from taking records, releases the records it took but has not
 // started, and waits for running records until ctx ends. Then it cancels the
 // Relay's ctx and returns ctx.Err() at once; a handler that ignores its ctx
-// finishes in the background. An interrupted record is released and due at
-// once for another Relay. Close then closes the WithBestEffort dispatcher.
+// finishes in the background. An interrupted record is released, due at once
+// for another Relay, when its handler returns; if the process exits first,
+// the record waits for its lease to expire. Close then closes the
+// WithBestEffort dispatcher.
 //
 // # Writing a store
 //
