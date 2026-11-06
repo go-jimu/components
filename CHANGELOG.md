@@ -1,5 +1,19 @@
 # Change log
 
+## Unreleased
+
+- Added: package `transaction` runs a use case in one local transaction and
+  carries it in ctx (go-jimu/components#84). `Within` commits or rolls back
+  and rejects nesting with `ErrNested`. It reports a conflict, from a
+  statement or from Commit, as `ErrConflict` (rolled back, safe to rerun) and
+  any other Commit failure as `ErrOutcomeUnknown`. Repository adapters resolve
+  the transaction with `Manager.Current`, which reports `ErrTransactionDone`
+  for a ctx kept past its transaction and `ErrForeignTransaction` for another
+  resource's transaction; a repository write that must be atomic on its own
+  runs in `Manager.WithinOrJoin`. `BeforeCommit` and `AfterCommit` attach work
+  to the transaction. Technology adapters implement `Driver`;
+  `transaction/transactiontest` provides an in-memory one for unit tests.
+
 ## v0.12.5
 
 - Changed: the ctx of `ddd/event` `Dispatch` and `DispatchAll` carries values
