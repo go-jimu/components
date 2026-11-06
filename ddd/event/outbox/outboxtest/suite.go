@@ -282,6 +282,26 @@ var storeCases = []struct {
 			t.Fatalf("Advance in another database's transaction = %v, want ErrForeignTransaction", err)
 		}
 	}},
+	{"AdvanceHoldsRecord", func(t *testing.T, s *suite) {
+		s.insert(s.record("a"))
+		r := s.claim(10)[0]
+		expired := s.at(2 * time.Minute) // past the claim's lease
+		err := s.h.Transactor.Within(context.Background(), func(ctx context.Context) error {
+			if err := s.h.Store.Advance(ctx, outbox.LeaseOf(r), 1); err != nil {
+				return err
+			}
+			if got := s.claimAt("relay-2", []string{"a"}, expired, 10); len(got) != 0 {
+				t.Errorf("claimed %v while a transaction that advanced it is open", ids(got))
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Within = %v", err)
+		}
+		if got := s.claimAt("relay-2", []string{"a"}, expired, 10); len(got) != 1 || got[0].Progress != 1 {
+			t.Fatalf("claim after the transaction = %+v, want the record at progress 1", got)
+		}
+	}},
 	{"AdvanceNeverLowers", func(t *testing.T, s *suite) {
 		rec := s.record("a")
 		rec.Events = append(rec.Events, rec.Events[0], rec.Events[0])

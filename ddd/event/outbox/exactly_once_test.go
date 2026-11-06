@@ -302,3 +302,30 @@ func TestWithoutMarkDoneStaysAtLeastOnce(t *testing.T) {
 		t.Fatalf("committed writes %v, want the first rerun and the second once", got)
 	}
 }
+
+// TestNextEventChecksLeaseAfterMarkDone covers an operator who skips the
+// next event while the current one, done through MarkDone, finishes: the
+// Relay checks the lease before running it.
+func TestNextEventChecksLeaseAfterMarkDone(t *testing.T) {
+	f := newFixture(t)
+	h := newHandler("projector", OrderPaid{}.Kind())
+	l := &ledger{}
+	markDoneIn(h, f.manager, l, nil, func(_ context.Context, call int) error {
+		if call == 0 {
+			return f.store.Skip(context.Background(), f.store.Records()[0].ID, 1)
+		}
+		return nil
+	})
+	f.subscribe(h)
+	f.run()
+	if err := f.dispatch(OrderPaid{"o-1"}, OrderPaid{"o-2"}, OrderPaid{"o-3"}); err != nil {
+		t.Fatal(err)
+	}
+	f.waitFor("the record to complete", f.settled(outbox.StatusDone))
+	if got := h.events(); !slices.Equal(got, []event.Event{OrderPaid{"o-1"}, OrderPaid{"o-3"}}) {
+		t.Fatalf("handled %v, want o-1 and o-3: o-2 was skipped before it ran", got)
+	}
+	if got := l.all(); !slices.Equal(got, []string{"o-1", "o-3"}) {
+		t.Fatalf("committed writes %v, want o-1 and o-3", got)
+	}
+}

@@ -10,8 +10,9 @@
   Handlers that do not call it run at least once, as before.
 - Changed: `outbox.Store.Advance` writes in the transaction ctx is in,
   returns `transaction.ErrForeignTransaction` in another database's, and
-  never lowers Progress. Store adapters must follow; `outboxtest.TestStore`
-  checks all three and now requires `Harness.Foreign`.
+  never lowers Progress, and holds the record until that transaction ends.
+  Store adapters must follow; `outboxtest.TestStore` checks all four and now
+  requires `Harness.Foreign`.
   `outboxtest.Store.Manager` ties the in-memory Store to one database.
 
 ## v0.12.7

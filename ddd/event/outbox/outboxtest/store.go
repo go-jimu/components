@@ -19,16 +19,17 @@ import (
 // Store is an in-memory outbox.Store. Insert and Advance in a transaction
 // apply once that transaction commits. The zero value joins the transactions
 // of any Manager; set Manager to make the Store one database's, so that
-// another Manager's transaction is foreign to it. Unlike a database, it does
-// not lock a record for the transaction that advanced it: when the lease
-// changes before that transaction commits, the advance is dropped. Its
-// methods are safe for concurrent use.
+// another Manager's transaction is foreign to it. A record advanced in a
+// transaction is held, as by a row lock, until that transaction ends: Claim
+// skips it. Its methods are safe for concurrent use.
 type Store struct {
 	Manager *transaction.Manager
 
 	mu      sync.Mutex
 	seq     int
 	records map[string]*stored
+	// held maps a record ID to the ctx of the transaction that advanced it.
+	held map[string]context.Context
 }
 
 type stored struct {
@@ -68,7 +69,7 @@ func (s *Store) Claim(_ context.Context, req outbox.ClaimRequest) ([]outbox.Reco
 	var due []*stored
 	for _, st := range s.records {
 		r := st.record
-		if r.Status == outbox.StatusPending &&
+		if r.Status == outbox.StatusPending && !s.heldLocked(r.ID) &&
 			slices.Contains(req.Handlers, r.Handler) &&
 			!r.NextAttemptAt.After(req.Now) &&
 			!r.LeaseUntil.After(req.Now) {
@@ -101,10 +102,34 @@ func (s *Store) Advance(ctx context.Context, lease outbox.Lease, progress int) e
 		return err
 	}
 	err := transaction.AfterCommit(ctx, func(context.Context) { _ = s.update(lease, apply) })
-	if errors.Is(err, transaction.ErrNoTransaction) {
+	switch {
+	case errors.Is(err, transaction.ErrNoTransaction):
 		return s.update(lease, apply)
+	case err != nil:
+		return err
 	}
-	return err
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.held == nil {
+		s.held = make(map[string]context.Context)
+	}
+	s.held[lease.RecordID] = ctx
+	return nil
+}
+
+type liveKey struct{}
+
+// heldLocked reports whether a live transaction holds the record id.
+func (s *Store) heldLocked(id string) bool {
+	ctx, found := s.held[id]
+	if !found {
+		return false
+	}
+	if _, err := transaction.Value(ctx, liveKey{}, func() bool { return true }); err != nil {
+		delete(s.held, id) // the transaction has ended
+		return false
+	}
+	return true
 }
 
 // foreign returns transaction.ErrForeignTransaction for a ctx in a

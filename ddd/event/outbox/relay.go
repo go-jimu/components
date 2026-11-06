@@ -258,15 +258,13 @@ func (o *Outbox) execute(ctx context.Context, r Record) {
 		switch {
 		case run.stored.Load():
 			// A transaction that called MarkDone committed the progress with
-			// its writes: the event is done whatever Handle returned.
+			// its writes: the event is done whatever Handle returned. The
+			// fenced Advance below still checks the lease before the next
+			// event; with Progress already there it changes nothing.
 			if err != nil {
 				o.cfg.logger.LogAttrs(ctx, slog.LevelWarn, "outbox handler failed after its transaction stored the event as done",
 					append(eventAttrs, slog.String("error", err.Error()))...)
 			}
-			continue
-		case errors.Is(err, ErrLeaseLost):
-			o.cfg.logger.LogAttrs(ctx, slog.LevelWarn, "outbox lease lost; another relay runs the record", eventAttrs...)
-			return
 		case errors.Is(err, ErrPermanent):
 			o.fail(ctx, lease, err, eventAttrs)
 			return
