@@ -1,8 +1,7 @@
-// Package outboxtest provides an in-memory outbox.Store for unit tests of
-// code built on an outbox.Outbox, and TestStore, the conformance suite every
-// outbox.Store implementation runs. Pair the memory Store with a
-// transactiontest.Driver: it keeps what a transaction inserts once that
-// transaction commits.
+// Package outboxtest provides Store, an in-memory outbox.Store for unit tests
+// of use cases and handlers, and TestStore, the conformance suite a Store
+// adapter passes. Pair Store with a transactiontest.Driver: it keeps what a
+// transaction inserts once that transaction commits.
 package outboxtest
 
 import (

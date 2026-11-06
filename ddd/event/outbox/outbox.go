@@ -19,10 +19,9 @@ import (
 	"github.com/go-jimu/components/transaction"
 )
 
-// Outbox records the events of a transaction for the Handlers that must run
-// them, and runs them through its Relay after commit. It implements
-// event.Dispatcher, so use cases dispatch to it as to any dispatcher, inside
-// Within. See "Runtime composition". Its methods are safe for concurrent use.
+// Outbox records a transaction's events for its must-run handlers and runs
+// them through its Relay after commit. It is the use cases' event.Dispatcher;
+// see "Runtime composition". Its methods are safe for concurrent use.
 type Outbox struct {
 	store    Store
 	registry *Registry
@@ -69,8 +68,8 @@ func New(store Store, registry *Registry, opts ...Option) (*Outbox, error) {
 	}, nil
 }
 
-// Subscribe adds a Handler that must run. Subscribe every Handler before
-// traffic starts. It returns ErrInvalidHandler, ErrDuplicateHandler, or
+// Subscribe adds a must-run handler; subscribe every one before traffic
+// starts. It returns ErrInvalidHandler, ErrDuplicateHandler, or
 // ErrUnregisteredKind wrapped when the Registry lacks one of its kinds.
 func (o *Outbox) Subscribe(h Handler) error {
 	if h == nil || h.Name() == "" || len(h.Listening()) == 0 {

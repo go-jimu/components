@@ -22,10 +22,9 @@ type Harness struct {
 	Transactor transaction.Transactor
 }
 
-// TestStore checks that a Store implementation keeps the outbox.Store
-// contract. newHarness returns a Harness over an empty Store for each
-// subtest; subtests do not run in parallel. Times the suite stores are
-// truncated to milliseconds, so a Store needs at least millisecond precision.
+// TestStore checks a Store adapter against the outbox.Store contract; see
+// "Writing a store" in package outbox. newHarness returns a Harness over an
+// empty Store for each subtest; subtests run one at a time.
 func TestStore(t *testing.T, newHarness func(t *testing.T) Harness) {
 	t.Helper()
 	for _, c := range storeCases {

@@ -13,8 +13,8 @@ import (
 	"github.com/go-jimu/components/transaction/transactiontest"
 )
 
-// ProjectOrder keeps a read model of orders. It must see every payment, so it
-// runs through the Outbox.
+// ProjectOrder keeps a read model of orders: a must-run handler, written as a
+// reconciler.
 type ProjectOrder struct{ done chan string }
 
 func (ProjectOrder) Name() string            { return "order-projection" }
@@ -26,8 +26,8 @@ func (p ProjectOrder) Handle(ctx context.Context, e event.Event) error {
 		return nil
 	}
 	d, _ := outbox.DeliveryFrom(ctx)
-	// Upsert the projection keyed by d.Key(), or guarded by the order version,
-	// so a rerun changes nothing.
+	// Reconcile: upsert the projection guarded by the order version, so a
+	// rerun or a stale event changes nothing.
 	p.done <- fmt.Sprintf("projected %s (attempt %d)", paid.OrderID, d.Attempt)
 	return nil
 }

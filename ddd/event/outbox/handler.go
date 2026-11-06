@@ -7,22 +7,19 @@ import (
 	"github.com/go-jimu/components/ddd/event"
 )
 
-// Handler is a handler that must run: the Outbox records its events in the
-// business transaction and the Relay runs them until they succeed. See
-// "Handlers".
+// Handler is a must-run handler. See "Handlers".
 type Handler interface {
-	// Name identifies the handler in stored records. It stays the same
-	// across versions and refactorings.
+	// Name keys the handler's records; keep it stable, see "Handlers".
 	Name() string
 	// Listening returns the kinds the handler runs for.
 	Listening() []event.Kind
-	// Handle runs one event. It returns nil when done, an error to retry the
-	// event later, or an error wrapping ErrPermanent to stop retrying.
+	// Handle runs one event. Its error decides what follows: nil moves on,
+	// ErrPermanent fails the record, anything else retries; see "Failures".
 	Handle(ctx context.Context, e event.Event) error
 }
 
-// Delivery identifies one run of one event: Key is the same on every retry
-// of that event, so a Handler deduplicates its effects by it. See "Handlers".
+// Delivery identifies one run of one event. Key is the same on every retry
+// of that event; see "Handlers".
 type Delivery struct {
 	RecordID string
 	// Index is the event's position in the record.

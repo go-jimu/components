@@ -49,9 +49,9 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithOwner sets the name this Outbox takes leases under. It defaults to a
-// random name per Outbox; set it to a stable, unique instance name, such as
-// the pod name, to read lease owners in the store. See "Leases".
+// WithOwner sets the name this Outbox takes leases under, a random name by
+// default. Set a unique instance name, such as the pod name, to tell which
+// instance holds a record. See "Leases".
 func WithOwner(owner string) Option {
 	return func(c *config) {
 		if owner != "" {
@@ -60,8 +60,8 @@ func WithOwner(owner string) Option {
 	}
 }
 
-// WithLease sets how long a lease lasts, 1 minute by default. Keep it longer
-// than the slowest record takes to run. See "Leases".
+// WithLease sets how long a lease lasts, 1 minute by default; see "Leases"
+// for sizing it.
 func WithLease(d time.Duration) Option {
 	return func(c *config) {
 		if d > 0 {
@@ -98,9 +98,9 @@ func WithWorkers(n int) Option {
 	}
 }
 
-// WithBackoff sets the delay before a retry: min after the first attempt,
-// doubling per attempt up to max. It defaults to 1 second and 5 minutes. See
-// "Failures".
+// WithBackoff sets the delay before a retry: minDelay after the first
+// attempt, doubling per attempt up to maxDelay. It defaults to 1 second and
+// 5 minutes. See "Failures".
 func WithBackoff(minDelay, maxDelay time.Duration) Option {
 	return func(c *config) {
 		if minDelay > 0 && maxDelay >= minDelay {
@@ -119,8 +119,7 @@ func WithRetention(d time.Duration) Option {
 	}
 }
 
-// WithBestEffort sets the dispatcher that receives every dispatched event
-// after commit, for handlers that may lose events, such as an
+// WithBestEffort sets the dispatcher of best-effort handlers, such as an
 // event.InMemoryDispatcher. See "Handlers".
 func WithBestEffort(dispatcher event.Dispatcher) Option {
 	return func(c *config) {

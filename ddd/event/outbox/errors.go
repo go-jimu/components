@@ -4,15 +4,12 @@ import "errors"
 
 // Errors returned by this package. Compare with errors.Is.
 var (
-	// ErrPermanent marks a handler error that retrying cannot fix. A Handler
-	// wraps it, as in fmt.Errorf("%w: account closed", outbox.ErrPermanent),
-	// and the Relay marks the record failed instead of retrying it. See
-	// "Failures".
+	// ErrPermanent marks a handler error that retrying cannot fix, as in
+	// fmt.Errorf("%w: account closed", outbox.ErrPermanent). See "Failures".
 	ErrPermanent = errors.New("outbox: permanent failure")
 
-	// ErrLeaseLost means a Store refused a record update because the record
-	// is no longer leased to that owner and attempt: another Relay took it
-	// over after the lease expired. See "Leases".
+	// ErrLeaseLost means a Store refused a record update under a lease that
+	// no longer holds. See "Leases".
 	ErrLeaseLost = errors.New("outbox: record lease lost")
 
 	// ErrRecordNotFound means a Store has no record with that ID in a state
@@ -29,9 +26,7 @@ var (
 	ErrInvalidEvent = errors.New("outbox: event is invalid")
 
 	// ErrDispatchAfterFlush means DispatchAll ran in a transaction whose
-	// records this Outbox has already written: a BeforeCommit hook registered
-	// after the transaction's first dispatch dispatched again. See
-	// "Dispatch".
+	// records are already written. See "Dispatch".
 	ErrDispatchAfterFlush = errors.New("outbox: events dispatched after the transaction's records were written")
 
 	// ErrDuplicateKind means Register was called twice for one Kind.

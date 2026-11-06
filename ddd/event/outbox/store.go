@@ -7,7 +7,8 @@ import (
 	"github.com/go-jimu/components/ddd/event"
 )
 
-// Status is the state of a Record. See "Records".
+// Status is the state of a Record: pending until done, or failed; see
+// "Failures".
 type Status int
 
 const (
@@ -39,9 +40,10 @@ type EncodedEvent struct {
 	Payload []byte
 }
 
-// Record is the outbox record of one Handler for one transaction: the
-// events of that transaction the Handler listens to, in dispatch order, and
-// how far it has run them. See "Records".
+// Record is the outbox record of one must-run handler for one transaction:
+// the events of that transaction the handler listens to, in dispatch order,
+// and how far it has run them. The Relay purges done records after
+// WithRetention.
 type Record struct {
 	ID      string
 	Handler string
@@ -55,15 +57,14 @@ type Record struct {
 	LeaseUntil    time.Time
 	NextAttemptAt time.Time
 	LastError     string
-	// Trace is the carrier captured at dispatch; see WithTrace.
+	// Trace is the carrier WithTrace captured; see "Context".
 	Trace     map[string]string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-// Lease identifies one attempt on a record: a Store applies an update only
-// while the record is pending and still leased to Owner for Attempt. See
-// "Leases".
+// Lease identifies one attempt on a record, which fences the record's
+// updates; see "Leases" and "Writing a store".
 type Lease struct {
 	RecordID string
 	Owner    string
@@ -100,11 +101,9 @@ type Count struct {
 	Oldest time.Time
 }
 
-// Store keeps the outbox records of one transactional resource, such as one
-// database, next to the business data; see "Writing a store". Technology
-// adapters implement it, and outboxtest.TestStore checks an implementation.
-// Every method is safe for concurrent use. Each update method returns
-// ErrLeaseLost when the lease no longer holds.
+// Store keeps the records of one database next to its business data.
+// Technology adapters implement it by the rules in "Writing a store". Every
+// method is safe for concurrent use.
 type Store interface {
 	// Insert writes records inside the transaction ctx is in, and returns
 	// transaction.ErrNoTransaction when ctx is in none.
@@ -114,22 +113,23 @@ type Store interface {
 	// lease has expired, oldest first. It sets LeaseOwner, LeaseUntil, and
 	// increments Attempts on each.
 	Claim(ctx context.Context, req ClaimRequest) ([]Record, error)
-	// Advance sets Progress.
+	// Advance sets Progress, fenced by lease.
 	Advance(ctx context.Context, lease Lease, progress int) error
-	// Complete marks the record done.
+	// Complete marks the record done, fenced by lease.
 	Complete(ctx context.Context, lease Lease) error
-	// Retry releases the lease and sets NextAttemptAt and LastError; the
-	// record stays pending.
+	// Retry, fenced by lease, releases the lease and sets NextAttemptAt and
+	// LastError; the record stays pending.
 	Retry(ctx context.Context, lease Lease, nextAttemptAt time.Time, cause string) error
-	// Fail releases the lease, sets LastError, and marks the record failed.
+	// Fail, fenced by lease, releases the lease, sets LastError, and marks the
+	// record failed.
 	Fail(ctx context.Context, lease Lease, cause string) error
 	// RetryFailed puts every failed record back to pending, due at now, and
 	// returns how many it reset.
 	RetryFailed(ctx context.Context, now time.Time) (int, error)
-	// Skip skips the event at index of a pending or failed record whose
+	// Skip passes the event at index of a pending or failed record whose
 	// Progress is index: it sets Progress to index+1, marks the record done
 	// when no event is left and pending otherwise, and releases the lease. It
-	// returns ErrRecordNotFound when no such record exists. See "Failures".
+	// returns ErrRecordNotFound when no such record exists.
 	Skip(ctx context.Context, id string, index int) error
 	// Purge deletes done records last updated before before, and returns how
 	// many it deleted.

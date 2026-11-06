@@ -1,36 +1,43 @@
-// Package outbox runs the domain event handlers that must not lose an event.
-// A use case dispatches events inside its transaction; the Outbox writes them,
-// in that same transaction, as one outbox record per Handler that listens to
-// them, and its Relay runs each record after commit until the Handler
-// succeeds. An event is recorded exactly when the business change commits,
-// and every recorded event runs at least once. Handlers that may lose events
-// stay on event.InMemoryDispatcher; see "Handlers".
+// Package outbox runs must-run handlers: domain event handlers whose effects
+// must not be lost. A use case dispatches events inside its transaction; the
+// Outbox writes them, in that same transaction, as one record per must-run
+// handler that listens to them, and its Relay runs each record after commit
+// until the handler succeeds. An event is recorded exactly when the business
+// change commits, and every recorded event runs at least once. Best-effort
+// handlers stay on event.InMemoryDispatcher; see "Handlers".
+//
+// Read by task:
+//   - Composing the runtime: "Runtime composition", "Relay", "Shutdown".
+//   - Writing a use case: "Dispatch".
+//   - Writing a must-run handler: "Handlers", "Events", "Failures", "Context".
+//   - Operating it: "Failures", "Leases".
+//   - Writing a Store adapter: "Writing a store".
 //
 // # Runtime composition
 //
-// One Outbox serves one transactional resource, such as one database: its
-// Store keeps records in that database, and use cases run in Within of the
-// transaction.Manager of that database. Composition:
+// One Outbox serves one database: its Store keeps records in that database,
+// and use cases run in Within of that database's transaction.Manager.
 //
 //	registry := outbox.NewRegistry()
-//	_ = outbox.Register[order.Paid](registry) // every event type a Handler listens to
+//	_ = outbox.Register[order.Paid](registry) // every event type a handler listens to
 //	ob, err := outbox.New(store, registry,     // store from a technology adapter
 //		outbox.WithOwner(podName),
 //		outbox.WithBestEffort(inMemoryDispatcher))
-//	_ = ob.Subscribe(projector)                // every Handler, before traffic starts
+//	_ = ob.Subscribe(projector)                // every must-run handler, before traffic starts
 //	go ob.Run(ctx)                             // the Relay
 //	...
 //	_ = ob.Close(shutdownCtx)                  // see "Shutdown"
 //
-// The Outbox implements event.Dispatcher: inject it into use cases as their
-// dispatcher. Run the Relay in every process that dispatches; Relays of
-// several processes share the records safely, see "Leases".
+// The Outbox is the use cases' event.Dispatcher. Run the Relay in every
+// process that dispatches; Relays of several processes share the records,
+// see "Leases".
 //
 // # Dispatch
 //
 // Dispatch inside the transaction, after the aggregate is saved, and return
-// the error: unlike event.InMemoryDispatcher, a dispatch error here means the
-// events cannot be recorded, so the transaction must roll back.
+// the error. This differs from event.InMemoryDispatcher, whose error a use
+// case ignores: here an error means the events cannot be recorded, so the
+// transaction rolls back.
 //
 //	return manager.Within(ctx, func(ctx context.Context) error {
 //		if err := repo.Save(ctx, order); err != nil {
@@ -41,154 +48,136 @@
 //
 // DispatchAll buffers the events in the transaction, and the first dispatch
 // registers a BeforeCommit hook that writes the records. Each record holds
-// the transaction's events its Handler listens to, in dispatch order. An
-// event no Handler listens to is not recorded. A rolled back transaction
-// records nothing, and the Relay sees a record only once its transaction has
-// committed.
+// the transaction's events its handler listens to, in dispatch order; an
+// event no handler listens to goes only to WithBestEffort. The Relay sees a
+// record once its transaction has committed, and a rolled back transaction
+// leaves none.
 //
-// BeforeCommit hooks run in registration order, so a hook that dispatches,
-// such as a unit of work that saves aggregates and dispatches their events,
-// is registered before the transaction's first dispatch. A dispatch from a
-// hook registered later comes after the records are written and returns
-// ErrDispatchAfterFlush, which rolls the transaction back: a second record
-// per Handler would lose the order of the transaction's events.
+// BeforeCommit hooks run in registration order. Register a hook that
+// dispatches, such as a unit of work that saves aggregates and dispatches
+// their events, before the transaction's first dispatch. A dispatch from a
+// hook registered later returns ErrDispatchAfterFlush and rolls the
+// transaction back, keeping one record per handler per transaction, and so
+// the order of its events.
 //
 // DispatchAll accepts all of its events or none. It returns:
 //   - transaction.ErrNoTransaction outside Within, and
 //     transaction.ErrTransactionDone on a ctx kept past its transaction;
 //   - ErrInvalidEvent wrapped for a nil event;
-//   - ErrUnregisteredKind wrapped for an event a Handler listens to whose
-//     type is not registered, see "Events";
+//   - ErrUnregisteredKind wrapped for an event a must-run handler listens to
+//     whose type is not registered, see "Events";
 //   - ErrDispatchAfterFlush, as above;
 //   - event.ErrDispatcherClosed after Close.
 //
 // # Handlers
 //
-// A Handler that must run implements Handler and is subscribed with
-// Subscribe. Its Name is stored in its records, so it stays the same across
-// versions and refactorings; renaming a Handler leaves its records for the
-// old name unrun, see "Relay". Handle returns an error to have the event
-// retried, see "Failures".
+// A must-run handler implements Handler and is subscribed with Subscribe.
+// Its Name keys its records, so keep it stable across versions and
+// refactorings; records under a retired name wait for an operator, see
+// "Relay".
 //
-// Delivery is at least once: an event runs again when a Relay stops after
-// Handle succeeded but before the success was stored, or when a lease
-// expires during a run. Make each effect idempotent: key it by
-// DeliveryFrom(ctx).Key(), the same on every retry of that event, or write the
-// handler as a reconciler that reads the aggregate's current state and
-// applies it with a version check.
+// Delivery is at least once: an event runs again when a Relay stops between
+// Handle succeeding and the success being stored, or when a lease expires
+// mid-run. Write each handler as a reconciler: it reads the aggregate's
+// current state and applies it with a version check, so a rerun or a stale
+// event changes nothing. For an effect outside your database, deduplicate by
+// DeliveryFrom(ctx).Key(), which is the same on every retry of that event.
 //
-// Order is kept within a record: a Handler runs the events of one
-// transaction in dispatch order, and the next event only after the previous
-// one succeeded. Records of different transactions run concurrently and in
-// any order, even for one aggregate, so a Handler compares versions instead
-// of trusting arrival order.
+// Order holds within a record: a handler runs one transaction's events in
+// dispatch order, each after the previous one succeeded. Records of different
+// transactions run concurrently and in any order, even for one aggregate;
+// the reconciler's version check absorbs that.
 //
-// Handlers that may lose events, such as cache invalidation or metrics, stay
-// on an event.InMemoryDispatcher passed to WithBestEffort: it receives every
-// event of a committed transaction right after commit, recorded or not.
+// Best-effort handlers, such as cache invalidation or metrics, subscribe to
+// the event.InMemoryDispatcher passed to WithBestEffort. It receives every
+// event of a committed transaction right after commit.
 //
 // # Events
 //
-// Records store events as JSON. Register each event type a Handler listens to
-// with Register; the Registry decodes a record's events back into those Go
-// types, and the Handler receives the same type that was dispatched. Keep a
-// type's Kind and JSON shape compatible while records of it may be pending:
-// add fields, and keep removed or renamed ones decodable; a record whose event
-// no longer decodes fails, see "Failures". A Kind is registered for one Go
-// type, so dispatching OrderPaid and *OrderPaid under one Kind is rejected.
+// Records store events as JSON. Register each event type a must-run handler
+// listens to; the Registry decodes stored events back into that Go type, so
+// Handle receives the type that was dispatched. A Kind maps to one Go type:
+// dispatch either OrderPaid or *OrderPaid under a Kind, consistently.
 //
-// # Records
-//
-// A Record is pending until its Handler has run all its events, then done.
-// Progress is the index of the next event to run, so a retry resumes after
-// the events that succeeded. A record fails on a permanent error, see
-// "Failures". The Relay purges done records after WithRetention, 7 days by
-// default; pending and failed records stay until they are done.
+// Evolve a type compatibly while records of it may be pending: add fields,
+// and keep removed or renamed ones decodable. An event that no longer
+// decodes fails its record, see "Failures".
 //
 // # Leases
 //
-// A Relay runs a record only under a lease: Claim leases due records to the
-// Relay's owner (WithOwner) until now plus WithLease, and increments
-// Attempts. A record committed while its Outbox's Relay runs is leased to that
-// Relay at insert and handed to it after commit, so it runs as soon as a
-// worker is free; other records wait for a claim. A record whose lease
-// expires before a worker takes it is left to the next claim. Once a lease
-// expires, another Relay may claim the record, and the first Relay's updates
-// then fail with ErrLeaseLost: the outcome is stored by one Relay only,
-// though both may have run the Handler. Keep the lease longer than the
-// slowest record takes.
+// A Relay runs a record only under a lease, taken by Claim for WithLease
+// under the Relay's WithOwner. A record committed while its Outbox's Relay
+// runs is leased to that Relay at insert and handed to it after commit, so it
+// runs as soon as a worker is free; other records wait for a claim, and so
+// does a handed-over record whose lease expires before a worker takes it.
+//
+// Once a lease expires, another Relay may claim the record. The first
+// Relay's updates then return ErrLeaseLost, so one Relay stores the outcome,
+// though both may have run the handler. Size WithLease above the time the
+// slowest record takes to run.
 //
 // # Relay
 //
-// Run is the Relay. At start it puts failed records back to pending and logs,
-// at Error, records of handler names this Outbox has not subscribed; such
-// records stay pending until a Relay that runs their Handler claims them, or
-// an operator skips them. Then it runs records handed over at commit, and
-// every WithPollInterval, 5 seconds by default, claims due records of its
-// Handlers, up to WithBatchSize and its free workers. It runs up to
-// WithWorkers records at once, 4 by default; each record runs on one
-// goroutine, event by event. Run returns nil when ctx ends, canceling running
-// handlers, or after Close; ErrAlreadyRunning while another Run of the same
-// Outbox is active.
+// Run is the Relay. At start it puts failed records back to pending, and
+// logs at Error the records of handler names this Outbox has not subscribed:
+// they stay pending for a Relay that runs their handler, or for an operator
+// to skip. Then it runs records handed over at commit, and every
+// WithPollInterval claims due records of its handlers, up to WithBatchSize
+// and its free workers. WithWorkers records run at once, each on one
+// goroutine, event by event, recording Progress after each event.
 //
 // # Failures
 //
-//   - An error from Handle is transient: the record is retried after a
-//     backoff, WithBackoff, from 1 second doubling to 5 minutes by default,
-//     forever. A panic in Handle is transient too.
-//   - An error wrapping ErrPermanent, or an event that does not decode,
-//     fails the record: it stops retrying and keeps the error in LastError.
+//   - Transient: an error from Handle, or a panic. The record is retried
+//     after WithBackoff, forever.
+//   - Permanent: an error wrapping ErrPermanent, or an event that does not
+//     decode. The record fails and keeps the error in LastError.
 //   - Failed records go back to pending when a Relay starts, so deploying a
 //     fix retries them.
-//   - An operator who decides an event must never run lists failed records
-//     with Store.Failed and calls Store.Skip with the record's ID and
-//     Progress. Skip passes that one event; the record's later events still
-//     run.
+//   - Skipping is the operator's decision: list failed records with
+//     Store.Failed, then call Store.Skip with the record's ID and Progress.
+//     Skip passes that one event; the record's later events still run.
 //
-// Every failure is logged with the record ID, the handler, the attempt, and
-// the event. For monitoring, Store.Counts reports pending and failed records
-// per handler with the CreatedAt of the oldest.
+// Every failure is logged with the record ID, handler, attempt, and event.
+// For monitoring, Store.Counts reports pending and failed records per
+// handler with the CreatedAt of the oldest.
 //
 // # Context
 //
-// Handle runs on a ctx owned by the Relay, not on the dispatcher's request
-// ctx, which may have ended long before. It carries the Delivery and, with
-// WithTrace, the trace: capture runs on the ctx of the transaction's first
-// dispatch and its carrier is stored in the transaction's records; restore
-// derives the Handle ctx from it. The ctx is canceled only when the Relay
-// shuts down.
+// Handle runs on a ctx owned by the Relay, which outlives the request that
+// dispatched. It carries the Delivery and, with WithTrace, the trace: capture
+// runs on the ctx of the transaction's first dispatch, its carrier is stored
+// in the records, and restore derives the Handle ctx from it. The Relay
+// cancels the ctx only when it shuts down.
 //
 // # Shutdown
 //
-// Call Close after the servers and workers whose code dispatches events have
-// finished. Close makes DispatchAll return event.ErrDispatcherClosed, stops
-// the Relay from taking new records, releases the records it took but has not
+// Call Close after the servers and workers that dispatch have finished.
+// Close rejects further dispatches with event.ErrDispatcherClosed, stops the
+// Relay from taking records, releases the records it took but has not
 // started, and waits for running records until ctx ends. Then it cancels the
-// Relay's ctx and returns ctx.Err() without waiting further; a Handler that
-// ignores its ctx keeps running in the background. A record interrupted this
-// way is released and due at once, so another Relay runs it again. Close then
-// closes the WithBestEffort dispatcher.
+// Relay's ctx and returns ctx.Err() at once; a handler that ignores its ctx
+// finishes in the background. An interrupted record is released and due at
+// once for another Relay. Close then closes the WithBestEffort dispatcher.
 //
 // # Writing a store
 //
 // A technology adapter implements Store over the database the
-// transaction.Manager runs on:
+// transaction.Manager runs on. The method docs define each operation; these
+// rules bind them:
 //
-//  1. Insert writes inside the transaction ctx is in, through the adapter's
-//     transaction-bound session, so records commit and roll back with the
-//     business data. Outside a transaction it returns
-//     transaction.ErrNoTransaction.
+//  1. Insert writes through the adapter's transaction-bound session, so
+//     records commit and roll back with the business data.
 //  2. Claim is atomic across processes, as with SELECT ... FOR UPDATE SKIP
-//     LOCKED followed by an update in one transaction, and returns records
-//     oldest first.
-//  3. Advance, Complete, Retry, and Fail apply only while the record is
-//     pending and leased to the Lease's owner and attempt, and return
-//     ErrLeaseLost otherwise. Skip releases the lease, so an update under it
-//     fails the same way.
-//  4. Times come from the Relay's clock in each request; the Store keeps them
-//     at millisecond precision or finer, and stamps UpdatedAt with its own
-//     process clock.
+//     LOCKED and an update in one transaction.
+//  3. Fencing: Advance, Complete, Retry, and Fail apply only while the record
+//     is pending and leased to the Lease's owner and attempt, and return
+//     ErrLeaseLost otherwise. Skip releases the lease, so later updates under
+//     it are fenced out too.
+//  4. Times come from the Relay's clock in each request; keep them at
+//     millisecond precision or finer, and stamp UpdatedAt from the Store's
+//     own process clock.
 //
-// Package outboxtest provides TestStore, the conformance suite every Store
-// runs, and an in-memory Store for unit tests of use cases.
+// The adapter is done when outboxtest.TestStore passes against it on a real
+// database.
 package outbox
