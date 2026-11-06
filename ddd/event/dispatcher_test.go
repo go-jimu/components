@@ -179,6 +179,53 @@ func TestDispatcherLogsRejectedDispatch(t *testing.T) {
 	require.Equal(t, "order-1", rejected[1].attrs["event_key"])
 }
 
+// Intent: cancellation while waiting for a full queue reports every event
+// the dispatcher did not accept, using the caller's context.
+func TestDispatcherLogsCanceledDispatch(t *testing.T) {
+	records := make(chan logRecord, 8)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	dispatcher := event.NewDispatcher(
+		event.WithWorkers(1),
+		event.WithBufferSize(1),
+		event.WithLogger(slog.New(recordingHandler{records: records})),
+	)
+	t.Cleanup(func() {
+		close(release)
+		require.NoError(t, dispatcher.Close(context.Background()))
+	})
+	dispatcher.Subscribe(handlerFunc{
+		kinds: []event.Kind{"order.event"},
+		handle: func(context.Context, event.Event) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+		},
+	})
+	require.NoError(t, dispatcher.Dispatch(context.Background(), keyed("order-1", "in-flight")))
+	receiveWithin(t, "first handler start", started)
+	require.NoError(t, dispatcher.Dispatch(context.Background(), keyed("order-1", "queued")))
+
+	traced := context.WithValue(context.Background(), logTraceKey{}, "dispatch-trace")
+	ctx, cancel := context.WithCancel(traced)
+	cancel()
+	require.ErrorIs(t, dispatcher.DispatchAll(ctx, []event.Event{
+		keyed("order-2", "paid"), nil, keyed("order-3", "shipped"),
+	}), context.Canceled)
+
+	require.Len(t, records, 2)
+	for _, key := range []string{"order-2", "order-3"} {
+		record := <-records
+		require.Equal(t, slog.LevelError, record.level)
+		require.Equal(t, "domain event dispatch rejected", record.message)
+		require.Equal(t, "dispatch-trace", record.trace)
+		require.Equal(t, "order.event", record.attrs["event_kind"])
+		require.Equal(t, key, record.attrs["event_key"])
+	}
+}
+
 // Intent: an interrupted Close rejects every later dispatch, including the
 // follow-ups of handlers still returning from their canceled contexts.
 func TestDispatcherRejectsAfterInterruptedClose(t *testing.T) {

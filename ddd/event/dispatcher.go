@@ -131,7 +131,7 @@ func (d *InMemoryDispatcher) Dispatch(ctx context.Context, event Event) error {
 //
 // It returns nil when the events are accepted, ErrDispatcherClosed once the
 // dispatcher rejects events (see Close), and ctx.Err() when ctx ends while
-// waiting.
+// waiting. Rejected events are logged on the caller's context.
 func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) error {
 	accepted := make([]queued, 0, len(events))
 	for _, event := range events {
@@ -154,9 +154,7 @@ func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) er
 		if d.closed {
 			d.removeWaiterLocked(turn)
 			d.mu.Unlock()
-			for _, item := range accepted {
-				d.logger.LogAttrs(ctx, slog.LevelError, "domain event dispatch rejected", eventAttrs(item)...)
-			}
+			d.logRejectedDispatch(ctx, accepted)
 			return ErrDispatcherClosed
 		}
 		if d.isFirstWaiterLocked(turn) && d.fitsLocked(len(accepted)) {
@@ -191,8 +189,15 @@ func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) er
 			// The waiter behind this one may now be first.
 			d.signalSpaceFreedLocked()
 			d.mu.Unlock()
+			d.logRejectedDispatch(ctx, accepted)
 			return ctx.Err()
 		}
+	}
+}
+
+func (d *InMemoryDispatcher) logRejectedDispatch(ctx context.Context, items []queued) {
+	for _, item := range items {
+		d.logger.LogAttrs(ctx, slog.LevelError, "domain event dispatch rejected", eventAttrs(item)...)
 	}
 }
 

@@ -99,6 +99,7 @@ type Handler interface {
 // values of ctx. Use SourceContext to read caller values explicitly.
 //
 // Dispatch and DispatchAll return nil, ErrDispatcherClosed, or ctx.Err().
+// The dispatcher reports each event that it rejects.
 // Close drains accepted events, and the follow-ups their handlers dispatch,
 // until the dispatcher is idle, then stops admission; see the package
 // documentation, "Shutdown".

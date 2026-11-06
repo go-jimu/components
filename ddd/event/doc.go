@@ -12,11 +12,12 @@
 //	if err := repo.Save(ctx, order); err != nil {
 //		return err
 //	}
-//	return dispatcher.DispatchAll(ctx, order.Events.Drain())
+//	_ = dispatcher.DispatchAll(ctx, order.Events.Drain()) // reports rejected events
+//	return nil
 //
 // The aggregate is already saved when DispatchAll runs, so a dispatch error
-// means only that the follow-ups will not run: report it and treat the saved
-// state as the use case's outcome.
+// means only that the follow-ups will not run. The dispatcher reports rejected
+// events, and the saved state remains the use case's outcome.
 //
 // Runtime composition builds one dispatcher with NewDispatcher, subscribes
 // every Handler before traffic starts, and calls Close during shutdown, as
