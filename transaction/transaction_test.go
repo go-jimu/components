@@ -496,3 +496,83 @@ func TestWithinOrJoin(t *testing.T) {
 		}
 	})
 }
+
+type bufferKey struct{}
+
+func TestValue(t *testing.T) {
+	manager, _ := newManager(t)
+	inits := 0
+	newBuffer := func() *[]string {
+		inits++
+		return new([]string)
+	}
+	var kept context.Context
+	err := manager.Within(context.Background(), func(ctx context.Context) error {
+		kept = ctx
+		for _, s := range []string{"a", "b"} {
+			buffer, err := transaction.Value(ctx, bufferKey{}, newBuffer)
+			if err != nil {
+				return err
+			}
+			*buffer = append(*buffer, s)
+		}
+		return transaction.BeforeCommit(ctx, func(ctx context.Context) error {
+			buffer, err := transaction.Value(ctx, bufferKey{}, newBuffer)
+			if err != nil {
+				return err
+			}
+			if !slices.Equal(*buffer, []string{"a", "b"}) {
+				t.Errorf("buffer = %v, want [a b]", *buffer)
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("Within() error = %v", err)
+	}
+	if inits != 1 {
+		t.Fatalf("init calls = %d, want 1", inits)
+	}
+	if _, err := transaction.Value(kept, bufferKey{}, newBuffer); !errors.Is(err, transaction.ErrTransactionDone) {
+		t.Fatalf("Value() on a kept ctx error = %v, want %v", err, transaction.ErrTransactionDone)
+	}
+	if _, err := transaction.Value(context.Background(), bufferKey{}, newBuffer); !errors.Is(err, transaction.ErrNoTransaction) {
+		t.Fatalf("Value() outside a transaction error = %v, want %v", err, transaction.ErrNoTransaction)
+	}
+	if _, err := transaction.Value[*[]string](context.Background(), bufferKey{}, nil); !errors.Is(err, transaction.ErrNilFunc) {
+		t.Fatalf("Value(nil) error = %v, want %v", err, transaction.ErrNilFunc)
+	}
+}
+
+func TestValueIsPerTransaction(t *testing.T) {
+	manager, _ := newManager(t)
+	for i := range 2 {
+		_ = manager.Within(context.Background(), func(ctx context.Context) error {
+			n, err := transaction.Value(ctx, bufferKey{}, func() *int { return new(int) })
+			if err != nil {
+				return err
+			}
+			*n++
+			if *n != 1 {
+				t.Errorf("transaction %d: value = %d, want a fresh value", i, *n)
+			}
+			return nil
+		})
+	}
+}
+
+func TestValuePanicsOnTypeMismatch(t *testing.T) {
+	manager, _ := newManager(t)
+	_ = manager.Within(context.Background(), func(ctx context.Context) error {
+		if _, err := transaction.Value(ctx, bufferKey{}, func() int { return 1 }); err != nil {
+			return err
+		}
+		defer func() {
+			if recover() == nil {
+				t.Error("Value() with another type did not panic")
+			}
+		}()
+		_, _ = transaction.Value(ctx, bufferKey{}, func() string { return "x" })
+		return nil
+	})
+}

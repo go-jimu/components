@@ -61,6 +61,7 @@ type scope struct {
 	active       bool
 	beforeCommit []func(context.Context) error
 	afterCommit  []func(context.Context)
+	values       map[any]any
 }
 
 func scopeOf(ctx context.Context) (*scope, bool) {
@@ -253,4 +254,62 @@ func register(ctx context.Context, add func(*scope)) error {
 	}
 	add(s)
 	return nil
+}
+
+// Value returns the value stored under key in the transaction ctx is in. The
+// first call for a key in a transaction stores init() and returns it; later
+// calls in the same transaction return that value. See "Transaction values".
+// It returns ErrNilFunc, ErrNoTransaction, or ErrTransactionDone. It panics
+// when the stored value is not a T, which only a key shared by two types
+// causes.
+func Value[T any](ctx context.Context, key any, init func() T) (T, error) {
+	var zero T
+	if init == nil {
+		return zero, ErrNilFunc
+	}
+	s, ok := scopeOf(ctx)
+	if !ok {
+		return zero, ErrNoTransaction
+	}
+	if value, found, err := s.value(key); err != nil || found {
+		return asT[T](key, value), err
+	}
+	// init runs unlocked, so it may use the transaction; a concurrent first
+	// call for the same key may run init too, and the first value stored wins.
+	value := init()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.active {
+		return zero, ErrTransactionDone
+	}
+	if stored, found := s.values[key]; found {
+		return asT[T](key, stored), nil
+	}
+	if s.values == nil {
+		s.values = make(map[any]any)
+	}
+	s.values[key] = value
+	return value, nil
+}
+
+func (s *scope) value(key any) (value any, found bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.active {
+		return nil, false, ErrTransactionDone
+	}
+	value, found = s.values[key]
+	return value, found, nil
+}
+
+func asT[T any](key, value any) T {
+	if value == nil {
+		var zero T
+		return zero
+	}
+	t, isT := value.(T)
+	if !isT {
+		panic(fmt.Sprintf("transaction: value of key %T is %T, not %T", key, value, t))
+	}
+	return t
 }

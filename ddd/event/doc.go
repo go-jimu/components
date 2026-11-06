@@ -123,7 +123,7 @@
 //
 // Delivery is best-effort and in memory: events still queued when the process
 // exits are lost, and so are events rejected by a closed dispatcher or a queue
-// that stays full. Put follow-up work that must survive a crash behind a
-// durable mechanism, such as a taskqueue task enqueued by the handler, or into
-// the use case itself.
+// that stays full. Subscribe must-run handlers, whose effects must not be
+// lost, to ddd/event/outbox instead: it records events in the use case's
+// transaction and runs them until they succeed.
 package event

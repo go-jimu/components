@@ -1,5 +1,24 @@
 # Change log
 
+## v0.12.7
+
+- Added: package `ddd/event/outbox` runs the domain event handlers that must
+  not lose an event (go-jimu/components#84). The `Outbox` is an
+  `event.Dispatcher` used inside `Within`: it writes the transaction's events
+  as one outbox record per subscribed `Handler`, in that transaction, and its
+  Relay (`Run`) runs each record after commit, in dispatch order, retrying
+  with backoff until the handler succeeds. A handler error wrapping
+  `ErrPermanent` fails the record; failed records retry when a Relay starts,
+  and an operator lists them with `Store.Failed` and skips the one event that
+  must not run with `Store.Skip`. A dispatch from a BeforeCommit hook
+  registered after the transaction's first dispatch returns
+  `ErrDispatchAfterFlush`, keeping one record per handler per transaction.
+  Relays of several processes share records through fenced leases. Technology adapters implement `Store`;
+  `ddd/event/outbox/outboxtest` provides an in-memory one and `TestStore`, the
+  conformance suite.
+- Added: `transaction.Value` keeps one value per key for the life of a
+  transaction, for hooks that buffer work until commit.
+
 ## v0.12.6
 
 - Added: package `transaction` runs a use case in one local transaction and

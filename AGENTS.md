@@ -17,6 +17,8 @@ through longer code and links back to the package documentation for rules.
   `encoding/json` or `encoding/yaml`.
 - `ddd/event`: domain events inside one bounded context, dispatched
   concurrently and ordered per key.
+- `ddd/event/outbox`: must-run domain event handlers; events are recorded in
+  the use case's transaction and run by a Relay after commit.
 - `ddd/message`: protobuf integration messages across boundaries.
 - `transaction`: one local transaction per use case, carried in ctx; use
   cases call `Within`, repository adapters call `Current`.
