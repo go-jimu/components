@@ -21,16 +21,21 @@ type StackTracer interface {
 	StackTrace() errors.StackTrace
 }
 
-// Error returns an attribute for err under ErrorKey. oops errors are logged
-// as they are, since they render their own context and stack. Other errors are
-// logged as a group with the message and, when the error carries one, its
-// stack trace. A nil err is logged as null.
+// Error returns an attribute for err under ErrorKey; see "Logging errors"
+// in the package documentation. A nil err is logged as null.
 func Error(err error) slog.Attr {
 	if err == nil {
 		return slog.Any(ErrorKey, nil)
 	}
-	if _, ok := oops.AsOops(err); ok {
+	//nolint:errorlint // err itself; a wrapped oops error is the next branch.
+	if _, ok := err.(oops.OopsError); ok {
 		return slog.Any(ErrorKey, err)
+	}
+	if cause, ok := oops.AsOops(err); ok {
+		return slog.Group(ErrorKey,
+			slog.String("msg", err.Error()),
+			slog.Any("cause", cause),
+		)
 	}
 
 	group := make([]slog.Attr, 0, 2)

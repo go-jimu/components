@@ -9,10 +9,25 @@
 // With or WithGroup share their handler's HandleFuncs, so a later Apply
 // reaches them too. Apply is safe while logging.
 //
-// Error(err) logs an error under ErrorKey: oops errors as they are, other
-// errors as a group with the message and, when the error carries one, its
-// stack trace. A nil error logs as null. NewContext and FromContext store a
-// logger in a context.
+// Error(err) logs an error under ErrorKey; see "Logging errors". NewContext
+// and FromContext store a logger in a context.
+//
+// # Logging errors
+//
+// Error(err) picks its shape by where an oops error sits in err's
+// errors.Unwrap chain:
+//
+//   - err is an oops error: it is logged as it is, rendering its own
+//     message, context, and stack.
+//   - err wraps an oops error, as fmt.Errorf("load user: %w", oopsErr) does,
+//     or a protocol error whose message is the text sent to a client: a
+//     group of msg, err's message, and cause, the first oops error in the
+//     chain with its context and stack. Wrapping an error for a client keeps
+//     its diagnosis in the log.
+//   - no oops error in the chain: a group of msg and, when an error in the
+//     chain carries a github.com/pkg/errors stack, trace.
+//
+// A nil error logs as null.
 //
 // # Logging conventions
 //

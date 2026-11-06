@@ -1,8 +1,11 @@
 package sloghelper_test
 
 import (
+	"bytes"
 	stderrors "errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 
@@ -80,4 +83,30 @@ func TestErrorWithStackTracerKeepsTrace(t *testing.T) {
 		}
 	}
 	t.Fatal("missing trace attr")
+}
+
+// redactingError stands for a protocol error, such as a Connect error, whose
+// message is the text sent to a client and whose cause is the diagnosis.
+type redactingError struct{ cause error }
+
+func (redactingError) Error() string   { return "internal server error" }
+func (e redactingError) Unwrap() error { return e.cause }
+
+// Intent: when an oops error is wrapped by another error, the log keeps both
+// the outer message and the oops context and stack, so wrapping an error for
+// a client does not hide its diagnosis from the log.
+func TestErrorWrappedOopsKeepsItsContext(t *testing.T) {
+	cause := oops.With("user_id", "user-1").Wrap(stderrors.New("connection refused"))
+	for _, err := range []error{
+		redactingError{cause: cause},
+		fmt.Errorf("load user: %w", cause),
+	} {
+		var logs bytes.Buffer
+		slog.New(slog.NewJSONHandler(&logs, nil)).Info("failed", sloghelper.Error(err))
+		for _, want := range []string{err.Error(), "connection refused", `"user_id":"user-1"`, "stacktrace"} {
+			if !strings.Contains(logs.String(), want) {
+				t.Errorf("log of %T does not contain %s: %s", err, want, logs.String())
+			}
+		}
+	}
 }
