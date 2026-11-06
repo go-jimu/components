@@ -1,5 +1,14 @@
 # Change log
 
+## v0.12.10
+
+- Changed: the ctx a must-run handler's Handle receives now ends when the
+  record's lease expires. A handler blocked on a hung dependency, such as a
+  publish to unreachable brokers, gives its worker back and the record is
+  retried, instead of holding the worker forever while another Relay claims
+  the record. A handler that passes ctx to its blocking calls needs no
+  change; size `WithLease` above the slowest record, as before.
+
 ## v0.12.9
 
 - Added: `outbox.ContextWithDelivery` returns a ctx carrying a Delivery, so

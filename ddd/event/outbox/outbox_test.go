@@ -721,11 +721,19 @@ func blockFirst(h *handler, started, release chan struct{}) {
 	}
 }
 
+// The first handler ignores its ctx: one that honors it returns when its own
+// lease expires, before the lease of the record waiting behind it.
 func TestRelaySkipsHandedOverRecordsWhoseLeaseExpired(t *testing.T) {
 	f := newFixture(t, outbox.WithWorkers(1), outbox.WithLease(50*time.Millisecond))
 	h := newHandler("projector", OrderPaid{}.Kind())
 	started, release := make(chan struct{}), make(chan struct{})
-	blockFirst(h, started, release)
+	h.fail = func(_ event.Event, call int) error {
+		if call == 0 {
+			close(started)
+			<-release
+		}
+		return nil
+	}
 	f.subscribe(h)
 	f.run()
 	if err := f.dispatch(OrderPaid{OrderID: "o-1"}); err != nil {
@@ -942,5 +950,44 @@ func TestContextWithDelivery(t *testing.T) {
 	err := f.manager.Within(ctx, outbox.MarkDone)
 	if !errors.Is(err, outbox.ErrNoDelivery) {
 		t.Fatalf("MarkDone on a test delivery = %v, want ErrNoDelivery", err)
+	}
+}
+
+// Intent: a handler blocked on a hung dependency gives its worker back when
+// the lease expires, since another Relay may claim the record from then on,
+// and the record is retried.
+func TestHandleContextEndsWithTheLease(t *testing.T) {
+	lease := 50 * time.Millisecond
+	f := newFixture(t, outbox.WithWorkers(1), outbox.WithLease(lease))
+	h := newHandler("publisher", OrderPaid{}.Kind())
+	h.mu.Lock()
+	h.fail = func(_ event.Event, call int) error {
+		if call > 0 {
+			return nil
+		}
+		h.mu.Lock()
+		ctx := h.ctxs[0]
+		h.mu.Unlock()
+		<-ctx.Done() // a publish to unreachable brokers
+		return ctx.Err()
+	}
+	h.mu.Unlock()
+	f.subscribe(h)
+	f.run()
+	started := time.Now()
+	if err := f.dispatch(OrderPaid{OrderID: "o-1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.wait(t, 2)
+	f.waitFor("the record to complete", f.settled(outbox.StatusDone))
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	deadline, ok := h.ctxs[0].Deadline()
+	if !ok || deadline.After(started.Add(lease+time.Second)) {
+		t.Fatalf("Handle ctx deadline = %v, %v, want the lease's end", deadline, ok)
+	}
+	if !errors.Is(h.ctxs[0].Err(), context.DeadlineExceeded) || h.deliveries[1].Attempt != 2 {
+		t.Fatalf("first run ended %v, retry attempt %d; want the lease to end it and a second lease to retry", h.ctxs[0].Err(), h.deliveries[1].Attempt)
 	}
 }

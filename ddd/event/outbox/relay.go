@@ -239,6 +239,10 @@ func (o *Outbox) execute(ctx context.Context, r Record) {
 	if o.cfg.restore != nil && r.Trace != nil {
 		ctx = o.cfg.restore(ctx, r.Trace)
 	}
+	// Past the lease another Relay may claim the record and run it too, so
+	// Handle's ctx ends there. The Store updates below detach from it.
+	ctx, cancel := context.WithDeadline(ctx, r.LeaseUntil)
+	defer cancel()
 	for i := r.Progress; i < len(r.Events); i++ {
 		eventAttrs := append(slices.Clone(attrs), slog.String("event_kind", string(r.Events[i].Kind)), slog.Int("event_index", i))
 		e, err := o.registry.Decode(r.Events[i])
