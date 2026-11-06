@@ -93,6 +93,14 @@
 // Both return ErrNoTransaction for a ctx in no transaction and
 // ErrTransactionDone once the transaction has ended.
 //
+// # Transaction values
+//
+// Value keeps one value per key for the life of one transaction, such as a
+// buffer that several calls inside fn append to and a BeforeCommit hook
+// flushes once. Declare an unexported key type, as for context.WithValue. The
+// value lives as long as the transaction's ctx; nothing needs clearing after a
+// commit or a rollback.
+//
 // # Writing a driver
 //
 // A technology adapter implements Driver for one technology:
