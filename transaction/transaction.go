@@ -18,8 +18,9 @@ type Transactor interface {
 type Driver interface {
 	// Begin starts a transaction bound to ctx.
 	Begin(ctx context.Context) (Tx, error)
-	// IsConflict reports whether err means the resource rolled the
-	// transaction back because of a concurrency conflict.
+	// IsConflict reports whether err means the transaction lost a
+	// concurrency conflict, so running it again may succeed; see "Writing a
+	// driver".
 	IsConflict(err error) bool
 }
 

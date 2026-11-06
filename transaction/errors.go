@@ -19,8 +19,8 @@ var (
 	// transaction. See rule 3 in "Running a use case".
 	ErrNested = errors.New("transaction: nested transaction is not supported")
 
-	// ErrConflict means the resource rolled the transaction back because of a
-	// concurrency conflict. See "Conflict and unknown outcome".
+	// ErrConflict means the transaction lost a concurrency conflict and was
+	// rolled back. See "Conflict and unknown outcome".
 	ErrConflict = errors.New("transaction: transaction rolled back on a conflict")
 
 	// ErrOutcomeUnknown means Commit failed and the transaction may or may not

@@ -100,8 +100,14 @@
 //  1. Begin starts a transaction bound to ctx and returns it as a Tx.
 //  2. Tx.Commit and Tx.Rollback end it; the Manager calls exactly one of
 //     them, once.
-//  3. IsConflict reports true only for errors after which the resource has
-//     rolled the transaction back, such as MySQL errors 1205 and 1213.
+//  3. IsConflict reports true for errors that mean the transaction lost a
+//     concurrency conflict, so running it again may succeed, such as MySQL
+//     errors 1205 (lock wait timeout) and 1213 (deadlock). The Manager rolls
+//     back after any error from fn or a BeforeCommit hook, so the resource
+//     need not have rolled back itself; MySQL rolls back only the statement
+//     on 1205. For a Commit error, report true only when the resource has
+//     rolled the transaction back, since the Manager cannot roll back after
+//     Commit.
 //  4. The adapter provides the resolving function described in
 //     "Repositories".
 //
