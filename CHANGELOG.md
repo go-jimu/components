@@ -1,5 +1,13 @@
 # Change log
 
+## v0.12.3
+
+- Fixed: `sloghelper.Error` keeps the context and stack of an oops error
+  wrapped by another error, such as `fmt.Errorf("...: %w", oopsErr)` or a
+  Connect error carrying a client message. It logs a group of `msg`, the
+  outer message, and `cause`, the oops error; it used to log only the outer
+  message. A log query on the `error` field of such errors now sees a group.
+
 ## v0.12.1
 
 - Fixed: `config.Value.Int` returns an error for a `uint` or `uint64` above
