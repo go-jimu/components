@@ -1,5 +1,11 @@
 # Change log
 
+## v0.12.9
+
+- Added: `outbox.ContextWithDelivery` returns a ctx carrying a Delivery, so
+  a unit test of a must-run handler can exercise code that reads
+  `DeliveryFrom`, such as a message ID derived from `Delivery.Key`.
+
 ## v0.12.8
 
 - Added: `outbox.MarkDone` makes a must-run handler's writes in the Store's
