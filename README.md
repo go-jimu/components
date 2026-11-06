@@ -19,17 +19,17 @@ package has no runtime API.
 | Must-run domain event handlers | `github.com/go-jimu/components/ddd/event/outbox` | Records events in the use case's transaction and runs them after commit, retrying until they succeed. `outboxtest` provides an in-memory store and the store conformance suite. |
 | Cross-boundary integration messages | `github.com/go-jimu/components/ddd/message` | Protobuf-first message DTOs and handler routing; broker runtime belongs to providers. |
 | Run a use case in one local transaction | `github.com/go-jimu/components/transaction` | One `Manager` per database carries the transaction in ctx; repository adapters resolve it with `Current`. `transaction/transactiontest` provides an in-memory driver for unit tests; `Value` keeps per-transaction state for hooks. |
-| Transport-neutral task queue contracts | `github.com/go-jimu/components/taskqueue` | Task envelopes, processors, routing, schedules, middleware, and worker interfaces. Rules in `go doc`; walkthrough in [`taskqueue/README.md`](taskqueue/README.md). |
+| Provider-neutral task queue contracts | `github.com/go-jimu/components/taskqueue` | Task envelopes, processors, routing, schedules, middleware, and worker interfaces. Rules in `go doc`; walkthrough in [`taskqueue/README.md`](taskqueue/README.md). |
 | Notification/specification validation helpers | `github.com/go-jimu/components/validation` | Specification combinators and error notification collection. |
-| `log/slog` helpers | `github.com/go-jimu/components/sloghelper` | Logger construction, context storage, error attributes, and handler hooks. |
+| `log/slog` helpers | `github.com/go-jimu/components/sloghelper` | Logger construction, context storage, error attributes, and handler hooks. Adapter and middleware code follows its "Logging conventions" in `go doc`. |
 
 Each package's `doc.go` states its contract, and `example_test.go` shows the
-usage shape. `CHANGELOG.md` lists breaking changes per release.
+usage shape. `CHANGELOG.md` lists the changes of each release.
 
 ## Verification
 
 Run the repository test suite with:
 
 ```sh
-go test ./...
+make test
 ```

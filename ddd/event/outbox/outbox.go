@@ -98,7 +98,7 @@ func (o *Outbox) Dispatch(ctx context.Context, e event.Event) error {
 }
 
 // DispatchAll adds events to the transaction ctx is in, all or none; see
-// "Dispatch" for when it does and the errors it returns.
+// "Dispatch" for when to call it and the errors it returns.
 func (o *Outbox) DispatchAll(ctx context.Context, events []event.Event) error {
 	if o.closed() {
 		return event.ErrDispatcherClosed
@@ -111,6 +111,9 @@ func (o *Outbox) DispatchAll(ctx context.Context, events []event.Event) error {
 		if listenedBy(subscribed, e.Kind()) {
 			if err := o.registry.check(e); err != nil {
 				return err
+			}
+			if err := validate(e); err != nil {
+				return fmt.Errorf("outbox: dispatch %s: %w", e.Kind(), err)
 			}
 		}
 	}
@@ -136,8 +139,8 @@ func (o *Outbox) DispatchAll(ctx context.Context, events []event.Event) error {
 	return nil
 }
 
-// Close stops the Relay and closes the best-effort dispatcher, waiting until
-// ctx ends; see "Shutdown".
+// Close stops the Relay and closes the best-effort dispatcher, waiting for
+// running records at most until ctx ends; see "Shutdown".
 func (o *Outbox) Close(ctx context.Context) error {
 	o.closeOnce.Do(func() { close(o.closing) })
 	o.mu.RLock()

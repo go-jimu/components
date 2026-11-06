@@ -17,6 +17,9 @@
 //	APP_DATABASE__MAX_CONN=20     ->  database.max_conn
 //	APP_HTTP__TLS__ENABLED=true   ->  http.tls.enabled
 //
+// A name that yields an empty level, such as APP_A____B, or contains "." is
+// skipped.
+//
 // List it last in config.WithSource so its values override the files:
 //
 //	cfg := config.New(config.WithSource(

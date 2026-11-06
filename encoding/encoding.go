@@ -5,17 +5,15 @@ import (
 	"sync"
 )
 
-// Codec defines the interface Transport uses to encode and decode messages.  Note
-// that implementations of this interface must be thread safe; a Codec's
-// methods can be called from concurrent goroutines.
+// Codec encodes and decodes values in one format. Implementations are safe
+// for concurrent use.
 type Codec interface {
-	// Marshal returns the wire format of v.
+	// Marshal returns the encoding of v.
 	Marshal(v interface{}) ([]byte, error)
-	// Unmarshal parses the wire format into v.
+	// Unmarshal decodes data into v.
 	Unmarshal(data []byte, v interface{}) error
-	// Name returns the name of the Codec implementation. The returned string
-	// will be used as part of content type in transmission.  The result must be
-	// static; the result cannot change between calls.
+	// Name returns the name the Codec is registered under. It returns the
+	// same value on every call.
 	Name() string
 }
 
@@ -24,9 +22,9 @@ var (
 	registeredCodecs = make(map[string]Codec)
 )
 
-// RegisterCodec registers the provided Codec for use with all Transport clients and
-// servers. Names are case-insensitive, and registering a name again replaces
-// the previous Codec. It is safe to call concurrently with GetCodec.
+// RegisterCodec registers codec under its Name, ignoring case; registering a
+// name again replaces the previous Codec. It panics when codec is nil or its
+// Name is empty. See "Writing a codec".
 func RegisterCodec(codec Codec) {
 	if codec == nil {
 		panic("cannot register a nil Codec")
@@ -40,9 +38,10 @@ func RegisterCodec(codec Codec) {
 	registeredCodecs[contentSubtype] = codec
 }
 
-// GetCodec gets a registered Codec by content-subtype, or nil if no Codec is
-// registered for the content-subtype. The lookup is case-insensitive, so a
-// format taken from a file extension such as "YAML" finds the "yaml" Codec.
+// GetCodec returns the Codec registered under the name contentSubtype,
+// ignoring case, so a format taken from a file extension such as "YAML" finds
+// the "yaml" Codec. It returns nil when no Codec has that name; blank import
+// the codec's package to register it. See "Using a codec".
 func GetCodec(contentSubtype string) Codec {
 	registryMu.RLock()
 	defer registryMu.RUnlock()

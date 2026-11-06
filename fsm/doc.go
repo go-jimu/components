@@ -3,13 +3,9 @@
 // and each concrete state implements that behavior its own way.
 //
 // A StateMachine holds the transition table: from + action -> to edges, each
-// optionally guarded by a Condition, and a StateBuilder per state. Transit
-// evaluates the candidate edges for the current state and action in the order
-// they were added, builds the first matching target state, and hands it to
-// StateContext.SetState. When no edge exists, or no Condition matches, Transit
-// returns a *TransitionError and the state stays unchanged.
-//
-// A StateMachine guards its own tables with a mutex; the consumer owns
+// optionally guarded by a Condition, and a StateBuilder per state. After a
+// behavior succeeds, Transit moves the business object along the first
+// matching edge. The StateMachine locks its own tables; the consumer owns
 // concurrency control around the business object.
 //
 // # Rules for consumer code
@@ -21,7 +17,7 @@
 //   - The consumer defines a state interface that embeds State and declares
 //     one behavior method per business method, taking the business object as
 //     a parameter. States hold only their label, typically by embedding
-//     *SimpleState.
+//     *SimpleState, so copying the business object is safe.
 //   - A base state returns an error from every behavior, and each concrete
 //     state embeds it and overrides only the behaviors it supports or rejects
 //     more specifically.
@@ -35,10 +31,13 @@
 //   - SetState type-checks the next state against the consumer's state
 //     interface and is the only place the state field changes after
 //     construction or restore. Restore stored objects with BuildState(label).
-//   - Guarded edges for one from + action come before any unguarded edge. To
-//     stay in the current state on purpose, add a self-transition.
+//   - A Condition only picks the edge, by calling business methods such as
+//     HasRemainingRefundAmount; the behavior method accepts or rejects the
+//     request. Guarded edges for one from + action come before any unguarded
+//     edge. To stay in the current state on purpose, add a self-transition.
 //   - Callers discard the business object when a business method returns an
-//     error: roll the transaction back and persist only after success.
+//     error, since the behavior may already have changed it: roll the
+//     transaction back and persist only after success.
 //
 // # Errors
 //
@@ -47,8 +46,8 @@
 // *StateBuilderError when the target has no builder or the builder returns nil
 // or a state with another label; a *StateMachineDefinitionError for a nil
 // context, machine, or current state; and any error from SetState. Check and
-// Freeze report wiring problems as a *StateMachineCheckError, and MustFreeze
-// panics with it. AddTransition and RegisterStateBuilder return a
+// Freeze report wiring problems as a *StateMachineCheckError, which MustFreeze
+// turns into a panic. AddTransition and RegisterStateBuilder return a
 // *StateMachineDefinitionError for empty input or a frozen machine.
 //
 // README.md walks through the order example step by step, and

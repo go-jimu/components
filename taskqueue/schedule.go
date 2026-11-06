@@ -15,7 +15,8 @@ const (
 	ScheduleKindInterval ScheduleKind = "interval"
 )
 
-// Schedule describes when a recurring task enqueue should happen.
+// Schedule describes when a PeriodicTask fires. Build it with CronSchedule or
+// IntervalSchedule.
 type Schedule struct {
 	kind     ScheduleKind
 	spec     string
@@ -30,20 +31,19 @@ type scheduleConfig struct {
 	location string
 }
 
-// WithLocation sets an IANA timezone name for cron schedules.
-//
-// Fixed interval schedules are duration-based and reject location options.
+// WithLocation sets an IANA time zone name for a cron schedule.
+// IntervalSchedule rejects it with ErrInvalidScheduleOption.
 func WithLocation(location string) ScheduleOption {
 	return func(cfg *scheduleConfig) {
 		cfg.location = location
 	}
 }
 
-// CronSchedule constructs a validated standard five-field cron schedule shape.
-//
-// Validation is intentionally limited to the portable five-field shape and
-// optional IANA location. Provider adapters remain responsible for cron dialect
-// details such as value ranges and named fields.
+// CronSchedule constructs a standard five-field cron schedule. It checks only
+// the portable shape and the optional IANA location, returning
+// ErrEmptySchedule, ErrInvalidSchedule, or ErrInvalidScheduleLocation; the
+// provider adapter validates its cron dialect, such as value ranges and named
+// fields.
 func CronSchedule(spec string, opts ...ScheduleOption) (Schedule, error) {
 	cfg := newScheduleConfig(opts...)
 	schedule := Schedule{
@@ -57,10 +57,10 @@ func CronSchedule(spec string, opts ...ScheduleOption) (Schedule, error) {
 	return schedule, nil
 }
 
-// IntervalSchedule constructs a validated fixed interval schedule.
-//
-// Interval schedules are duration-based; use CronSchedule with WithLocation
-// when wall-clock timezone semantics matter.
+// IntervalSchedule constructs a fixed interval schedule. It returns
+// ErrEmptySchedule for a non-positive interval and ErrInvalidScheduleOption
+// for WithLocation. For wall-clock times in a time zone, use CronSchedule with
+// WithLocation.
 func IntervalSchedule(interval time.Duration, opts ...ScheduleOption) (Schedule, error) {
 	cfg := newScheduleConfig(opts...)
 	schedule := Schedule{
@@ -99,13 +99,13 @@ func (s Schedule) Interval() time.Duration {
 	return s.interval
 }
 
-// Location returns the configured IANA timezone name for cron schedules.
+// Location returns the configured IANA time zone name for cron schedules.
 func (s Schedule) Location() string {
 	return s.location
 }
 
-// Validate checks whether the schedule carries enough information for a
-// provider adapter to register it.
+// Validate returns the error CronSchedule or IntervalSchedule returns for s,
+// or ErrEmptySchedule for the zero Schedule.
 func (s Schedule) Validate() error {
 	switch s.kind {
 	case ScheduleKindCron:
@@ -149,12 +149,8 @@ func validateScheduleLocation(location string) error {
 	return nil
 }
 
-// PeriodicTask describes a recurring enqueue definition for a concrete task.
-//
-// Each schedule fire enqueues the same Task envelope with the same enqueue
-// policy. Dynamic payload generation belongs in application or provider-level
-// orchestration outside this transport-neutral contract. This intentionally
-// narrow core shape is name + Schedule + Task + EnqueuePolicy.
+// PeriodicTask enqueues one Task with one enqueue policy on every fire of its
+// Schedule. See "Periodic tasks".
 type PeriodicTask struct {
 	name     string
 	schedule Schedule
@@ -162,7 +158,11 @@ type PeriodicTask struct {
 	policy   EnqueueOptions
 }
 
-// NewPeriodicTask constructs a periodic task producer contract.
+// NewPeriodicTask constructs a periodic task registered under name. It returns
+// ErrEmptyPeriodicTaskName, the Schedule.Validate errors, ErrEmptyType,
+// ErrPeriodicTaskID for a task with an ID, ErrInvalidEnqueueOption, or
+// ErrInvalidPeriodicTaskPolicy for WithProcessAt or WithDeadline. See
+// "Periodic tasks".
 func NewPeriodicTask(name string, schedule Schedule, task Task, opts ...EnqueueOption) (PeriodicTask, error) {
 	periodic := PeriodicTask{
 		name:     name,
@@ -176,7 +176,7 @@ func NewPeriodicTask(name string, schedule Schedule, task Task, opts ...EnqueueO
 	return periodic, nil
 }
 
-// Name returns the semantic name of the periodic task producer.
+// Name returns the registration key of the periodic task.
 func (t PeriodicTask) Name() string {
 	return t.name
 }
@@ -196,9 +196,7 @@ func (t PeriodicTask) EnqueuePolicy() EnqueueOptions {
 	return t.policy
 }
 
-// Validate checks whether a periodic task has a semantic identity, schedule,
-// routable task type, and enqueue policy suitable for repeated scheduled
-// enqueues.
+// Validate returns the error NewPeriodicTask returns for t's values.
 func (t PeriodicTask) Validate() error {
 	if t.name == "" {
 		return ErrEmptyPeriodicTaskName
@@ -233,23 +231,15 @@ func validatePeriodicTaskPolicy(policy EnqueueOptions) error {
 	return nil
 }
 
-// PeriodicTaskRegistrar registers periodic task producers.
-//
-// PeriodicTask.Name is the unique registration key for one registrar instance.
-// Implementations should return ErrDuplicatePeriodicTask when the same name is
-// registered twice in that instance. Cross-process or cross-replica duplicate
-// prevention is outside this provider-neutral contract. Implementations should
-// document whether registration is only supported before Start or can be
-// reconciled while running.
+// PeriodicTaskRegistrar registers periodic tasks. RegisterPeriodicTask
+// returns ErrDuplicatePeriodicTask for a PeriodicTask.Name already registered
+// on the same registrar. See "Periodic tasks".
 type PeriodicTaskRegistrar interface {
 	RegisterPeriodicTask(PeriodicTask) error
 }
 
-// PeriodicTaskScheduler registers periodic task producers and exposes the
-// provider lifecycle used by application runtime hooks.
-//
-// This is only a provider-neutral capability composition. It does not define
-// how schedules are compiled, persisted, locked, or executed by a provider.
+// PeriodicTaskScheduler registers periodic tasks and starts and stops the
+// provider scheduler. See "Lifecycle".
 type PeriodicTaskScheduler interface {
 	PeriodicTaskRegistrar
 	Worker

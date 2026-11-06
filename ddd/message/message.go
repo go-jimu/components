@@ -9,11 +9,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Kind is the semantic integration message contract type.
-//
-// Kind is used for handler matching and payload resolution. It is not a broker
-// topic, queue, subject, exchange, partition, or routing-key contract. Provider
-// adapters may map a Kind to their own envelope address.
+// Kind names an integration message contract: it routes a message to its
+// handlers and names its payload type. Providers map it onto their own
+// envelope address, such as a topic. See "Kind".
 type Kind string
 
 // Message is a protobuf integration DTO plus transport-neutral metadata.
@@ -110,8 +108,8 @@ func (m Message) Headers() map[string]string {
 // "google.protobuf.StringValue". It returns "" for a nil payload. It reads only
 // the type, so KindOf(&T{}) names the contract of T.
 //
-// KindOf is the recommended Kind for protobuf payloads; see the package
-// documentation for when to write a Kind by hand.
+// KindOf is the recommended Kind for protobuf payloads; see "Kind" for when to
+// write a Kind by hand.
 func KindOf(payload proto.Message) Kind {
 	if isNilPayload(payload) {
 		return ""

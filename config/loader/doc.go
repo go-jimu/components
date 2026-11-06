@@ -1,24 +1,26 @@
-// Package loader provides an opinionated application configuration loader.
+// Package loader loads application configuration into a struct from a
+// defaults file, an optional profile file, and environment variables.
 //
-// Load walks a configuration directory (./configs by default, including
-// subdirectories) and reads two kinds of files, in this order:
+// Load walks a configuration directory, including subdirectories, and reads
+// two kinds of files, in this order:
 //
 //   - the defaults file, named <defaults>.<ext>, "defaults.yml" by default;
 //   - when a profile alias is active, the profile file named
 //     <prefix>_<alias>.<ext>, such as "app_dev.yml" for
 //     WithConfigFilePrefix("app") and alias "dev".
 //
-// The extension selects the codec: .json, .yaml, .yml, or .toml. Values in the
-// profile file override the defaults. Load then scans the merged result into
-// the caller's struct through encoding/json, so tag struct fields with json
-// tags.
+// The directory is "./configs" by default, relative to the working
+// directory. The extension selects the codec: .json, .yaml, .yml, or .toml.
+// Values in the profile file override the defaults. Load then scans the
+// merged result into the caller's struct; see "Scanning" in the config
+// package documentation for json tags and string conversion.
 //
 // The alias comes from the environment variable JIMU_PROFILES_ACTIVE, or from
 // WithProfilesAlias when that variable is unset. An active alias requires
 // WithConfigFilePrefix.
 //
-// Load is one-shot and does not keep watching sources; use the config package
-// directly to watch.
+// Load reads the files once. To react to changes, compose config.New
+// directly; see "Reload" in the config package documentation.
 //
 // # Environment variables
 //

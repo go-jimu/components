@@ -10,8 +10,7 @@ type taskConfig struct {
 }
 
 // WithID sets a caller-assigned task identity that names one unit of work.
-// Enqueue returns ErrDuplicateTask while the provider retains a task with the
-// same ID. See Task.ID.
+// See "Task ID".
 func WithID(id string) Option {
 	return func(cfg *taskConfig) {
 		cfg.id = id
@@ -43,7 +42,8 @@ func WithHeaders(headers map[string]string) Option {
 	}
 }
 
-// WithPayloadCodec records the codec used to encode raw task payload bytes.
+// WithPayloadCodec records the codec that encoded the raw payload bytes passed
+// to New, so DecodePayload can find it.
 func WithPayloadCodec(codecName string) Option {
 	return func(cfg *taskConfig) {
 		cfg.payloadCodec = normalizePayloadCodec(codecName)

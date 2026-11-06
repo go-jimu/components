@@ -1,17 +1,11 @@
 # taskqueue
 
-`taskqueue` defines provider-neutral task queue contracts: task envelopes,
-processors and routing, enqueue policy, periodic enqueue definitions,
-middleware, and worker lifecycle interfaces. Provider packages own the runtime:
-persistence, polling, acknowledgement, retries, dead-letter queues, locking,
-metrics, and scheduler ownership.
-
-The rules live in the package documentation, which `go doc -all
-github.com/go-jimu/components/taskqueue` prints: vocabulary, processor
-outcomes (retry, `ErrSkipRetry`), who validates enqueue policy, task IDs and
-`ErrDuplicateTask`, periodic tasks, and lifecycle. This README walks through
-the code and expands the provider adapter checklist; `example_test.go` runs
-each pattern.
+`taskqueue` holds provider-neutral task queue contracts. The rules live in the package documentation, which `go doc -all
+github.com/go-jimu/components/taskqueue` prints: processor outcomes and
+`ErrSkipRetry`, middleware order, enqueue policy and who validates it, task
+IDs and `ErrDuplicateTask`, periodic tasks, and lifecycle. This README walks
+through the code and holds the provider adapter checklist; `example_test.go`
+runs each pattern.
 
 ## Consumer shape
 
@@ -36,9 +30,7 @@ A processor with injected dependencies implements `Processor` on a struct
 instead; `ExampleProcessor` shows that form with `DecodeProto` and
 `ErrSkipRetry`.
 
-Create the envelope at the application boundary. `New` takes raw bytes,
-`NewJSONTask` and `NewProtoTask` encode one format, and `NewEncodedTask` takes
-any registered codec:
+Create the envelope at the application boundary:
 
 ```go
 task, err := taskqueue.NewJSONTask(
@@ -59,12 +51,8 @@ Submit it through a provider adapter that implements `Enqueuer`:
 err = enqueuer.Enqueue(ctx, task, taskqueue.WithMaxRetry(3), taskqueue.WithTimeout(time.Minute))
 ```
 
-### Task ID
-
-`WithID` names one unit of work, and an ID conflict returns
-`ErrDuplicateTask`; see "Task ID" in the package documentation and
-`ExampleWithID`, which treats the conflict as "already scheduled". Each adapter
-documents how long it retains an ID.
+`ExampleWithID` treats an ID conflict (`ErrDuplicateTask`) as "already
+scheduled"; see "Task ID" in the package documentation.
 
 ## Schema registry
 
@@ -79,18 +67,15 @@ err := registry.Register(taskqueue.Definition{Type: "email.welcome", Queue: "mai
 })
 
 task, err := registry.NewTask(taskqueue.JSONCodec, WelcomeEmail{UserID: "user-1"})
-payload, err := registry.Decode(task)
+payload, err := registry.Decode(task) // *WelcomeEmail
 ```
 
-Factories return pointers, and each payload Go type maps to one task type.
 Protobuf messages register the same way and use `registry.NewProtoTask`.
 
 ## Periodic tasks
 
-A `PeriodicTask` enqueues the same static envelope with the same policy on every
-schedule fire. Scheduler callbacks, payloads computed per fire, distributed
-lock ownership, and workflow orchestration belong to application or provider
-code.
+Build the task without an ID and give the policy relative timing only; see
+"Periodic tasks" in the package documentation.
 
 ```go
 task, err := taskqueue.NewJSONTask(
@@ -109,41 +94,56 @@ periodic, err := taskqueue.NewPeriodicTask(
 )
 ```
 
-The constraints that keep a periodic task valid on every fire (relative
-timing only, no task ID) are under "Periodic tasks" in the package
-documentation.
-
-## Enqueue policy
-
-Each `EnqueueOption` documents its meaning; zero values mean provider
-defaults. The caller validates the policy, because adapters are not required
-to:
-
-```go
-opts := []taskqueue.EnqueueOption{taskqueue.WithDelay(delay), taskqueue.WithMaxRetry(3)}
-if err := taskqueue.NewEnqueueOptions(opts...).Validate(); err != nil {
-	return err // matches taskqueue.ErrInvalidEnqueueOption
-}
-err = enqueuer.Enqueue(ctx, task, opts...)
-```
-
 ## Provider adapters
 
-An adapter maps these contracts onto its system. Its documentation is complete
-when it answers each item:
+An adapter maps these contracts onto its system;
+`github.com/go-jimu/contrib/taskqueue/asynq` is a complete one. Its
+documentation is complete when it answers each item:
 
 - [ ] How `TaskType`, `Queue`, `ID`, `Headers`, `PayloadCodec`, and payload
       bytes are encoded.
 - [ ] How long a task ID is retained, with ID conflicts returned as
       `ErrDuplicateTask`.
-- [ ] How each enqueue policy maps to provider options, and which fields
-      define `WithUnique` duplicates, returned as `ErrDuplicateTask`.
+- [ ] How each enqueue option maps to provider options, including an unset
+      `MaxRetry`, and which fields define `WithUnique` duplicates, returned as
+      `ErrDuplicateTask`.
 - [ ] How processor errors are retried, skipped, dead-lettered, or recorded,
       and what `ErrSkipRetry` does.
+- [ ] Which `ExecutionInfo` fields the worker supplies. Without `RetryCount`
+      and `MaxRetry`, `Logging` logs every failure at Error.
 - [ ] Whether processors and periodic tasks can be registered after the worker
       starts, and how duplicate periodic names are detected in one registrar.
 - [ ] How the runtime surfaces failures after startup, since `Runner.Run`
-      returns only startup and shutdown errors for background runtimes.
+      returns only startup and shutdown errors.
 
-Cross-process duplicate prevention, scheduler leadership, storage schemas, and
-acknowledgement semantics are the adapter's to define.
+The worker side wraps a `Router`: for each delivery it stores `ExecutionInfo`
+in ctx, rebuilds the `Task`, and maps `ErrSkipRetry` to the provider's own
+stop-retrying signal. With a hypothetical SDK `sdk`:
+
+```go
+func (w *Worker) Register(p taskqueue.Processor) error { return w.router.Register(p) }
+
+// handle is the SDK's callback for one delivery.
+func (w *Worker) handle(ctx context.Context, msg *sdk.Message) error {
+	ctx = taskqueue.ContextWithExecutionInfo(ctx, taskqueue.NewExecutionInfo(
+		taskqueue.WithExecutionTaskID(msg.ID),
+		taskqueue.WithExecutionQueue(msg.Queue),
+		taskqueue.WithExecutionRetryCount(msg.Retried),
+		taskqueue.WithExecutionMaxRetry(msg.MaxRetry),
+	))
+	task, err := taskqueue.New(
+		taskqueue.Definition{Type: taskqueue.TaskType(msg.Type), Queue: msg.Queue},
+		msg.Payload,
+		taskqueue.WithPayloadCodec(msg.Codec), // carried beside the payload at enqueue
+		taskqueue.WithHeaders(msg.Headers),
+	)
+	if err != nil {
+		return err
+	}
+	err = w.router.Process(ctx, task)
+	if errors.Is(err, taskqueue.ErrSkipRetry) {
+		return sdk.SkipRetry(err)
+	}
+	return err
+}
+```

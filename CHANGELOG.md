@@ -1,5 +1,32 @@
 # Change log
 
+## v0.12.11
+
+- Added: an outbox event type may implement `Validate() error`
+  (go-jimu/components#91). It runs when a must-run handler's event is
+  dispatched, so `DispatchAll` returns `ErrInvalidEvent` wrapped and the
+  transaction rolls back, and after decoding a record, so an older
+  record that lacks a now-required field fails with the error in
+  `LastError` instead of running the handler with a zero value. Types
+  without `Validate` behave as before. `Register` rejects a type whose
+  `Validate` is on its pointer only.
+- Docs: "Events" in `ddd/event/outbox` states what JSON decoding catches
+  (only type conflicts; missing or renamed fields decode as zero values),
+  that pending records must stay compatible in both directions during a
+  rolling deploy, and that an incompatible change takes a new Kind.
+- Removed: `config.ErrTypeAssert`, which nothing returned, and the
+  `config.Reader` interface, which no API accepted or returned. A `Value`
+  accessor that cannot convert still returns a descriptive error; match
+  `config.ErrNotFound` to tell an absent key apart.
+- Docs: every package's documentation is revised for agent readers. Each
+  rule now lives once in `doc.go`, which opens with a "Read by task" list.
+  Symbol comments state their own contracts and point to sections, and the
+  READMEs keep walkthroughs only. Fixed stale claims include what
+  `config/file` loads, `loader.Load` with `WithEnvOverrides`, `fsm.MustFreeze`'s
+  panic value, `outbox.Close`'s wait, and `Dispatcher`'s error contract.
+  `AGENTS.md` now covers verification, changelog entries, and how to write
+  docs.
+
 ## v0.12.10
 
 - Changed: the ctx a must-run handler's Handle receives now ends when the

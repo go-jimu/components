@@ -10,8 +10,8 @@ import (
 	"github.com/samber/oops"
 )
 
-// ErrorKey is the attribute key Error uses, "error" by default. Change it
-// only during initialization, before any logging; it is not synchronized.
+// ErrorKey is the attribute key Error uses, "error" by default. Set it during
+// initialization, before any logging; it is not synchronized.
 var ErrorKey = "error"
 
 // StackTracer is implemented by errors that carry a github.com/pkg/errors
@@ -21,8 +21,8 @@ type StackTracer interface {
 	StackTrace() errors.StackTrace
 }
 
-// Error returns an attribute for err under ErrorKey; see "Logging errors"
-// in the package documentation. A nil err is logged as null.
+// Error returns an attribute for err under ErrorKey, shaped as "Logging
+// errors" describes. A nil err is logged as null.
 func Error(err error) slog.Attr {
 	if err == nil {
 		return slog.Any(ErrorKey, nil)

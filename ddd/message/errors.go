@@ -19,15 +19,14 @@ var (
 	// kind. Providers treat it as a message-level failure.
 	ErrUnhandledKind = errors.New("message kind is unhandled")
 	// ErrUnknownKind means PayloadRegistry.Resolve has no factory for the
-	// kind. Register the kind before the provider consumes it.
+	// kind. See "Consuming".
 	ErrUnknownKind = errors.New("unknown message kind")
 
-	// ErrNilPayloadResolver means no resolver function was configured.
+	// ErrNilPayloadResolver means PayloadResolverFunc.Resolve was called on a
+	// nil function.
 	ErrNilPayloadResolver = errors.New("message payload resolver is nil")
-
-	// ErrNilPayloadFactory means a resolver or registry factory could not
-	// allocate a protobuf target for decoding. It is distinct from
-	// ErrNilPayload, which applies to constructing a Message with an invalid
-	// payload value.
+	// ErrNilPayloadFactory means a payload factory is missing or returned no
+	// target to decode into: PayloadRegistry.Register received a nil factory,
+	// or a factory or PayloadResolverFunc returned a nil or typed-nil payload.
 	ErrNilPayloadFactory = errors.New("message payload factory is nil")
 )

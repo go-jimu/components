@@ -28,12 +28,16 @@ func NewRegistry() *Registry {
 
 // Register adds event type T under the Kind its zero value reports. It
 // returns ErrInvalidEvent wrapped when that Kind is empty or the zero value
-// cannot report it, and ErrDuplicateKind when the Kind is already
-// registered.
+// cannot report it, or when only *T has a Validate method, and
+// ErrDuplicateKind when the Kind is already registered. See "Events".
 func Register[T event.Event](r *Registry) error {
 	kind, err := kindOf[T]()
 	if err != nil {
 		return err
+	}
+	if _, ok := any(new(T)).(validator); ok && !reflect.TypeFor[T]().Implements(reflect.TypeFor[validator]()) {
+		return fmt.Errorf("%w: %s has Validate on its pointer only, so it would never run; give Validate a value receiver",
+			ErrInvalidEvent, reflect.TypeFor[T]())
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -45,6 +49,9 @@ func Register[T event.Event](r *Registry) error {
 		decode: func(payload []byte) (event.Event, error) {
 			var e T
 			if err := json.Unmarshal(payload, &e); err != nil {
+				return nil, err
+			}
+			if err := validate(e); err != nil {
 				return nil, err
 			}
 			return e, nil
@@ -76,11 +83,14 @@ func (r *Registry) Registered(kind event.Kind) bool {
 }
 
 // Encode returns e in stored form. It returns ErrInvalidEvent wrapped for a
-// nil e, and ErrUnregisteredKind wrapped when e's Kind is not registered or
-// was registered for another Go type.
+// nil e or one whose Validate fails, and ErrUnregisteredKind wrapped when e's
+// Kind is not registered or was registered for another Go type.
 func (r *Registry) Encode(e event.Event) (EncodedEvent, error) {
 	if err := r.check(e); err != nil {
 		return EncodedEvent{}, err
+	}
+	if err := validate(e); err != nil {
+		return EncodedEvent{}, fmt.Errorf("outbox: encode %s: %w", e.Kind(), err)
 	}
 	payload, err := json.Marshal(e)
 	if err != nil {
@@ -90,7 +100,8 @@ func (r *Registry) Encode(e event.Event) (EncodedEvent, error) {
 }
 
 // Decode returns the event e encodes. It returns ErrUnregisteredKind wrapped
-// for an unknown Kind, and the JSON error for a payload that does not decode.
+// for an unknown Kind, the JSON error for a payload that does not decode, and
+// ErrInvalidEvent wrapped for an event whose Validate fails.
 func (r *Registry) Decode(e EncodedEvent) (event.Event, error) {
 	r.mu.RLock()
 	reg, found := r.kinds[e.Kind]
@@ -117,6 +128,31 @@ func (r *Registry) check(e event.Event) error {
 	}
 	if got := reflect.TypeOf(e); got != reg.typ {
 		return fmt.Errorf("%w: %s is registered for %s, not %s", ErrUnregisteredKind, e.Kind(), reg.typ, got)
+	}
+	return nil
+}
+
+// validator is the optional method an event type implements to reject a
+// value, such as one decoded from a record written before a required field
+// existed. See "Events".
+type validator interface {
+	Validate() error
+}
+
+// validate runs e's Validate, if it has one, and returns its error or panic
+// wrapped in ErrInvalidEvent.
+func validate(e event.Event) (err error) {
+	v, ok := e.(validator)
+	if !ok {
+		return nil
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("%w: Validate panicked: %v", ErrInvalidEvent, p)
+		}
+	}()
+	if err := v.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
 	return nil
 }

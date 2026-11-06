@@ -1,8 +1,8 @@
 // Package transactiontest provides an in-memory transaction.Driver for unit
 // tests of code that runs inside a transaction.Manager: application use
 // cases, hooks, and code built on them. It records how each transaction
-// ended and can be told to fail the next Begin or Commit. It stores no data;
-// test the real Driver against its database.
+// ended and can be told to fail the next Begin, Commit, or Rollback. It
+// stores no data; test the real Driver against its database.
 package transactiontest
 
 import (
@@ -84,8 +84,9 @@ func (d *Driver) FailNextBegin(err error) {
 	d.mu.Unlock()
 }
 
-// FailNextCommit makes the next Commit return err. Pass ErrConflict for a
-// conflict; any other error leaves the commit outcome unknown to the Manager.
+// FailNextCommit makes the next Commit return err. The Manager reports
+// ErrConflict as transaction.ErrConflict and any other error as
+// transaction.ErrOutcomeUnknown.
 func (d *Driver) FailNextCommit(err error) {
 	d.mu.Lock()
 	d.commitErr = err

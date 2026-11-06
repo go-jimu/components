@@ -1,5 +1,9 @@
-// Package proto defines the protobuf codec. Importing this package will
-// register the codec.
+// Package proto registers the protobuf codec with the encoding registry under
+// the name "proto".
+//
+// The codec accepts a protobuf message or a pointer to one; Unmarshal into a
+// pointer to a nil message allocates the message. Any other value, or a nil
+// message to marshal, returns an error.
 package proto
 
 import (
@@ -10,14 +14,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Name is the name registered for the proto compressor.
+// Name is the name registered for the proto codec.
 const Name = "proto"
 
 func init() {
 	encoding.RegisterCodec(codec{})
 }
 
-// codec is a codec implementation with protobuf. It is the default codec for Transport.
+// codec is the protobuf Codec.
 type codec struct{}
 
 func (codec) Marshal(v interface{}) ([]byte, error) {

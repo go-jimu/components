@@ -6,13 +6,7 @@ import (
 )
 
 // Processor processes the tasks of one type. TaskType returns that type;
-// Process handles one attempt.
-//
-// Process returns nil when the task is done, an error to have the provider
-// retry it, or an error wrapping ErrSkipRetry to stop retries. It may run
-// concurrently with itself and more than once for one task, so make it safe
-// for concurrent use and idempotent. Implement Processor on a struct when the
-// processor has injected dependencies; use NewProcessor for a closure.
+// Process handles one attempt and reports its outcome. See "Processing".
 type Processor interface {
 	TaskType() TaskType
 	Process(context.Context, Task) error
@@ -22,11 +16,8 @@ type Processor interface {
 // it to a task type, and Middleware wraps it.
 type ProcessorFunc func(context.Context, Task) error
 
-// Registrar registers task processors.
-//
-// Register is a processor registration operation only. It does not imply that a
-// provider worker has started polling, acknowledged tasks, scheduled retries,
-// or joined a runtime process.
+// Registrar registers task processors. Registration starts nothing; see
+// "Lifecycle".
 type Registrar interface {
 	Register(Processor) error
 }
@@ -36,10 +27,8 @@ type functionProcessor struct {
 	fn       ProcessorFunc
 }
 
-// NewProcessor constructs a Processor that handles taskType with fn. It suits
-// closures and middleware chains; implement Processor on a struct instead when
-// the processor has injected dependencies. Process returns ErrNilProcessor
-// when fn is nil.
+// NewProcessor constructs a Processor that handles taskType with fn. Its
+// Process returns ErrNilProcessor when fn is nil. See "Processing".
 func NewProcessor(taskType TaskType, fn ProcessorFunc) Processor {
 	return functionProcessor{taskType: taskType, fn: fn}
 }

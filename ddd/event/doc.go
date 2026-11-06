@@ -57,9 +57,11 @@
 // The ctx passed in carries values only. Its cancellation and deadline do not
 // reject events: the events of a committed transaction must not be dropped
 // because the client disconnected. Handlers run asynchronously, possibly
-// before DispatchAll returns, on a context owned by the dispatcher; copy
-// observability values, such as the trace, through SourceContext, typically
-// in WithContextFactory. Data a handler needs belongs in the event.
+// before DispatchAll returns, on a context owned by the dispatcher, without
+// the caller's values: some, such as an open transaction, end with the
+// request. Copy observability values, such as the trace, through
+// SourceContext, typically in WithContextFactory. Data a handler needs
+// belongs in the event.
 //
 // Events are rejected in two cases only: the dispatcher is closed
 // (ErrDispatcherClosed), or the queue stayed full for the admission timeout,
@@ -96,7 +98,8 @@
 // derived from it.
 //
 // A queue that stays full means handlers cannot keep up: callers wait up to
-// the admission timeout, then their events are rejected and logged.
+// the admission timeout, then their events are rejected, see "Dispatch". A
+// longer timeout only holds the callers longer.
 //
 // # Shutdown
 //
@@ -107,8 +110,7 @@
 // accepting events until it is idle: the queue is empty and no handler is
 // running. A handler that runs a use case dispatching a follow-up event gets
 // that event handled. Once idle, Close returns nil and Dispatch returns
-// ErrDispatcherClosed; a rejected dispatch is logged at Error with each
-// event's kind and key, since nothing recovers it.
+// ErrDispatcherClosed, see "Dispatch".
 //
 // Close's ctx is the dispatcher's whole shutdown budget, handler chains
 // included; a chain of handlers dispatching each other ends when it runs out.

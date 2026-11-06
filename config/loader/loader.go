@@ -40,13 +40,14 @@ const (
 )
 
 // Load reads the defaults file and the active profile file, merges them, and
-// scans the result into v, a pointer to a struct with json tags.
+// scans the result into v, a pointer to a struct with json tags. Fields the
+// configuration leaves out keep their values, so set defaults in v before
+// calling Load; a directory with no matching file is not an error.
 //
 // It returns an error when the configuration directory cannot be read, when
 // a profile alias is active without WithConfigFilePrefix, when WithEnvOverrides
 // is set without WithEnvVarsPrefix, or when a file cannot be parsed or scanned
-// into v. When no file matches, it returns nil and
-// leaves v unchanged, so set defaults in v before calling Load.
+// into v.
 func Load(v any, opts ...Option) error {
 	o := new(loadOptions)
 	*o = defaultLoadOption

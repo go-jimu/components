@@ -16,7 +16,9 @@ var (
 	_ Value = (*errValue)(nil)
 )
 
-// Value is config value interface.
+// Value is the configuration value at one key. The accessors convert
+// between scalar kinds and return ErrNotFound while the key is absent; see
+// "Values".
 type Value interface {
 	Bool() (bool, error)
 	Int() (int64, error)
@@ -25,10 +27,15 @@ type Value interface {
 	Duration() (time.Duration, error)
 	Slice() ([]Value, error)
 	Map() (map[string]Value, error)
-	// Scan decodes the value into a pointer, converting strings to the kinds
-	// of the target fields as Config.Scan does; see "Scanning" in README.md.
+	// Scan decodes the value into a pointer as Config.Scan does; see
+	// "Scanning".
 	Scan(interface{}) error
+	// Load returns the value as decoded, such as a string, a number, a
+	// []interface{}, or a map[string]interface{}; nil while the key is
+	// absent.
 	Load() interface{}
+	// Store replaces what every holder of this Value reads, until the next
+	// reload.
 	Store(interface{})
 }
 
@@ -67,11 +74,13 @@ func (v *atomicValue) storeNotFound() {
 	v.box.Store(valueBox{err: ErrNotFound})
 }
 
-func (v *atomicValue) typeAssertError() error {
+// typeAssertError reports why the value cannot convert to kind: ErrNotFound
+// while the key is absent.
+func (v *atomicValue) typeAssertError(kind string) error {
 	if err := v.load().err; err != nil {
 		return err
 	}
-	return fmt.Errorf("type assert to %v failed", reflect.TypeOf(v.Load()))
+	return fmt.Errorf("cannot convert %v to %s", reflect.TypeOf(v.Load()), kind)
 }
 
 func (v *atomicValue) Bool() (bool, error) {
@@ -81,7 +90,7 @@ func (v *atomicValue) Bool() (bool, error) {
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, string:
 		return strconv.ParseBool(fmt.Sprint(val))
 	}
-	return false, v.typeAssertError()
+	return false, v.typeAssertError("bool")
 }
 
 func (v *atomicValue) Int() (int64, error) {
@@ -113,7 +122,7 @@ func (v *atomicValue) Int() (int64, error) {
 	case string:
 		return strconv.ParseInt(val, 10, 64)
 	}
-	return 0, v.typeAssertError()
+	return 0, v.typeAssertError("int64")
 }
 
 // uint64ToInt64 rejects values above math.MaxInt64, as ParseInt does for a
@@ -128,7 +137,7 @@ func uint64ToInt64(u uint64) (int64, error) {
 func (v *atomicValue) Slice() ([]Value, error) {
 	vals, ok := v.Load().([]interface{})
 	if !ok {
-		return nil, v.typeAssertError()
+		return nil, v.typeAssertError("slice")
 	}
 	slices := make([]Value, 0, len(vals))
 	for _, val := range vals {
@@ -142,7 +151,7 @@ func (v *atomicValue) Slice() ([]Value, error) {
 func (v *atomicValue) Map() (map[string]Value, error) {
 	vals, ok := v.Load().(map[string]interface{})
 	if !ok {
-		return nil, v.typeAssertError()
+		return nil, v.typeAssertError("map")
 	}
 	m := make(map[string]Value, len(vals))
 	for key, val := range vals {
@@ -182,7 +191,7 @@ func (v *atomicValue) Float() (float64, error) {
 	case string:
 		return strconv.ParseFloat(val, 64)
 	}
-	return 0.0, v.typeAssertError()
+	return 0.0, v.typeAssertError("float64")
 }
 
 func (v *atomicValue) String() (string, error) {
@@ -196,7 +205,7 @@ func (v *atomicValue) String() (string, error) {
 	case fmt.Stringer:
 		return val.String(), nil
 	}
-	return "", v.typeAssertError()
+	return "", v.typeAssertError("string")
 }
 
 // Duration accepts duration strings such as "5s", like Scan into a

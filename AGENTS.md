@@ -1,35 +1,38 @@
 # Repository Guidance for Code Agents
 
-This repository is a Go component library. Keep package changes small,
-backward-compatible when practical, and verified with `go test ./...`.
+A Go component library. Verify every change with `make test` (race detector
+on) and `make lint`, as CI does. `make lint` needs golangci-lint v2, which
+`make tools` installs.
 
-## Package Orientation
+## Using a package
 
-`README.md` maps needs to packages. Before writing or changing code that uses a
-package, read `go doc -all <package>`: the package documentation states its
-rules, contracts, and error identities. Then read its `example_test.go`; the
-examples are executable and set the usage shape. A package README walks
-through longer code and links back to the package documentation for rules.
+Before writing or changing code that uses a package:
 
-- `config`: read `config/README.md`. Application code starts at
-  `config/loader`.
-- `encoding`: a codec registry. Blank import the codecs in use, such as
-  `encoding/json` or `encoding/yaml`.
-- `ddd/event`: domain events inside one bounded context, dispatched
-  concurrently and ordered per key.
-- `ddd/event/outbox`: must-run domain event handlers; events are recorded in
-  the use case's transaction and run by a Relay after commit.
-- `ddd/message`: protobuf integration messages across boundaries.
-- `transaction`: one local transaction per use case, carried in ctx; use
-  cases call `Within`, repository adapters call `Current`.
-- `taskqueue`: task contracts; `taskqueue/README.md` expands the provider
-  adapter checklist for adapter code.
-- `sloghelper`: helpers around the standard library `log/slog`.
-- `validation`: specification combinators and error notification.
+1. Find it in the package map in `README.md`.
+2. Read `go doc -all <package>`. The package documentation holds its rules,
+   contracts, and error identities, and its rules are the bar for done.
+3. Read its `example_test.go`, which sets the usage shape and runs.
+4. Read its README when it has one: `config`, `encoding`, `fsm`, and
+   `taskqueue` walk through longer code there, and `taskqueue/README.md`
+   holds the provider adapter checklist.
 
-## FSM Usage
+## Changing the library
 
-Before writing or changing code that uses `fsm`, read `go doc -all
-github.com/go-jimu/components/fsm`; its "Rules for consumer code" are the bar
-for done, `fsm/README.md` walks through the order example, and
-`fsm/example_test.go` runs the pattern.
+- Keep exported API backward-compatible when practical. A breaking change
+  uses a `!` commit type, such as `refactor(fsm)!:`.
+- Record every user-visible change in `CHANGELOG.md` under the next patch
+  tag, such as `## v0.12.11`, in entries headed Added, Changed, Fixed,
+  Deprecated, Removed, or Docs.
+
+## Writing docs
+
+Doc comments and READMEs are written for agents: write and revise them with
+the `writing-for-agents` skill. In this repository that means:
+
+- `doc.go` holds each contract once, one `# Section` per concept, with the
+  choice of path and numbered composition steps up front.
+- A symbol comment states its own contract (inputs, defaults, errors) and
+  points to the `doc.go` section by name, as in `See "Events".`
+- A README walks through longer code and links to `go doc` for the rules.
+- One term per concept, instructions stated positively, and every pointer
+  names a section that exists.

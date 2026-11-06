@@ -5,10 +5,13 @@
 // Application code depends on this package only: it publishes through
 // Publisher and subscribes Handler values through Subscriber. A provider
 // adapter, such as github.com/go-jimu/contrib/message/kafka, implements those
-// interfaces and is imported in runtime composition only. Providers map
-// Kind, ID, OccurredAt, Key, and Headers onto their own broker envelopes, such
-// as topics and record headers, and own the broker runtime: polling,
-// acknowledgement, offset commit, retry, redelivery, and dead-letter routing.
+// interfaces and is imported in runtime composition only.
+//
+// Read by task:
+//   - Publishing a message: "Kind", "Publishing".
+//   - Writing a handler: "Kind", "Handlers", "Middleware", "Failures".
+//   - Composing a consumer: "Consuming".
+//   - Writing a provider adapter: "Providers", "Failures".
 //
 // # Kind
 //
@@ -36,22 +39,28 @@
 //	}
 //	return publisher.Publish(ctx, msg)
 //
-// New generates a random ID and sets OccurredAt to now unless WithID or
-// WithOccurredAt sets them. WithKey sets the ordering group, usually the
-// aggregate ID.
-//
 // # Consuming
 //
-// Providers decode a payload before routing it, so register a factory for
-// every Kind a handler listens to before the provider starts consuming:
+// Compose a consumer in this order, before it starts consuming:
 //
-//	registry.Register(message.KindOf(&userv1.UserRegisteredV1{}), func() proto.Message {
+//  1. Register a payload factory in a PayloadRegistry for every Kind a
+//     handler listens to; the provider decodes a payload before routing it.
+//  2. Pass the registry to the provider as its PayloadResolver, for example
+//     kafka.WithPayloadResolver.
+//  3. Subscribe each Handler, wrapped with Chain when it takes Middleware.
+//  4. Run the provider when it implements Runner.
+//
+// Step 1 for one Kind:
+//
+//	registry := message.NewPayloadRegistry()
+//	err := registry.Register(message.KindOf(&userv1.UserRegisteredV1{}), func() proto.Message {
 //		return &userv1.UserRegisteredV1{}
 //	})
 //
-// Pass the registry to the provider as its PayloadResolver, then Subscribe
-// each Handler. A Handler type-asserts msg.Payload() to its generated type and
-// returns an error when the assertion fails.
+// # Handlers
+//
+// A Handler type-asserts msg.Payload() to its generated type and returns an
+// error when the assertion fails.
 //
 // Handle returns nil when the message is fully handled, and the provider marks
 // delivery complete. Return a non-nil error only when the provider should
@@ -68,16 +77,12 @@
 //
 //	subscriber.Subscribe(message.Chain(handler, message.Logging(logger)))
 //
-// Logging logs every Handle call at Debug, a failure included: the provider
-// logs the failure again at the level its failure policy implies, such as
-// Warn for a retry and Error for a lost message.
-//
 // # Failures
 //
 // Failures come in two layers:
 //
 //   - Handler.Handle returns a message-level failure for one delivered
-//     message. Each provider documents its policy for these: retry,
+//     message. Each provider documents its failure policy for these: retry,
 //     dead-letter, drop, or record.
 //   - Runner.Run returns a runtime-level failure: the provider loop cannot
 //     continue safely. Context cancellation or expiration is a normal shutdown
@@ -85,4 +90,18 @@
 //
 // Each function documents the Err* values it returns; compare them with
 // errors.Is.
+//
+// # Providers
+//
+// A provider adapter:
+//   - maps Kind, ID, OccurredAt, Key, and Headers onto its broker envelope,
+//     such as a topic and record headers;
+//   - owns the broker runtime: polling, acknowledgement, offset commit, retry,
+//     redelivery, and dead-letter routing, started by Runner.Run;
+//   - decodes each payload into the target its PayloadResolver returns, then
+//     routes the message, usually through a Router, which also implements
+//     Subscriber;
+//   - applies its failure policy to a Handle error and logs the failure at the
+//     level that policy implies, such as Warn for a retry and Error for a lost
+//     message; Logging records it at Debug only.
 package message

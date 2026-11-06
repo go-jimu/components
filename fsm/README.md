@@ -5,32 +5,14 @@ a business object delegates each behavior to its current state, and each
 concrete state implements that behavior its own way. An unpaid order's `Pay`
 takes the payment; a paid order's `Pay` returns "order has already been paid".
 
-Every business method runs **behavior first, transition second**: the current
-state performs or rejects the behavior, and only after it succeeds does
-`fsm.Transit` move the object to the next state.
-
 The running example is an order. An unpaid order can only be paid. A paid order
 can be refunded in part, which makes it partially refunded, or canceled, which
 refunds it in full. A partially refunded order can be refunded again or
 canceled, and never paid again. `example_test.go` is the executable version.
 
-## Responsibilities
-
-`fsm` owns the transition table: `from + action -> to` edges, their guards
-(`Condition`), building the target state from a registered `StateBuilder`,
-checking that edges and builders agree, and the transition flow in `Transit`.
-
-The consumer owns:
-
-- the business object, which implements `StateContext` and holds the current
-  state field
-- the state behavior interface, whose methods take the business object as a
-  parameter
-- a base state whose behavior methods return errors, and concrete states that
-  override the behaviors they support
-- `SetState`, which type-checks the next state and may record domain events or
-  bump a version
-- concurrency control around the business object
+The rules this walkthrough satisfies, and the bar for done in your own code, are
+"Rules for consumer code" in `go doc -all github.com/go-jimu/components/fsm`;
+error types are under "Errors" there.
 
 ## Steps
 
@@ -50,10 +32,6 @@ const (
 ```
 
 ### 2. Define the behavior interface and states
-
-Each behavior method receives the order it acts on. States hold only their
-label, so restoring an order is `BuildState(label)` and copying an order is
-safe.
 
 ```go
 type OrderState interface {
@@ -126,10 +104,8 @@ type CanceledOrderState struct{ BaseOrderState }
 Register a builder for every state that appears in a transition, add the
 transitions, and freeze the result into a package-level variable.
 `RegisterStateBuilder` and `AddTransition` fail only on empty input or a frozen
-machine, so join their errors and panic like `MustFreeze` does. `MustFreeze`
-runs `Check` and panics on a miswired machine, so wiring errors surface at
-startup: a missing or unreferenced builder, or one that returns nil or a state
-with the wrong label. Call `Freeze` instead when you want the error returned.
+machine, so join their errors and panic. `MustFreeze` runs `Check`, so a
+miswired machine panics at startup; call `Freeze` instead to get the error.
 
 ```go
 var orderMachine = fsm.MustFreeze(newOrderStateMachine())
@@ -170,11 +146,6 @@ func newOrderStateMachine() fsm.StateMachine {
 	return sm
 }
 ```
-
-The package-level variable replaces the deprecated registry
-(`RegisterStateMachine`, `GetStateMachine`, `MustGetStateMachine`): the
-dependency is a compile-time reference instead of a string looked up at
-runtime.
 
 ### 4. Implement the business object
 
@@ -259,25 +230,3 @@ if err != nil {
 }
 order := &Order{state: state.(OrderState), paidAmount: row.PaidAmount /* ... */}
 ```
-
-## Transit and guards
-
-`Transit(order, machine, action)` reads the candidate edges for the current
-state and action, evaluates each edge's `Condition` with the order, builds the
-first matching target state with `BuildState`, and hands it to
-`order.SetState`.
-
-A `Condition` is a **guard** on one `from -> to` edge. It picks the edge after
-the behavior already succeeded; the behavior method stays the place that
-accepts or rejects the business request. Guards call business methods on the
-aggregate, such as `HasRemainingRefundAmount`.
-
-The guard order, the self-transition rule, the `*TransitionError` cases, and
-discarding the aggregate after an error are stated under "Rules for consumer
-code" and "Errors" in the package documentation (`go doc -all
-github.com/go-jimu/components/fsm`).
-
-## Checklist
-
-The checklist that marks consumer code as done is "Rules for consumer code"
-in the package documentation. This walkthrough satisfies every rule.

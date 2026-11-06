@@ -1,8 +1,9 @@
 # encoding
 
-`encoding` is a small codec registry. Codec packages register themselves from
-`init`, so consumers normally blank import the formats they want and then look
-up a codec by content subtype.
+`encoding` is a registry of codecs keyed by name. The rules and the built-in
+codec packages live in the package documentation, which `go doc -all
+github.com/go-jimu/components/encoding` prints; `example_test.go` runs the
+lookup.
 
 ## Usage
 
@@ -10,18 +11,11 @@ up a codec by content subtype.
 import (
 	"github.com/go-jimu/components/encoding"
 	_ "github.com/go-jimu/components/encoding/json"
-	_ "github.com/go-jimu/components/encoding/proto"
-	_ "github.com/go-jimu/components/encoding/toml"
-	_ "github.com/go-jimu/components/encoding/yaml"
 )
 
 codec := encoding.GetCodec("json")
+if codec == nil {
+	return errors.New("json codec is not registered")
+}
 data, err := codec.Marshal(value)
 ```
-
-Built-in codec packages:
-
-- `encoding/json`
-- `encoding/yaml`
-- `encoding/toml`
-- `encoding/proto`

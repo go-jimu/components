@@ -15,7 +15,8 @@ type file struct {
 	path string
 }
 
-// NewSource new a file source.
+// NewSource returns a Source that loads and watches the file or directory at
+// path; see the package documentation.
 func NewSource(path string) config.Source {
 	return &file{path: path}
 }

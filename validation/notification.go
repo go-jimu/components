@@ -56,7 +56,8 @@ func (e *ErrChain) Unwrap() []error {
 	return e.errors
 }
 
-// Errors returns a copy of the collected errors in the order they were added.
+// Errors returns a copy of the collected errors in the order they were added,
+// for example to report failures per field.
 func (e *ErrChain) Errors() []error {
 	return append([]error(nil), e.errors...)
 }
