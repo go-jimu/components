@@ -12,11 +12,14 @@
 //	if err := repo.Save(ctx, order); err != nil {
 //		return err
 //	}
-//	return dispatcher.DispatchAll(ctx, order.Events.Drain())
+//	_ = dispatcher.DispatchAll(ctx, order.Events.Drain()) // the dispatcher reports rejected events
+//	return nil
 //
 // The aggregate is already saved when DispatchAll runs, so a dispatch error
-// means only that the follow-ups will not run: report it and treat the saved
-// state as the use case's outcome.
+// means only that the follow-ups will not run. Returning it would make the
+// caller retry a write that succeeded. The dispatcher has already logged each
+// rejected event, so the use case ignores the error and returns the saved
+// state.
 //
 // Runtime composition builds one dispatcher with NewDispatcher, subscribes
 // every Handler before traffic starts, and calls Close during shutdown, as
@@ -49,10 +52,20 @@
 // Dispatch and DispatchAll report admission only: whether the dispatcher
 // accepted the events, never whether handlers succeeded. DispatchAll accepts
 // all of its events or none, and calls waiting for queue space are admitted in
-// arrival order. The ctx passed in bounds only the wait for admission. Handlers
-// run asynchronously, possibly before DispatchAll returns, on a context owned by
-// the dispatcher; copy the caller values a handler needs, such as trace or
-// request IDs, through SourceContext, typically in WithContextFactory.
+// arrival order.
+//
+// The ctx passed in carries values only. Its cancellation and deadline do not
+// reject events: the events of a committed transaction must not be dropped
+// because the client disconnected. Handlers run asynchronously, possibly
+// before DispatchAll returns, on a context owned by the dispatcher; copy
+// observability values, such as the trace, through SourceContext, typically
+// in WithContextFactory. Data a handler needs belongs in the event.
+//
+// Events are rejected in two cases only: the dispatcher is closed
+// (ErrDispatcherClosed), or the queue stayed full for the admission timeout,
+// 5s by default (ErrAdmissionTimeout, WithAdmissionTimeout). Either way the
+// dispatcher logs each rejected event at Error with its kind and key, on the
+// caller's ctx, so the log leads back to the request.
 //
 // # Ordering
 //
@@ -76,10 +89,14 @@
 // context. Size WithWorkers against the resources handlers share, such as the
 // database connection pool.
 //
-// A handler that dispatches a follow-up event waits for queue space while
-// holding its worker; when every worker does this on a full queue, they wait
-// on each other. Dispatch follow-ups from the use case, or pass a ctx with a
-// deadline.
+// A handler that dispatches follow-up events with the ctx Handle received
+// never waits for queue space: only the workers free it, so a worker waiting
+// on a full queue could wait on itself. Those events are accepted at once,
+// beyond the buffer size if needed. Dispatch follow-ups with that ctx, or one
+// derived from it.
+//
+// A queue that stays full means handlers cannot keep up: callers wait up to
+// the admission timeout, then their events are rejected and logged.
 //
 // # Shutdown
 //
@@ -105,7 +122,8 @@
 // # Durability
 //
 // Delivery is best-effort and in memory: events still queued when the process
-// exits are lost. Put follow-up work that must survive a crash behind a
+// exits are lost, and so are events rejected by a closed dispatcher or a queue
+// that stays full. Put follow-up work that must survive a crash behind a
 // durable mechanism, such as a taskqueue task enqueued by the handler, or into
 // the use case itself.
 package event
