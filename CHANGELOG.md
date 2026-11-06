@@ -14,12 +14,10 @@
   (only type conflicts; missing or renamed fields decode as zero values),
   that pending records must stay compatible in both directions during a
   rolling deploy, and that an incompatible change takes a new Kind.
-- Changed: a `config.Value` accessor that cannot convert the value, such as
-  `Int` of `"ten"` or `Slice` of a string, now returns an error wrapping
-  `config.ErrTypeAssert`, so `errors.Is` identifies it. Before, the error did
-  not wrap it and `ErrTypeAssert` was never returned. Messages changed.
-- Removed: the exported `config.Reader` interface. No API accepted or
-  returned it.
+- Removed: `config.ErrTypeAssert`, which nothing returned, and the
+  `config.Reader` interface, which no API accepted or returned. A `Value`
+  accessor that cannot convert still returns a descriptive error; match
+  `config.ErrNotFound` to tell an absent key apart.
 - Docs: every package's documentation is revised for agent readers. Each
   rule now lives once in `doc.go`, which opens with a "Read by task" list.
   Symbol comments state their own contracts and point to sections, and the

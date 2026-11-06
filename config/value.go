@@ -17,8 +17,8 @@ var (
 )
 
 // Value is the configuration value at one key. The accessors convert
-// between scalar kinds; they return ErrNotFound while the key is absent and
-// ErrTypeAssert wrapped for a value that does not convert. See "Values".
+// between scalar kinds and return ErrNotFound while the key is absent; see
+// "Values".
 type Value interface {
 	Bool() (bool, error)
 	Int() (int64, error)
@@ -75,20 +75,12 @@ func (v *atomicValue) storeNotFound() {
 }
 
 // typeAssertError reports why the value cannot convert to kind: ErrNotFound
-// while the key is absent, otherwise ErrTypeAssert wrapped.
+// while the key is absent.
 func (v *atomicValue) typeAssertError(kind string) error {
 	if err := v.load().err; err != nil {
 		return err
 	}
-	return fmt.Errorf("%w: %v to %s", ErrTypeAssert, reflect.TypeOf(v.Load()), kind)
-}
-
-// convertError wraps a failed parse of a convertible value in ErrTypeAssert.
-func convertError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("%w: %w", ErrTypeAssert, err)
+	return fmt.Errorf("cannot convert %v to %s", reflect.TypeOf(v.Load()), kind)
 }
 
 func (v *atomicValue) Bool() (bool, error) {
@@ -96,8 +88,7 @@ func (v *atomicValue) Bool() (bool, error) {
 	case bool:
 		return val, nil
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, string:
-		b, err := strconv.ParseBool(fmt.Sprint(val))
-		return b, convertError(err)
+		return strconv.ParseBool(fmt.Sprint(val))
 	}
 	return false, v.typeAssertError("bool")
 }
@@ -129,8 +120,7 @@ func (v *atomicValue) Int() (int64, error) {
 	case float64:
 		return int64(val), nil
 	case string:
-		i, err := strconv.ParseInt(val, 10, 64)
-		return i, convertError(err)
+		return strconv.ParseInt(val, 10, 64)
 	}
 	return 0, v.typeAssertError("int64")
 }
@@ -139,7 +129,7 @@ func (v *atomicValue) Int() (int64, error) {
 // string.
 func uint64ToInt64(u uint64) (int64, error) {
 	if u > math.MaxInt64 {
-		return 0, fmt.Errorf("%w: value %d overflows int64", ErrTypeAssert, u)
+		return 0, fmt.Errorf("value %d overflows int64", u)
 	}
 	return int64(u), nil
 }
@@ -199,8 +189,7 @@ func (v *atomicValue) Float() (float64, error) {
 	case float64:
 		return val, nil
 	case string:
-		f, err := strconv.ParseFloat(val, 64)
-		return f, convertError(err)
+		return strconv.ParseFloat(val, 64)
 	}
 	return 0.0, v.typeAssertError("float64")
 }
@@ -228,7 +217,7 @@ func (v *atomicValue) Duration() (time.Duration, error) {
 		}
 		val, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
 		if err != nil {
-			return 0, fmt.Errorf("%w: invalid duration %q", ErrTypeAssert, s)
+			return 0, fmt.Errorf("invalid duration %q", s)
 		}
 		return time.Duration(val), nil
 	}

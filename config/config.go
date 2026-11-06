@@ -20,9 +20,6 @@ import (
 var (
 	// ErrNotFound reports a key absent from the configuration; see "Values".
 	ErrNotFound = errors.New("key not found")
-	// ErrTypeAssert is wrapped by a Value accessor that cannot convert the
-	// value to the requested kind; see "Values".
-	ErrTypeAssert = errors.New("type assert error")
 
 	_ Config = (*config)(nil)
 )
