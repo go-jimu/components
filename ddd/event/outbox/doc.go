@@ -123,8 +123,9 @@
 //
 // Once a lease expires, another Relay may claim the record. The first
 // Relay's updates then return ErrLeaseLost, so one Relay stores the outcome,
-// though both may have run the handler. Size WithLease above the time the
-// slowest record takes to run.
+// though both may have run the handler. So the Handle ctx ends when the
+// lease expires: a handler that honors ctx returns, and the record is
+// retried. Size WithLease above the time the slowest record takes to run.
 //
 // # Relay
 //
@@ -157,8 +158,10 @@
 // Handle runs on a ctx owned by the Relay, which outlives the request that
 // dispatched. It carries the Delivery and, with WithTrace, the trace: capture
 // runs on the ctx of the transaction's first dispatch, its carrier is stored
-// in the records, and restore derives the Handle ctx from it. The Relay
-// cancels the ctx only when it shuts down.
+// in the records, and restore derives the Handle ctx from it. The ctx ends
+// when the record's lease expires, see "Leases", or when the Relay shuts
+// down. Pass it to every call that may block, such as a publish, so a hung
+// dependency holds a worker for one lease at most.
 //
 // # Shutdown
 //
