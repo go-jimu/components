@@ -25,8 +25,9 @@ var (
 	// is not in the Registry. See "Events".
 	ErrUnregisteredKind = errors.New("outbox: event kind is not registered")
 
-	// ErrInvalidEvent means an event is nil, or its type reports an empty
-	// Kind.
+	// ErrInvalidEvent means an event is nil, its type reports an empty Kind
+	// or has Validate on its pointer only, or its Validate failed. See
+	// "Events".
 	ErrInvalidEvent = errors.New("outbox: event is invalid")
 
 	// ErrDispatchAfterFlush means DispatchAll ran in a transaction whose

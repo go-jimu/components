@@ -63,7 +63,8 @@
 // DispatchAll accepts all of its events or none. It returns:
 //   - transaction.ErrNoTransaction outside Within, and
 //     transaction.ErrTransactionDone on a ctx kept past its transaction;
-//   - ErrInvalidEvent wrapped for a nil event;
+//   - ErrInvalidEvent wrapped for a nil event, or one a must-run handler
+//     listens to whose Validate fails, see "Events";
 //   - ErrUnregisteredKind wrapped for an event a must-run handler listens to
 //     whose type is not registered, see "Events";
 //   - ErrDispatchAfterFlush, as above;
@@ -108,9 +109,36 @@
 // Handle receives the type that was dispatched. A Kind maps to one Go type:
 // dispatch either OrderPaid or *OrderPaid under a Kind, consistently.
 //
-// Evolve a type compatibly while records of it may be pending: add fields,
-// and keep removed or renamed ones decodable. An event that no longer
-// decodes fails its record, see "Failures".
+// Decoding does not catch most incompatible changes. A field missing from
+// the stored JSON, or stored under another name, decodes as its zero value
+// without an error; only a stored value of a conflicting JSON type, such as a
+// string for an int, fails the record. A field whose meaning or unit changed
+// decodes without a sign.
+//
+// So evolve a type compatibly while records of it may be pending, in both
+// directions: during a rolling deploy, a Relay of the old version may run
+// records the new version wrote, and the reverse.
+//   - A field you add is a zero value in older records: the handler must
+//     accept that zero value, or Validate rejects it, see below.
+//   - A field already released keeps its JSON name and its meaning.
+//   - A change that cannot follow these rules gets a new Kind and a new Go
+//     type. Keep the old type registered, and its handlers subscribed, until
+//     Store.Counts shows no records left for them.
+//
+// Keep events small: the identifiers and the facts of what happened, with
+// handlers reading current state as reconcilers, see "Handlers". Fewer
+// fields means fewer fields to evolve.
+//
+// An event type may implement Validate() error to reject values it cannot
+// handle, such as a required field left zero. The Registry calls it when a
+// must-run handler's event is dispatched, so DispatchAll returns
+// ErrInvalidEvent wrapped and the transaction rolls back, and after every
+// decode, so an older record that lacks the field fails, see "Failures",
+// instead of running the handler.
+// Reject only what the handler cannot handle: a zero value it copes with
+// must pass, or older records fail for nothing. Give Validate a value
+// receiver when the type is registered as a value; Register rejects a
+// Validate on the pointer only, which would never run.
 //
 // # Leases
 //
@@ -142,7 +170,8 @@
 //   - Transient: an error from Handle, or a panic. The record is retried
 //     after WithBackoff, forever.
 //   - Permanent: an error wrapping ErrPermanent, or an event that does not
-//     decode. The record fails and keeps the error in LastError.
+//     decode or fails its Validate, see "Events". The record fails and keeps
+//     the error in LastError.
 //   - Failed records go back to pending when a Relay starts, so deploying a
 //     fix retries them.
 //   - Skipping is the operator's decision: list failed records with

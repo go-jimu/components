@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,6 +31,22 @@ type OrderShipped struct {
 }
 
 func (OrderShipped) Kind() event.Kind { return "order.shipped" }
+
+// OrderRefunded gained the required Amount after records without it were
+// written.
+type OrderRefunded struct {
+	OrderID string `json:"order_id"`
+	Amount  int64  `json:"amount"`
+}
+
+func (OrderRefunded) Kind() event.Kind { return "order.refunded" }
+
+func (e OrderRefunded) Validate() error {
+	if e.Amount <= 0 {
+		return errors.New("amount is required")
+	}
+	return nil
+}
 
 type Unregistered struct{}
 
@@ -108,6 +125,9 @@ func newFixture(t *testing.T, opts ...outbox.Option) *fixture {
 		t.Fatal(err)
 	}
 	if err := outbox.Register[OrderShipped](registry); err != nil {
+		t.Fatal(err)
+	}
+	if err := outbox.Register[OrderRefunded](registry); err != nil {
 		t.Fatal(err)
 	}
 	store := &outboxtest.Store{Manager: manager}
@@ -260,6 +280,21 @@ func TestDispatchRejectsUnregisteredType(t *testing.T) {
 	})
 	if !errors.Is(dispatchErr, outbox.ErrUnregisteredKind) || !errors.Is(err, outbox.ErrUnregisteredKind) {
 		t.Fatalf("DispatchAll of *OrderPaid = %v, Within = %v, want ErrUnregisteredKind from both", dispatchErr, err)
+	}
+	if last := f.driver.Last(); last.State() != transactiontest.RolledBack {
+		t.Fatalf("transaction %s, want rolled back", last.State())
+	}
+	if records := f.store.Records(); len(records) != 0 {
+		t.Fatalf("stored %d records", len(records))
+	}
+}
+
+func TestDispatchRejectsEventsThatFailValidate(t *testing.T) {
+	f := newFixture(t)
+	f.subscribe(newHandler("refunds", OrderRefunded{}.Kind()))
+	err := f.dispatch(OrderRefunded{OrderID: "o-1", Amount: 100}, OrderRefunded{OrderID: "o-2"})
+	if !errors.Is(err, outbox.ErrInvalidEvent) || !strings.Contains(err.Error(), "amount is required") {
+		t.Fatalf("dispatch = %v, want ErrInvalidEvent with the Validate error", err)
 	}
 	if last := f.driver.Last(); last.State() != transactiontest.RolledBack {
 		t.Fatalf("transaction %s, want rolled back", last.State())
@@ -462,6 +497,29 @@ func TestRelayFailsUndecodableRecords(t *testing.T) {
 	f.waitFor("the record to fail", f.settled(outbox.StatusFailed))
 	if n := len(h.events()); n != 0 {
 		t.Fatalf("handler ran %d times for an undecodable event", n)
+	}
+}
+
+func TestRelayFailsRecordsThatFailValidate(t *testing.T) {
+	f := newFixture(t)
+	h := newHandler("refunds", OrderRefunded{}.Kind())
+	f.subscribe(h)
+	err := f.manager.Within(context.Background(), func(ctx context.Context) error {
+		return f.store.Insert(ctx, []outbox.Record{{
+			ID: "r-1", Handler: "refunds", Status: outbox.StatusPending,
+			Events: []outbox.EncodedEvent{{Kind: "order.refunded", Payload: []byte(`{"order_id":"o-1"}`)}},
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.run()
+	f.waitFor("the record to fail", f.settled(outbox.StatusFailed))
+	if n := len(h.events()); n != 0 {
+		t.Fatalf("handler ran %d times for an event that fails Validate", n)
+	}
+	if got := f.store.Records()[0].LastError; !strings.Contains(got, "amount is required") {
+		t.Fatalf("LastError = %q, want the Validate error", got)
 	}
 }
 

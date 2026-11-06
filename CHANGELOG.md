@@ -1,5 +1,20 @@
 # Change log
 
+## v0.12.11
+
+- Added: an outbox event type may implement `Validate() error`
+  (go-jimu/components#91). The `Registry` calls it when a must-run handler's
+  event is dispatched, so `DispatchAll` returns `ErrInvalidEvent` wrapped and
+  the transaction rolls back, and after decoding a record, so an older
+  record that lacks a now-required field fails with the error in
+  `LastError` instead of running the handler with a zero value. Types
+  without `Validate` behave as before. `Register` rejects a type whose
+  `Validate` is on its pointer only.
+- Docs: "Events" in `ddd/event/outbox` states what JSON decoding catches
+  (only type conflicts; missing or renamed fields decode as zero values),
+  that pending records must stay compatible in both directions during a
+  rolling deploy, and that an incompatible change takes a new Kind.
+
 ## v0.12.10
 
 - Changed: the ctx a must-run handler's Handle receives now ends when the
