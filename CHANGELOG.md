@@ -1,6 +1,6 @@
 # Change log
 
-## Unreleased
+## v0.12.5
 
 - Changed: the ctx of `ddd/event` `Dispatch` and `DispatchAll` carries values
   only, such as the caller's trace. Its cancellation and deadline no longer
