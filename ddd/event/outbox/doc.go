@@ -130,11 +130,11 @@
 // fields means fewer fields to evolve.
 //
 // An event type may implement Validate() error to reject values it cannot
-// handle, such as a required field left zero. It runs when a
-// must-run handler's event is dispatched, so DispatchAll returns
-// ErrInvalidEvent wrapped and the transaction rolls back, and after every
-// decode, so an older record that lacks the field fails, see "Failures",
-// instead of running the handler.
+// handle, such as a required field left zero. It runs when a must-run
+// handler's event is dispatched, so DispatchAll returns ErrInvalidEvent
+// wrapped and the transaction rolls back, and after every decode, so an
+// older record that lacks the field fails, see "Failures", instead of
+// running the handler.
 // Reject only what the handler cannot handle: a zero value it copes with
 // must pass, or older records fail for nothing. Give Validate a value
 // receiver when the type is registered as a value; Register rejects a
