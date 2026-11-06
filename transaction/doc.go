@@ -4,9 +4,9 @@
 // technology adapter, such as one for xorm, begins and ends the real
 // transactions.
 //
-// Runtime composition builds one Manager per resource with NewManager, and
-// hands it to application code as a Transactor and to that resource's
-// technology adapter as a *Manager.
+// Runtime composition gets one Manager per resource, from NewManager or from
+// that resource's technology adapter, and hands it to application code as a
+// Transactor.
 //
 // # Running a use case
 //
