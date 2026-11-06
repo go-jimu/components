@@ -18,6 +18,8 @@ through longer code and links back to the package documentation for rules.
 - `ddd/event`: domain events inside one bounded context, dispatched
   concurrently and ordered per key.
 - `ddd/message`: protobuf integration messages across boundaries.
+- `transaction`: one local transaction per use case, carried in ctx; use
+  cases call `Within`, repository adapters call `Current`.
 - `taskqueue`: task contracts; `taskqueue/README.md` expands the provider
   adapter checklist for adapter code.
 - `sloghelper`: helpers around the standard library `log/slog`.

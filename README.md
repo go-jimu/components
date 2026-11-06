@@ -17,6 +17,7 @@ package has no runtime API.
 | Model polymorphic states | `github.com/go-jimu/components/fsm` | State polymorphism; behavior first, transition second. Rules in `go doc`; walkthrough in [`fsm/README.md`](fsm/README.md). |
 | Same bounded-context domain events | `github.com/go-jimu/components/ddd/event` | Concurrent in-memory dispatch, ordered per key. |
 | Cross-boundary integration messages | `github.com/go-jimu/components/ddd/message` | Protobuf-first message DTOs and handler routing; broker runtime belongs to providers. |
+| Run a use case in one local transaction | `github.com/go-jimu/components/transaction` | One `Manager` per database carries the transaction in ctx; repository adapters resolve it with `Current`. `transaction/transactiontest` provides an in-memory driver for unit tests. |
 | Transport-neutral task queue contracts | `github.com/go-jimu/components/taskqueue` | Task envelopes, processors, routing, schedules, middleware, and worker interfaces. Rules in `go doc`; walkthrough in [`taskqueue/README.md`](taskqueue/README.md). |
 | Notification/specification validation helpers | `github.com/go-jimu/components/validation` | Specification combinators and error notification collection. |
 | `log/slog` helpers | `github.com/go-jimu/components/sloghelper` | Logger construction, context storage, error attributes, and handler hooks. |
