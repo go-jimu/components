@@ -10,7 +10,7 @@ import (
 	"github.com/go-jimu/components/sloghelper"
 )
 
-// Middleware wraps a task processor function.
+// Middleware wraps a ProcessorFunc. See "Middleware".
 type Middleware func(ProcessorFunc) ProcessorFunc
 
 // Chain wraps processor with middleware in declaration order: the first
@@ -25,7 +25,8 @@ func Chain(processor ProcessorFunc, middleware ...Middleware) ProcessorFunc {
 	return processor
 }
 
-// Recover converts processor panics into ErrPanic.
+// Recover converts a processor panic into an error wrapping ErrPanic. It
+// returns ErrNilProcessor when the wrapped function is nil.
 func Recover() Middleware {
 	return func(next ProcessorFunc) ProcessorFunc {
 		return func(ctx context.Context, task Task) (err error) {
@@ -50,8 +51,7 @@ func Recover() Middleware {
 // the ExecutionInfo the provider supplied, and is logged with the processor's
 // ctx. A failure also has elapsed_ms, final when the retry budget is known,
 // and the error under sloghelper.Error. A nil logger means slog.Default().
-//
-// Place Logging before Recover in Chain, so it logs a recovered panic.
+// Pass it before Recover to Chain; see "Middleware".
 func Logging(logger *slog.Logger) Middleware {
 	if logger == nil {
 		logger = slog.Default()

@@ -1,10 +1,10 @@
 package fsm
 
-// Transit executes the standard transition flow for a StateContext.
-//
-// It returns a *TransitionError when no edge is registered for the current
-// state and action, or when edges exist but none of their conditions match. To
-// stay in the current state, register an explicit self-transition.
+// Transit moves context along the first edge from its current state on action
+// whose Condition matches, evaluating edges in the order they were added: it
+// builds the target with sm.BuildState and hands it to context.SetState.
+// Errors other than SetState's leave the state unchanged. Call it after the
+// behavior succeeded; see "Rules for consumer code" and "Errors".
 func Transit(context StateContext, sm RuntimeStateMachine, action Action) error {
 	if context == nil {
 		return newStateMachineDefinitionError("state context is required")

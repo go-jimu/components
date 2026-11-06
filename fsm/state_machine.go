@@ -220,8 +220,9 @@ func (sm *simpleStateMachine) Freeze() (RuntimeStateMachine, error) {
 	return sm, nil
 }
 
-// MustFreeze checks and freezes sm, and panics if it is invalid. It suits a
-// package-level variable that holds a domain's state machine:
+// MustFreeze freezes sm and panics with a message naming sm and its
+// *StateMachineCheckError if Check fails. It suits a package-level variable
+// that holds a domain's state machine:
 //
 //	var orderMachine = fsm.MustFreeze(newOrderStateMachine())
 func MustFreeze(sm StateMachine) RuntimeStateMachine {

@@ -7,24 +7,15 @@ import (
 
 // Publisher sends integration messages through a provider. Publish returns
 // nil once the provider has accepted msg; an error means msg may not have been
-// sent, and each provider documents which errors it returns. Implementations are safe for
-// concurrent use.
+// sent, and each provider documents which errors it returns. Implementations
+// are safe for concurrent use. See "Publishing".
 type Publisher interface {
 	Publish(context.Context, Message) error
 }
 
 // Handler processes integration messages for the kinds returned by Listening.
-//
-// Handle returns nil when the message has been accepted and fully handled by
-// this handler. A provider may ack, commit, or otherwise mark delivery complete
-// after all matching handlers return nil.
-//
-// A non-nil error is a message-level failure: this specific message was not
-// successfully handled. Providers may apply their own retry, redelivery,
-// dead-letter, drop, or failure-recording policy. A Handler error is not, by
-// itself, a Runner runtime-loop failure. Business outcomes that should not use
-// provider failure handling should be handled inside the handler and then
-// return nil.
+// Handle returns nil when it has fully handled the message; a non-nil error is
+// a message-level failure. See "Handlers" and "Failures".
 type Handler interface {
 	Listening() []Kind
 	Handle(context.Context, Message) error
@@ -32,29 +23,18 @@ type Handler interface {
 
 // Subscriber registers message handlers. Subscribe returns an error when the
 // handler cannot be registered; see Router.Subscribe for the base errors.
-//
-// Subscribe is a handler registration operation only. It does not imply that a
-// broker consumer has started polling, reserved partitions, acknowledged
-// records, committed offsets, or joined a consumer group. Providers that own a
-// runtime loop should expose that separately, for example by implementing
-// Runner.
+// Subscribe only registers; a provider starts consuming in Runner.Run.
 type Subscriber interface {
 	Subscribe(Handler) error
 }
 
-// Runner is an optional runtime loop capability for providers that actively
-// consume messages.
+// Runner is the optional runtime loop of a provider that actively consumes
+// messages.
 //
-// Run blocks until the provider runtime loop terminates. Context cancellation or
-// expiration is a normal shutdown signal: Run stops consuming and returns nil
-// unless shutdown itself fails. Callers that need to know why ctx ended can
-// check ctx.Err(). A non-nil error returned by Run means the provider runtime
-// cannot continue safely, for example because polling, acknowledgement,
-// commit, or provider-owned failure handling failed.
-//
-// Run errors are runtime-level failures. Handler.Handle errors are message-level
-// failures and should be handled by the provider's documented message failure
-// policy rather than being treated as Run failures by default.
+// Run blocks until the loop terminates. When ctx is cancelled or expires, Run
+// stops consuming and returns nil unless shutdown itself fails; ctx.Err() tells
+// why ctx ended. A non-nil error is a runtime-level failure, for example
+// because polling, acknowledgement, or commit failed. See "Failures".
 type Runner interface {
 	Run(context.Context) error
 }

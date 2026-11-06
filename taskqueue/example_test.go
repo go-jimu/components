@@ -124,9 +124,8 @@ func ExampleNewPeriodicTask() {
 	// reports.daily cron reports.generate_daily
 }
 
-// indexDocument is a Processor implemented on a struct, the usual form when
-// the processor has injected dependencies. NewProcessor (see ExampleRouter)
-// suits closures, tests, and middleware chains.
+// indexDocument is a Processor implemented on a struct, the form for a
+// processor with injected dependencies.
 type indexDocument struct {
 	index map[int64]string // stands in for an injected repository
 }
@@ -225,7 +224,7 @@ func ExampleWithID() {
 }
 
 // ExampleEnqueueOptions_Validate shows the caller validating a policy before
-// Enqueue; adapters are not required to validate it.
+// Enqueue.
 func ExampleEnqueueOptions_Validate() {
 	opts := []taskqueue.EnqueueOption{
 		taskqueue.WithDelay(time.Minute),

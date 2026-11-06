@@ -26,7 +26,8 @@ const (
 	YMLCodec = "yml"
 )
 
-// TaskType is the semantic contract identifier for a task payload schema.
+// TaskType is the semantic contract that routes a task and names its payload
+// schema. See "Vocabulary".
 type TaskType string
 
 // Definition identifies a semantic task type and optional queue lane.
@@ -36,6 +37,7 @@ type Definition struct {
 }
 
 // Task is a provider-neutral background task envelope.
+// See "Creating and enqueueing tasks".
 type Task struct {
 	def          Definition
 	payload      []byte
@@ -44,7 +46,8 @@ type Task struct {
 	headers      map[string]string
 }
 
-// New constructs a task from raw payload bytes.
+// New constructs a task from raw payload bytes. It returns ErrEmptyType for an
+// empty def.Type. Pass WithPayloadCodec so DecodePayload finds the codec.
 func New(def Definition, payload []byte, opts ...Option) (Task, error) {
 	if def.Type == "" {
 		return Task{}, ErrEmptyType
@@ -98,12 +101,16 @@ func NewProtoTask(def Definition, payload any, opts ...Option) (Task, error) {
 	return NewEncodedTask(def, ProtoCodec, payload, opts...)
 }
 
-// DecodePayload decodes task payload into target using task.PayloadCodec().
+// DecodePayload decodes task payload into target using task.PayloadCodec(),
+// with the DecodePayloadWithCodec errors.
 func DecodePayload(task Task, target any) error {
 	return DecodePayloadWithCodec(task, task.PayloadCodec(), target)
 }
 
 // DecodePayloadWithCodec decodes task payload into target using codecName.
+// An empty payload leaves target unchanged and returns nil. It returns
+// ErrNilDecodeTarget, ErrEmptyPayloadCodec, ErrUnknownPayloadCodec, or the
+// codec's error wrapped with ErrSkipRetry; see "Processing".
 func DecodePayloadWithCodec(task Task, codecName string, target any) error {
 	if target == nil {
 		return ErrNilDecodeTarget
@@ -121,12 +128,14 @@ func DecodePayloadWithCodec(task Task, codecName string, target any) error {
 	return nil
 }
 
-// DecodeJSON decodes a JSON task payload into target.
+// DecodeJSON decodes a JSON task payload into target, with the
+// DecodePayloadWithCodec errors.
 func DecodeJSON(task Task, target any) error {
 	return DecodePayloadWithCodec(task, JSONCodec, target)
 }
 
-// DecodeProto decodes a protobuf task payload into target.
+// DecodeProto decodes a protobuf task payload into target, with the
+// DecodePayloadWithCodec errors.
 func DecodeProto(task Task, target any) error {
 	return DecodePayloadWithCodec(task, ProtoCodec, target)
 }
@@ -157,11 +166,8 @@ func (t Task) PayloadCodec() string {
 }
 
 // ID returns the caller-assigned task identity set by WithID, or "" when the
-// provider should assign one. "Task ID" in the package documentation states
-// how providers retain IDs and when Enqueue returns ErrDuplicateTask.
-//
-// Adapters need not restore ID on the worker side; a processor reads the
-// provider's task ID from ExecutionInfoFromContext instead.
+// provider assigns one. See "Task ID". On the worker side ID may be empty; a
+// processor reads the provider's task ID from ExecutionInfoFromContext.
 func (t Task) ID() string {
 	return t.id
 }

@@ -9,20 +9,24 @@ import (
 	"github.com/go-jimu/components/encoding"
 )
 
-// Decoder is config decoder.
+// Decoder decodes one KeyValue into the map for that entry, which is then
+// merged; see WithDecoder for the default.
 type Decoder func(*KeyValue, map[string]interface{}) error
 
-// Resolver resolve placeholder in config.
+// Resolver resolves placeholders in the merged configuration, in place. See
+// "Placeholders".
 type Resolver func(map[string]interface{}) error
 
-// Option is config option.
+// Option configures New.
 type Option func(*options)
 
-// Merge is config merge func.
+// Merge merges src, a decoded entry of type map[string]interface{}, into dst,
+// a *map[string]interface{}. See "Sources" for the default.
 type Merge func(dst, src interface{}) error
 
-// Lookup looks up a placeholder name outside the loaded configuration, for
-// example in environment variables. It reports whether name was found.
+// Lookup returns the value of a placeholder name from outside the
+// configuration, such as an environment variable, and reports whether name
+// was found. See "Placeholders".
 type Lookup func(name string) (string, bool)
 
 type options struct {
@@ -34,7 +38,8 @@ type options struct {
 	actualTypes bool
 }
 
-// WithSource with config source.
+// WithSource sets the sources, lowest priority first, replacing any set
+// before. See "Sources".
 func WithSource(s ...Source) Option {
 	return func(o *options) {
 		o.sources = s
@@ -51,10 +56,9 @@ func WithDecoder(d Decoder) Option {
 	}
 }
 
-// WithResolveActualTypes selects the default resolver for ${NAME:default}
-// placeholders, replacing one set by WithResolver. With enableConvertToType,
-// a value that is a single placeholder takes the type of its resolved text,
-// such as a number or a bool.
+// WithResolveActualTypes selects the built-in resolver, replacing one set by
+// an earlier WithResolver. With enableConvertToType, a value that is exactly
+// one placeholder takes the type of its resolved text. See "Placeholders".
 func WithResolveActualTypes(enableConvertToType bool) Option {
 	return func(o *options) {
 		o.resolver = nil
@@ -62,24 +66,24 @@ func WithResolveActualTypes(enableConvertToType bool) Option {
 	}
 }
 
-// WithResolver with config resolver.
+// WithResolver replaces the built-in placeholder resolver, which ignores
+// WithLookup from then on. See "Placeholders".
 func WithResolver(r Resolver) Option {
 	return func(o *options) {
 		o.resolver = r
 	}
 }
 
-// WithLookup sets an external lookup for ${name:default} placeholders used by
-// the built-in resolvers. The lookup is consulted before configuration paths,
-// so it can supply values such as environment variables that are not part of
-// the merged configuration. It has no effect on a resolver set by WithResolver.
+// WithLookup sets the Lookup the built-in resolver consults first for each
+// placeholder. See "Placeholders".
 func WithLookup(lookup Lookup) Option {
 	return func(o *options) {
 		o.lookup = lookup
 	}
 }
 
-// WithMergeFunc with config merge func.
+// WithMergeFunc replaces the Merge that merges each decoded entry over the
+// earlier ones; the default is described in "Sources".
 func WithMergeFunc(m Merge) Option {
 	return func(o *options) {
 		o.merge = m

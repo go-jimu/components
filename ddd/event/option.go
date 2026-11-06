@@ -25,7 +25,7 @@ func WithLogger(logger *slog.Logger) Option {
 
 // WithHandlerTimeout bounds each Handle call: its context is canceled after
 // timeout. The default, 0, sets no timeout; a negative timeout is ignored. The
-// handler must watch ctx for the timeout to free its worker.
+// handler must watch ctx for the timeout to free its worker; see "Capacity".
 func WithHandlerTimeout(timeout time.Duration) Option {
 	return func(d *InMemoryDispatcher) {
 		if timeout >= 0 {
@@ -69,18 +69,16 @@ func WithPanicHandler(fn func(PanicContext)) Option {
 // were running and those never started, for example to persist them for
 // compensation. With the hook set, the dispatcher logs only a Warn summary
 // and the hook owns the events; without it, each event is logged at Error.
-// See the package documentation, "Shutdown".
+// See "Shutdown".
 func WithCloseInterruptedHandler(fn func(CloseInterruptedContext)) Option {
 	return func(d *InMemoryDispatcher) {
 		d.closeInterruptedHandler = fn
 	}
 }
 
-// WithWorkers sets how many events the dispatcher may handle concurrently. The
-// default is 5, so handlers and hooks run on several goroutines at once. Size it
-// against the resources handlers share, such as the database connection pool.
-// With 1 worker, every event is handled in the order it was accepted. A value
-// below 1 keeps the default.
+// WithWorkers sets how many events the dispatcher may handle concurrently, 5
+// by default; a value below 1 keeps the default. With 1 worker, every event is
+// handled in the order it was accepted. See "Ordering" and "Capacity".
 func WithWorkers(n int) Option {
 	return func(d *InMemoryDispatcher) {
 		if n > 0 {
@@ -114,9 +112,8 @@ func WithBufferSize(size int) Option {
 
 // WithAdmissionTimeout sets how long DispatchAll waits for queue space before
 // it rejects the events with ErrAdmissionTimeout and logs each one. The
-// default is 5s: a queue that stays full that long means the handlers cannot
-// keep up, and waiting longer only holds the caller. A timeout below or equal
-// to 0 keeps the default.
+// default is 5s; a timeout below or equal to 0 keeps the default. See
+// "Capacity".
 func WithAdmissionTimeout(timeout time.Duration) Option {
 	return func(d *InMemoryDispatcher) {
 		if timeout > 0 {

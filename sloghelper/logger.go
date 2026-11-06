@@ -39,9 +39,8 @@ var (
 	pendingOptions []HandlerOption
 )
 
-// NewLog creates a JSON logger from opt and sets it as the slog default.
-// Level is case-insensitive and defaults to info; an unknown level falls back
-// to info and is reported with a warning.
+// NewLog creates a JSON logger from opt and sets it as the slog default. An
+// unknown Level falls back to info and is logged as a warning.
 func NewLog(opt Options) *slog.Logger {
 	level, known := parseLevel(opt.Level)
 	opts := &slog.HandlerOptions{
@@ -68,8 +67,9 @@ func NewLog(opt Options) *slog.Logger {
 	return logger
 }
 
-// Apply applies opt to the handler of the logger created by NewLog. Options
-// applied before NewLog take effect when NewLog is called.
+// Apply applies opt to the handler of the logger created by NewLog; an opt
+// applied before NewLog takes effect when NewLog runs. It is safe to call
+// concurrently with logging.
 func Apply(opt HandlerOption) {
 	defaultMu.Lock()
 	defer defaultMu.Unlock()

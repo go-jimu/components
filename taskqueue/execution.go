@@ -5,7 +5,9 @@ import "context"
 type executionInfoContextKey struct{}
 
 // ExecutionInfo carries provider worker metadata for the current processing
-// attempt. It is not part of the task payload schema.
+// attempt. The adapter's worker stores it with ContextWithExecutionInfo;
+// processors and Logging read it with ExecutionInfoFromContext. See
+// "Vocabulary".
 type ExecutionInfo struct {
 	taskID        string
 	queue         string

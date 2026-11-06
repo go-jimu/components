@@ -14,6 +14,14 @@
   (only type conflicts; missing or renamed fields decode as zero values),
   that pending records must stay compatible in both directions during a
   rolling deploy, and that an incompatible change takes a new Kind.
+- Docs: every package's documentation is revised for agent readers. Each
+  rule now lives once in `doc.go`, which opens with a "Read by task" list.
+  Symbol comments state their own contracts and point to sections, and the
+  READMEs keep walkthroughs only. Fixed stale claims include what
+  `config/file` loads, `loader.Load` with `WithEnvOverrides`, `fsm.MustFreeze`'s
+  panic value, `outbox.Close`'s wait, and `Dispatcher`'s error contract.
+  `AGENTS.md` now covers verification, changelog entries, and how to write
+  docs.
 
 ## v0.12.10
 

@@ -90,8 +90,8 @@
 // transaction, so the writes and the progress commit together or not at
 // all, even when the commit's reply is lost. That transaction completes the
 // event, so make it the last thing Handle does: run other effects before it,
-// since one after it is lost if it fails. Without MarkDone nothing changes,
-// whatever transactions Handle opens.
+// since one after it is lost if it fails. Without MarkDone, the transactions
+// Handle opens are effects like any other, which a rerun repeats.
 //
 // Order holds within a record: a handler runs one transaction's events in
 // dispatch order, each after the previous one succeeded. Records of different
@@ -197,7 +197,7 @@
 // Call Close after the servers and workers that dispatch have finished.
 // Close rejects further dispatches with event.ErrDispatcherClosed, stops the
 // Relay from taking records, releases the records it took but has not
-// started, and waits for running records until ctx ends. Then it cancels the
+// started, and waits for running records. If ctx ends first, it cancels the
 // Relay's ctx and returns ctx.Err() at once; a handler that ignores its ctx
 // finishes in the background. An interrupted record is released, due at once
 // for another Relay, when its handler returns; if the process exits first,

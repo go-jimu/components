@@ -12,7 +12,8 @@ import (
 	"github.com/go-jimu/components/sloghelper"
 )
 
-// Reader is config reader.
+// Reader is the method set of the store behind a Config. No exported API
+// accepts or returns a Reader; read values through Config.
 type Reader interface {
 	Merge(...*KeyValue) error
 	Value(string) (Value, bool)

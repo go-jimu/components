@@ -1,12 +1,19 @@
 // Package transaction runs one application use case in one local transaction
 // on one resource, such as one database, and carries that transaction in ctx
-// so repositories join it. It is technology-neutral: a Driver from a
-// technology adapter, such as one for xorm, begins and ends the real
-// transactions.
+// so repositories join it. A Driver from a technology adapter, such as one
+// for xorm, begins and ends the real transactions. Runtime composition gets
+// one Manager per resource, from NewManager or from that resource's
+// technology adapter, and hands it to application code as a Transactor.
 //
-// Runtime composition gets one Manager per resource, from NewManager or from
-// that resource's technology adapter, and hands it to application code as a
-// Transactor.
+// Read by task:
+//   - Writing a use case: "Running a use case", "Conflict and unknown
+//     outcome".
+//   - Writing a repository: "Repositories".
+//   - Writing code that works inside a transaction it does not own, such as
+//     an event dispatcher: "Hooks", "Transaction values".
+//   - Writing a technology adapter: "Writing a driver".
+//   - Unit testing code built on a Manager: package transactiontest, an
+//     in-memory Driver.
 //
 // # Running a use case
 //
@@ -29,9 +36,9 @@
 //     already in a transaction, of this Manager or of another one. Keep one
 //     Within call at the use case boundary and pass its ctx down.
 //  4. The ctx of fn belongs to fn: use it sequentially and drop it when fn
-//     returns. After the transaction ends, Current and hook registration
-//     report ErrTransactionDone for that ctx, so a kept ctx never falls back
-//     to the connection pool.
+//     returns. After the transaction ends, Current, Value, and hook
+//     registration report ErrTransactionDone for that ctx, so a kept ctx
+//     never falls back to the connection pool.
 //  5. One Manager owns one resource. Current reports ErrForeignTransaction
 //     for a ctx in another Manager's transaction, so a write to a second
 //     resource never looks atomic with the first.
@@ -85,40 +92,31 @@
 //   - AfterCommit registers a function that runs after a successful Commit,
 //     in registration order, before Within returns. It receives the ctx passed
 //     to Within, which is in no transaction. It runs only when Commit
-//     succeeded, never after a rollback, ErrConflict, or ErrOutcomeUnknown,
-//     so it suits work that is safe to lose, such as waking a worker. Keep it
-//     short and panic-free: a panic propagates out of Within after the
-//     commit.
-//
-// Both return ErrNoTransaction for a ctx in no transaction and
-// ErrTransactionDone once the transaction has ended.
+//     returned nil; after ErrOutcomeUnknown the transaction may have
+//     committed without it, so it suits work that is safe to lose, such as
+//     waking a worker. Keep it short and panic-free: a panic propagates out
+//     of Within after the commit.
 //
 // # Transaction values
 //
 // Value keeps one value per key for the life of one transaction, such as a
 // buffer that several calls inside fn append to and a BeforeCommit hook
 // flushes once. Declare an unexported key type, as for context.WithValue. The
-// value lives as long as the transaction's ctx; nothing needs clearing after a
-// commit or a rollback.
+// value needs no clearing after a commit or a rollback.
 //
 // # Writing a driver
 //
 // A technology adapter implements Driver for one technology:
 //
-//  1. Begin starts a transaction bound to ctx and returns it as a Tx.
-//  2. Tx.Commit and Tx.Rollback end it; the Manager calls exactly one of
-//     them, once.
-//  3. IsConflict reports true for errors that mean the transaction lost a
-//     concurrency conflict, so running it again may succeed, such as MySQL
-//     errors 1205 (lock wait timeout) and 1213 (deadlock). The Manager rolls
-//     back after any error from fn or a BeforeCommit hook, so the resource
-//     need not have rolled back itself; MySQL rolls back only the statement
-//     on 1205. For a Commit error, report true only when the resource has
-//     rolled the transaction back, since the Manager cannot roll back after
-//     Commit.
-//  4. The adapter provides the resolving function described in
+//  1. Begin starts a transaction bound to ctx and returns it as a Tx, which
+//     Tx.Commit or Tx.Rollback ends; see Tx.
+//  2. IsConflict reports true for errors such as MySQL errors 1205 (lock
+//     wait timeout) and 1213 (deadlock), and their counterparts on other
+//     resources. The Manager rolls back after any error from fn or a
+//     BeforeCommit hook, so the resource need not have rolled back itself;
+//     MySQL rolls back only the statement on 1205. For a Commit error, report
+//     true only when the resource has rolled the transaction back, since the
+//     Manager cannot roll back after Commit.
+//  3. The adapter provides the resolving function described in
 //     "Repositories".
-//
-// Package transactiontest provides an in-memory Driver for unit tests of code
-// built on a Manager.
 package transaction

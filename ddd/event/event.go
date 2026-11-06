@@ -46,22 +46,16 @@ type CloseInterruptedContext struct {
 	Pending  []Event
 }
 
-// Keyed is implemented by events that must be handled in order with other
-// events of the same key, usually the ID of the aggregate that raised them.
-//
-// Events with the same key are handled one at a time in the order they were
-// accepted. Events with different keys, and events without a key, are handled
-// concurrently. An empty key means no key. Events that do not implement Keyed
-// can get a key from WithKeyFunc.
+// Keyed is implemented by events that carry an ordering key, usually the ID
+// of the aggregate that raised them; an empty key means no key. WithKeyFunc
+// keys events that do not implement Keyed. See "Ordering".
 type Keyed interface {
 	Key() string
 }
 
-// Collection stores pending domain events raised by an aggregate. Drain removes
-// the pending events but leaves the collection ready to accept later events.
-// Events is the implementation; its zero value is ready to use.
-// Its methods are safe for concurrent use, but they do not synchronize other
-// aggregate state or mutable values referenced by an Event.
+// Collection stores pending domain events raised by an aggregate; Events
+// implements it. Its methods are safe for concurrent use, but they do not
+// synchronize other aggregate state or mutable values referenced by an Event.
 type Collection interface {
 	// Add records a pending event. A nil event is ignored.
 	Add(Event)
@@ -72,21 +66,14 @@ type Collection interface {
 	Len() int
 }
 
-// Handler reacts to a domain event as a follow-up transaction.
+// Handler reacts to a domain event as a follow-up transaction; see
+// "Handlers".
 //
-// Listening returns the kinds the handler is subscribed to; Subscribe reads it
-// once. Handle receives each accepted event of those kinds, type-asserts the
-// concrete event type it expects, and returns early for any other type.
-//
-// Handle owns its failures: by the time it runs, the publisher has returned,
-// so the handler is the only party that knows whether to retry, compensate, or
-// record a failure. Nothing retries Handle. The dispatcher recovers panics as
-// bugs and reports them to WithPanicHandler.
-//
-// Handle runs on a dispatcher worker with a context owned by the dispatcher,
-// possibly concurrently with itself for events of different keys, so it must
-// be safe for concurrent use. Keep it responsive to ctx: an interrupted Close
-// and WithHandlerTimeout cancel it.
+// Subscribe reads Listening once. Handle receives each accepted event of
+// those kinds, returns early for any concrete type it was not written for,
+// and owns its failures: nothing retries it. Handle runs concurrently with
+// itself for events of different keys, see "Ordering", on a ctx that
+// WithHandlerTimeout and an interrupted Close cancel.
 type Handler interface {
 	Listening() []Kind
 	Handle(context.Context, Event)
@@ -95,20 +82,13 @@ type Handler interface {
 // Dispatcher accepts domain events for asynchronous handling. Its methods are
 // safe for concurrent use.
 //
-// DispatchAll accepts all of its events or none of them. The ctx of Dispatch
-// and DispatchAll carries values only, such as the caller's trace: its
-// cancellation and deadline neither reject events nor reach handlers.
-// Accepted events are handled after the caller returns, on a context owned by
-// the dispatcher; use SourceContext to read caller values explicitly.
-//
-// Dispatch and DispatchAll return nil when the events are accepted, and
-// ErrDispatcherClosed or an implementation-specific error, such as
-// ErrAdmissionTimeout, when they are rejected. The dispatcher reports every
-// rejected event itself; a use case ignores the error and returns its saved
-// state.
-// Close drains accepted events, and the follow-ups their handlers dispatch,
-// until the dispatcher is idle, then stops admission; see the package
-// documentation, "Shutdown".
+// DispatchAll accepts all of its events or none, and returns nil when it
+// accepts them. The ctx of Dispatch and DispatchAll carries values only, such
+// as the caller's trace: its cancellation and deadline neither reject events
+// nor reach handlers. An error's meaning is the implementation's:
+// InMemoryDispatcher reports each rejected event itself, so a use case
+// ignores its error, see "Dispatch"; an error from ddd/event/outbox rolls the
+// transaction back. Close stops admission, see "Shutdown".
 type Dispatcher interface {
 	Dispatch(context.Context, Event) error
 	DispatchAll(context.Context, []Event) error
@@ -119,21 +99,16 @@ type sourceContextKey struct{}
 
 // SourceContext returns the context passed to Dispatch or DispatchAll for the
 // event being handled, detached from its cancellation and deadline. It reports
-// false for contexts not created by a dispatcher.
-//
-// Handler contexts deliberately do not inherit caller values, because some of
-// them, such as an open transaction, are only valid during the caller's
-// request. Copy only observability values, such as the trace, from
-// SourceContext, typically inside WithContextFactory; data a handler needs to
-// do its work belongs in the event.
+// false for contexts not created by a dispatcher. Copy observability values,
+// such as the trace, from it; see "Dispatch".
 func SourceContext(ctx context.Context) (context.Context, bool) {
 	source, ok := ctx.Value(sourceContextKey{}).(context.Context)
 	return source, ok
 }
 
 // Subscriber registers handlers for domain events. Subscribe every handler
-// before the first event of its kinds is dispatched: an event accepted before
-// its kind has a handler is reported as unhandled.
+// before the first event of its kinds is dispatched: an event that reaches a
+// worker before its kind has a handler is reported as unhandled.
 type Subscriber interface {
 	Subscribe(Handler)
 }

@@ -34,7 +34,9 @@ type schemaEntry struct {
 	payloadType reflect.Type
 }
 
-// SchemaRegistry maps semantic task types to Go payload schemas.
+// SchemaRegistry maps each TaskType to its Go payload type: NewTask finds the
+// Definition for a payload, and Decode allocates the payload for a task. Its
+// methods are safe for concurrent use.
 type SchemaRegistry struct {
 	mu           sync.RWMutex
 	byType       map[TaskType]schemaEntry
@@ -90,7 +92,7 @@ func (r *SchemaRegistry) Register(def Definition, factory func() any) error {
 	return nil
 }
 
-// Resolve returns a fresh payload target for taskType.
+// Resolve returns a fresh payload target for taskType, or ErrUnknownType.
 func (r *SchemaRegistry) Resolve(taskType TaskType) (any, error) {
 	r.mu.RLock()
 	entry, ok := r.byType[taskType]
@@ -106,7 +108,8 @@ func (r *SchemaRegistry) Resolve(taskType TaskType) (any, error) {
 	return payload, nil
 }
 
-// DefinitionOf returns the task definition registered for payload's Go type.
+// DefinitionOf returns the task definition registered for payload's Go type,
+// a pointer or not. It returns ErrNilPayload or ErrUnknownPayloadType.
 func (r *SchemaRegistry) DefinitionOf(payload any) (Definition, error) {
 	payloadType, err := payloadValueType(payload)
 	if err != nil {
@@ -148,7 +151,7 @@ func (r *SchemaRegistry) Decode(task Task) (any, error) {
 	return r.DecodeWithCodec(task, task.PayloadCodec())
 }
 
-// DecodeWithCodec resolves task.Type() and decodes task payload with codecName.
+// DecodeWithCodec is Decode with codecName in place of task.PayloadCodec().
 func (r *SchemaRegistry) DecodeWithCodec(task Task, codecName string) (any, error) {
 	payload, err := r.Resolve(task.Type())
 	if err != nil {

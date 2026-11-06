@@ -1,7 +1,7 @@
 // Package outboxtest provides Store, an in-memory outbox.Store for unit tests
 // of use cases and handlers, and TestStore, the conformance suite a Store
-// adapter passes. Pair Store with a transactiontest.Driver: it keeps what a
-// transaction inserts once that transaction commits.
+// adapter passes. Pair Store with a transaction.Manager over a
+// transactiontest.Driver.
 package outboxtest
 
 import (
@@ -40,7 +40,9 @@ type stored struct {
 var _ outbox.Store = (*Store)(nil)
 
 // Insert keeps records once the transaction ctx is in commits. It returns
-// transaction.ErrNoTransaction or transaction.ErrTransactionDone.
+// transaction.ErrNoTransaction or transaction.ErrTransactionDone, and
+// transaction.ErrForeignTransaction in another Manager's transaction when
+// Manager is set.
 func (s *Store) Insert(ctx context.Context, records []outbox.Record) error {
 	if err := s.foreign(ctx); err != nil {
 		return err

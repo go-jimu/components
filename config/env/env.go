@@ -15,22 +15,17 @@ type env struct {
 
 // NewSource returns a Source that loads environment variables as flat
 // key/value entries; see "Flat source" in the package documentation. With
-// prefixes, it keeps only the variables that start with one of them and
-// strips the first matching prefix plus one following "_", so APP_NAME with
-// prefix "APP" becomes key NAME. A variable equal to a prefix is skipped.
-// Without prefixes, it loads every variable unchanged. Its watcher never
-// reports a change.
+// prefixes, it keeps only the variables that start with one of them, matched
+// case-sensitively, and strips the first matching prefix plus one following
+// "_", so APP_NAME with prefix "APP" becomes key NAME. A variable equal to a
+// prefix is skipped. Without prefixes, it loads every variable unchanged.
 func NewSource(prefixs ...string) config.Source {
 	return &env{prefixs: prefixs}
 }
 
 // NewOverrideSource returns a Source whose variables override nested
-// configuration paths; see "Override source" in the package documentation.
-// Prefixes match and are stripped as in NewSource. The rest of the name is
-// lower-cased and split into levels at each "__", so APP_DATABASE__MAX_CONN
-// with prefix "APP" becomes key database.max_conn. A variable whose name
-// yields an empty level or contains "." is skipped. Its watcher never reports
-// a change.
+// configuration paths, mapped as described in "Override source" in the
+// package documentation. Prefixes match and are stripped as in NewSource.
 func NewOverrideSource(prefixs ...string) config.Source {
 	return &env{prefixs: prefixs, override: true}
 }

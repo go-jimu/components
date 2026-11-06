@@ -172,9 +172,8 @@ func (m *Manager) Within(ctx context.Context, fn func(context.Context) error) er
 }
 
 // WithinOrJoin runs fn in the transaction of this Manager that ctx is in, or,
-// when ctx is in no transaction, in a new one through Within. A repository
-// uses it for a write of several statements that must be atomic on its own;
-// see "Repositories". Joined, fn's error goes back to the caller, whose
+// when ctx is in no transaction, in a new one through Within; see
+// "Repositories". Joined, fn's error goes back to the caller, whose
 // transaction then rolls back when the error reaches its Within. It returns
 // ErrNilFunc, ErrForeignTransaction, ErrTransactionDone, fn's error, or what
 // Within returns.

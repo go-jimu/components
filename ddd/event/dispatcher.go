@@ -26,9 +26,8 @@ type queued struct {
 	source context.Context
 }
 
-// InMemoryDispatcher handles events with a pool of workers. Events with the
-// same key are handled one at a time in the order they were accepted; other
-// events are handled concurrently.
+// InMemoryDispatcher handles events in memory with a pool of workers,
+// ordered per key. See "Ordering" and "Durability".
 type InMemoryDispatcher struct {
 	mu                      sync.Mutex
 	ready                   *sync.Cond
@@ -126,21 +125,16 @@ func (d *InMemoryDispatcher) Dispatch(ctx context.Context, event Event) error {
 	return d.DispatchAll(ctx, []Event{event})
 }
 
-// DispatchAll accepts all events or none of them. ctx carries values only,
-// such as the caller's trace: its cancellation and deadline never reject
-// events. When the queue cannot hold the events, DispatchAll waits for space
-// up to the admission timeout (WithAdmissionTimeout). Waiting calls are
-// admitted first come, first served, so a later call never overtakes an
-// earlier one. More events than the buffer size are accepted once the queue
-// is empty. Nil events are skipped.
-//
-// A handler that dispatches follow-up events with the ctx Handle received
-// never waits: the events are accepted at once, beyond the buffer size if
-// needed, because only the workers free queue space.
+// DispatchAll accepts all events or none of them, skipping nil events. ctx
+// carries values only. When the queue cannot hold the events, DispatchAll
+// waits for space up to WithAdmissionTimeout, first come, first served; more
+// events than the buffer size are accepted once the queue is empty. Follow-up
+// events, dispatched with the ctx Handle received, never wait; see
+// "Capacity".
 //
 // It returns nil when the events are accepted, and ErrDispatcherClosed or
-// ErrAdmissionTimeout when they are rejected. A rejected event is logged at
-// Error with its kind and key, on ctx, so the caller does not report it again.
+// ErrAdmissionTimeout when they are rejected, after logging each rejected
+// event; see "Dispatch".
 func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) error {
 	accepted := make([]queued, 0, len(events))
 	for _, event := range events {
@@ -267,16 +261,13 @@ func (d *InMemoryDispatcher) signalSpaceFreedLocked() {
 // Close shuts the dispatcher down and returns nil once it is idle: the queue
 // is empty and no handler is running. Until then it keeps accepting events,
 // so the follow-up events that running handlers dispatch are handled too.
-// Once idle, it rejects new events with ErrDispatcherClosed.
-//
-// Close relies on the runtime to stop every caller of Dispatch from outside
-// the handlers before calling it; a caller that keeps dispatching keeps Close
-// waiting until ctx ends. See the package documentation, "Shutdown".
+// Once idle, it rejects new events with ErrDispatcherClosed. Call it after
+// every caller outside the handlers has stopped dispatching; one that keeps
+// dispatching keeps Close waiting until ctx ends.
 //
 // When ctx ends first, Close rejects new events, cancels the contexts of
 // running handlers, drops the events not yet started, reports both (see
-// WithCloseInterruptedHandler), and returns ctx.Err(). Close's ctx is the
-// whole shutdown budget of the dispatcher, handler chains included.
+// WithCloseInterruptedHandler), and returns ctx.Err(). See "Shutdown".
 func (d *InMemoryDispatcher) Close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()

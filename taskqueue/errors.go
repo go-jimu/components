@@ -41,7 +41,7 @@ var (
 	ErrInvalidPayloadFactory = errors.New("task payload factory returned invalid payload")
 	// ErrNilPayloadResolver means a nil PayloadResolverFunc was called.
 	ErrNilPayloadResolver = errors.New("task payload resolver is nil")
-	// ErrPanic wraps a panic recovered by the Recover middleware.
+	// ErrPanic is wrapped by the error Recover returns for a panic.
 	ErrPanic = errors.New("task processor panicked")
 	// ErrInvalidEnqueueOption means EnqueueOptions.Validate rejected the
 	// policy.
@@ -71,14 +71,12 @@ var (
 
 	// ErrDuplicateTask reports that the provider already holds the work: a
 	// task with the same ID is still retained, or WithUnique suppressed a
-	// duplicate of the task's content. Enqueue returns an error matching it.
-	// Provider adapters return it, optionally wrapping their own error, in
-	// both cases.
+	// duplicate of the task's content. Provider adapters return it from
+	// Enqueue in both cases, optionally wrapping their own error. See
+	// "Task ID".
 	ErrDuplicateTask = errors.New("task with the same ID already exists")
 
-	// ErrSkipRetry marks a processor failure as permanent. Wrap it in the
-	// error returned from Process, as in
-	// fmt.Errorf("%w: %w", taskqueue.ErrSkipRetry, err), and the provider
-	// stops retrying the task at once. Decode errors already wrap it.
+	// ErrSkipRetry marks a processor failure as permanent: the provider stops
+	// retrying a task whose Process error wraps it. See "Processing".
 	ErrSkipRetry = errors.New("skip retry for task")
 )

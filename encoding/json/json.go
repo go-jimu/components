@@ -14,11 +14,15 @@ import (
 const Name = "json"
 
 var (
-	// MarshalOptions is a configurable JSON format marshaller.
+	// MarshalOptions encodes protobuf messages; by default it emits
+	// unpopulated fields. Changing it affects every user of the codec in the
+	// process.
 	MarshalOptions = protojson.MarshalOptions{
 		EmitUnpopulated: true,
 	}
-	// UnmarshalOptions is a configurable JSON format parser.
+	// UnmarshalOptions decodes protobuf messages; by default it discards
+	// unknown fields. Changing it affects every user of the codec in the
+	// process.
 	UnmarshalOptions = protojson.UnmarshalOptions{
 		DiscardUnknown: true,
 	}

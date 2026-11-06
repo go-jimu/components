@@ -16,7 +16,9 @@ var (
 	_ Value = (*errValue)(nil)
 )
 
-// Value is config value interface.
+// Value is the configuration value at one key. The accessors convert
+// between scalar kinds and return ErrNotFound while the key is absent; see
+// "Values".
 type Value interface {
 	Bool() (bool, error)
 	Int() (int64, error)
@@ -25,10 +27,15 @@ type Value interface {
 	Duration() (time.Duration, error)
 	Slice() ([]Value, error)
 	Map() (map[string]Value, error)
-	// Scan decodes the value into a pointer, converting strings to the kinds
-	// of the target fields as Config.Scan does; see "Scanning" in README.md.
+	// Scan decodes the value into a pointer as Config.Scan does; see
+	// "Scanning".
 	Scan(interface{}) error
+	// Load returns the value as decoded, such as a string, a number, a
+	// []interface{}, or a map[string]interface{}; nil while the key is
+	// absent.
 	Load() interface{}
+	// Store replaces what every holder of this Value reads, until the next
+	// reload.
 	Store(interface{})
 }
 

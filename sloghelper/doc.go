@@ -1,16 +1,15 @@
-// Package sloghelper provides helpers around the standard library log/slog.
+// Package sloghelper provides helpers around the standard library log/slog,
+// and the conventions the go-jimu components log by.
 //
-// NewLog builds a JSON logger from Options, writing to stdout or to a rotating
-// file, and sets it as the slog default. Apply adds a HandleFunc to that
-// logger; calls made before NewLog take effect when NewLog runs.
-//
-// Handler wraps any slog.Handler and runs HandleFuncs on every record, for
-// example to add request attributes from the context. Loggers derived with
-// With or WithGroup share their handler's HandleFuncs, so a later Apply
-// reaches them too. Apply is safe while logging.
-//
-// Error(err) logs an error under ErrorKey; see "Logging errors". NewContext
-// and FromContext store a logger in a context.
+// Read by task:
+//   - Building an application's logger: NewLog; then Apply with
+//     WithHandleFunc to add attributes from ctx, such as a trace ID, to every
+//     record.
+//   - Adding HandleFuncs to another slog.Handler: NewHandler.
+//   - Logging an error: Error, see "Logging errors".
+//   - Carrying a logger in ctx: NewContext, FromContext.
+//   - Writing code that logs for a component or an adapter: "Logging
+//     conventions".
 //
 // # Logging errors
 //
@@ -20,14 +19,12 @@
 //   - err is an oops error: it is logged as it is, rendering its own
 //     message, context, and stack.
 //   - err wraps an oops error, as fmt.Errorf("load user: %w", oopsErr) does,
-//     or a protocol error whose message is the text sent to a client: a
-//     group of msg, err's message, and cause, the first oops error in the
-//     chain with its context and stack. Wrapping an error for a client keeps
-//     its diagnosis in the log.
+//     or a protocol error that carries the text sent to a client: a group of
+//     msg, err's message, and cause, the first oops error in the chain with
+//     its context and stack. So an error wrapped for a client keeps its
+//     diagnosis in the log.
 //   - no oops error in the chain: a group of msg and, when an error in the
-//     chain carries a github.com/pkg/errors stack, trace.
-//
-// A nil error logs as null.
+//     chain carries a github.com/pkg/errors stack, trace; see StackTracer.
 //
 // # Logging conventions
 //
@@ -56,8 +53,9 @@
 //
 // Levels follow what the reader must do:
 //
-//   - Debug: success, start, batch summaries, pauses and resumes.
-//   - Info: lifecycle, such as start and shutdown.
+//   - Debug: a unit of work starting or succeeding, batch summaries, pauses
+//     and resumes.
+//   - Info: a component's lifecycle, such as start and shutdown.
 //   - Warn: a failure that is retried, a fallback that failed and is tried
 //     again, an infrastructure error that recovers by itself, a timeout
 //     warning.

@@ -1,18 +1,20 @@
 # config
 
-`config` loads key/value configuration from one or more sources, merges the
-decoded data, resolves placeholders, and exposes values through path lookup or
-struct scanning.
+`config` loads configuration from sources, merges it, resolves
+`${name:default}` placeholders, and serves it by path or as a struct. The rules
+live in the package documentation; this README walks through the common
+setups.
 
-Two entry points:
+```sh
+go doc -all github.com/go-jimu/components/config
+go doc -all github.com/go-jimu/components/config/loader
+```
 
-- `config/loader` loads application config into a struct: defaults plus an
-  optional profile file, with placeholders resolved from prefixed environment
-  variables. Start here for application code.
-- The root package builds a `Config` from sources you choose, with path lookup
-  and watching.
+## Application config: `config/loader`
 
-`config/loader`:
+Start here for application code. `loader.Load` reads `configs/defaults.yml`,
+overrides it with the active profile file, here `configs/app_dev.yml`, and
+scans the result into a struct:
 
 ```go
 var opts struct {
@@ -24,15 +26,56 @@ err := loader.Load(
 	&opts,
 	loader.WithConfigurationDirectory("./configs", "defaults"),
 	loader.WithConfigFilePrefix("app"),
-	loader.WithProfilesAlias("dev"),
+	loader.WithProfilesAlias("dev"), // JIMU_PROFILES_ACTIVE wins when set
 )
 ```
 
-Root package:
+## Environment variables
+
+With one prefix, environment variables fill placeholders and override keys
+that have none:
+
+```yaml
+# configs/defaults.yml
+server:
+  addr: ${HOST:0.0.0.0}:${PORT:8000}
+  timeout: ${TIMEOUT:5s}
+database:
+  max_conn: 10
+```
+
+```go
+var opts struct {
+	Server struct {
+		Addr    string        `json:"addr"`
+		Timeout time.Duration `json:"timeout"`
+	} `json:"server"`
+	Database struct {
+		MaxConn int `json:"max_conn"`
+	} `json:"database"`
+}
+
+err := loader.Load(
+	&opts,
+	loader.WithEnvVarsPrefix("app"),
+	loader.WithEnvOverrides(),
+)
+```
+
+With `APP_PORT=9090` and `APP_DATABASE__MAX_CONN=20`, `opts` holds
+`0.0.0.0:9090`, `5s`, and `20`. Rules: "Environment variables" in
+`config/loader`, "Override source" in `config/env`, "Scanning" in `config`.
+
+## Composing sources and watching
+
+The root package composes sources directly and keeps watching them:
 
 ```go
 cfg := config.New(
-	config.WithSource(file.NewSource("./configs")),
+	config.WithSource(
+		file.NewSource("./configs"),
+		env.NewOverrideSource("APP"),
+	),
 	config.WithLookup(func(name string) (string, bool) {
 		return os.LookupEnv("APP_" + name)
 	}),
@@ -40,66 +83,15 @@ cfg := config.New(
 if err := cfg.Load(); err != nil {
 	return err
 }
+defer func() { _ = cfg.Close() }()
 
-addr, err := cfg.Value("server.http.addr").String()
+addr := cfg.Value("server.addr") // tracks the key across reloads
+if err := cfg.Watch("server.addr", func(_ string, v config.Value) {
+	s, err := v.String() // config.ErrNotFound while the key is removed
+	...
+}); err != nil {
+	return err
+}
 ```
 
-`WithSource` replaces the source list, so pass every source in one call. Later
-sources override earlier ones, also when a watched source reloads: a reload
-rebuilds the configuration from every source in order, then notifies the
-observers registered with `Watch`. A Value returned by `Value` keeps tracking
-its key across reloads, including type changes and a key that is removed and
-comes back. While the key is removed, the Value reads as `ErrNotFound`, and its
-observers receive a Value whose `Load` is nil; they are notified again if the
-key comes back. `Value` on a key that does not exist returns a Value that only
-reports `ErrNotFound`; call `Value` again once the key exists. `Load` starts
-over from the sources on every call, so retry it after an error; the sources
-are watched once.
-
-## Scanning
-
-`Scan` decodes through `encoding/json`, so struct fields use `json` tags. Before
-decoding, string values are converted to the kind of the target field:
-`"8080"` fills an `int`, `"true"` fills a `bool`, and `"5s"` or `"1m30s"` fills a
-`time.Duration`. Numbers and booleans also fill `string` fields and fields
-tagged `,string`. Values that cannot be converted, such as `"NaN"`, are reported
-by `encoding/json` as usual.
-`Value(path).Duration()` accepts the same duration strings.
-
-## Placeholders and environment variables
-
-String values may contain `${name}` or `${name:default}` placeholders. A
-placeholder is resolved from the `WithLookup` function first, then from a
-configuration path such as `${server.host}`, then from the default.
-
-Environment variables reach the configuration in two ways:
-
-- Placeholders: a `${NAME}` written in a file fills exactly the spot it sits
-  in, as below.
-- Override source: `env.NewOverrideSource("APP")`, listed last in
-  `WithSource`, maps `APP_DATABASE__MAX_CONN` to `database.max_conn` and
-  overrides it without touching the files. See the `config/env` package
-  documentation.
-
-```yaml
-server:
-  addr: ${HOST:0.0.0.0}:${PORT:8000}
-  port: ${PORT:8000}
-  timeout: ${TIMEOUT:5s}
-```
-
-`config/loader` resolves `${PORT}` from the environment variable
-`<prefix>PORT`, where the prefix comes from `loader.WithEnvVarsPrefix`. With
-`WithEnvVarsPrefix("app")`, `APP_PORT=9090` sets both `server.port` and the
-port part of `server.addr`. Add `loader.WithEnvOverrides()` to also merge
-`APP_*` variables as the last layer, so `APP_DATABASE__MAX_CONN=20` overrides
-`database.max_conn` with no placeholder in the files.
-
-## Sources
-
-- `config/file` loads files or directories; the file extension selects the
-  codec, case-insensitively.
-- `config/env` reads environment variables by prefix, either as nested
-  overrides (`NewOverrideSource`, `__` separates levels) or as flat keys for
-  placeholders (`NewSource`).
-- `config/inmem` supplies an in-memory source for tests or embedded defaults.
+Rules: "Sources", "Placeholders", "Values", and "Reload" in `config`.

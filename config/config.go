@@ -18,27 +18,35 @@ import (
 )
 
 var (
-	// ErrNotFound is key not found.
+	// ErrNotFound reports a key absent from the configuration; see "Values".
 	ErrNotFound = errors.New("key not found")
-	// ErrTypeAssert is type assert error.
+	// ErrTypeAssert is not returned by this package: a failed Value
+	// conversion returns a descriptive error that does not wrap it.
 	ErrTypeAssert = errors.New("type assert error")
 
 	_ Config = (*config)(nil)
 )
 
-// Observer is config observer.
+// Observer receives a watched key and its tracked Value after the value
+// changes; see "Reload".
 type Observer func(string, Value)
 
-// Config is a config interface.
+// Config is the merged configuration of its sources. Create it with New.
 type Config interface {
+	// Load reads every source and replaces the whole configuration, then
+	// starts watching the sources on the first success. It returns the first
+	// source, decode, or merge error; call it again to retry. See "Sources".
 	Load() error
+	// Scan decodes the whole configuration into v, a pointer; see "Scanning".
 	Scan(v interface{}) error
-	// Value returns the value at key. The returned Value keeps tracking key
-	// across reloads, including type changes and a removal (read as
-	// ErrNotFound) followed by the key coming back. For a key that does not
-	// exist, Value returns a Value that only reports ErrNotFound.
+	// Value returns the Value at key, a dotted path, tracking key across
+	// reloads. For a key absent at the call, it returns a detached Value
+	// that only reports ErrNotFound. See "Values".
 	Value(key string) Value
+	// Watch registers o to receive every change of the value at key, and
+	// returns ErrNotFound when key is absent. See "Reload".
 	Watch(key string, o Observer) error
+	// Close stops the source watchers and returns the first Stop error.
 	Close() error
 }
 
@@ -72,7 +80,8 @@ type config struct {
 	snapshots [][]*KeyValue
 }
 
-// New new a config with options.
+// New returns a Config over the sources set by WithSource. Its values read
+// as ErrNotFound until Load succeeds. See "Sources".
 func New(opts ...Option) Config {
 	o := options{
 		decoder: defaultDecoder,
@@ -228,10 +237,6 @@ func flattenKeyValues(snapshots [][]*KeyValue, index int, replacement []*KeyValu
 	return all
 }
 
-// Load reads every source and replaces the whole configuration, then starts
-// watching the sources. Load can be called again, for example to retry after
-// an error: each call starts over from the sources, and the sources are
-// watched once.
 func (c *config) Load() error {
 	if err := c.load(); err != nil {
 		return err
@@ -321,8 +326,6 @@ func (c *config) Scan(v interface{}) error {
 	return scanJSON(data, v)
 }
 
-// Watch registers o to be called when the value at key changes. Every observer
-// registered for a key is called.
 func (c *config) Watch(key string, o Observer) error {
 	// Caching the value and registering o under one lock means every change
 	// after the value was read reaches o.
