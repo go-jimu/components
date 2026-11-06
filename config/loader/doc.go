@@ -17,9 +17,23 @@
 // WithProfilesAlias when that variable is unset. An active alias requires
 // WithConfigFilePrefix.
 //
-// Environment variables are not merged as an override layer. Reference them
-// from configuration files with ${NAME:default} placeholders; NAME is looked up
-// as the environment variable prefix+NAME, where the prefix is set by
-// WithEnvVarsPrefix. Load is one-shot and does not keep watching sources; use
-// the config package directly to watch.
+// Load is one-shot and does not keep watching sources; use the config package
+// directly to watch.
+//
+// # Environment variables
+//
+// WithEnvVarsPrefix sets one prefix, such as "app" for APP_*, for both ways
+// environment variables reach the configuration:
+//
+//   - Placeholders, always on: ${NAME:default} in a file reads APP_NAME.
+//   - Overrides, with WithEnvOverrides: APP_DATABASE__MAX_CONN overrides
+//     database.max_conn, as the last layer over the defaults and profile
+//     files. Names map to paths as described under "Override source" in the
+//     config/env package documentation.
+//
+// With both on, one variable serves both ways: APP_PORT fills ${PORT} and
+// also overrides a top-level "port" key. An override replaces a value before
+// placeholders resolve, so APP_SERVER__PORT wins over a ${PORT} written at
+// server.port. WithEnvOverrides requires a non-empty prefix, so unrelated
+// variables such as USER stay out of the configuration.
 package loader
