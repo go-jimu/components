@@ -1,6 +1,6 @@
 # Change log
 
-## Unreleased
+## v0.12.6
 
 - Added: package `transaction` runs a use case in one local transaction and
   carries it in ctx (go-jimu/components#84). `Within` commits or rolls back
