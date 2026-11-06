@@ -113,7 +113,10 @@ type Store interface {
 	// lease has expired, oldest first. It sets LeaseOwner, LeaseUntil, and
 	// increments Attempts on each.
 	Claim(ctx context.Context, req ClaimRequest) ([]Record, error)
-	// Advance sets Progress, fenced by lease.
+	// Advance raises Progress to progress, fenced by lease; it never lowers
+	// it. In a transaction of the Store's database it writes in that
+	// transaction; for a ctx in another database's transaction it returns
+	// transaction.ErrForeignTransaction.
 	Advance(ctx context.Context, lease Lease, progress int) error
 	// Complete marks the record done, fenced by lease.
 	Complete(ctx context.Context, lease Lease) error

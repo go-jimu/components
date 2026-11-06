@@ -76,12 +76,21 @@
 // refactorings; records under a retired name wait for an operator, see
 // "Relay".
 //
-// Delivery is at least once: an event runs again when a Relay stops between
-// Handle succeeding and the success being stored, or when a lease expires
-// mid-run. Write each handler as a reconciler: it reads the aggregate's
-// current state and applies it with a version check, so a rerun or a stale
-// event changes nothing. For an effect outside your database, deduplicate by
+// Handle runs at least once: again when a Relay stops before storing its
+// success, or when a lease expires mid-run. Write each handler as a
+// reconciler: it reads the aggregate's current state and applies it with a
+// version check, so a rerun or a stale event changes nothing. Deduplicate
+// effects outside the database, such as publishing a message, by
 // DeliveryFrom(ctx).Key(), which is the same on every retry of that event.
+//
+// Writes in the Store's database can take effect exactly once instead: make
+// them in one transaction of that database, on the ctx Handle received, and
+// call MarkDone inside it. MarkDone stores the event's progress in that
+// transaction, so the writes and the progress commit together or not at
+// all, even when the commit's reply is lost. That transaction completes the
+// event, so make it the last thing Handle does: run other effects before it,
+// since one after it is lost if it fails. Without MarkDone nothing changes,
+// whatever transactions Handle opens.
 //
 // Order holds within a record: a handler runs one transaction's events in
 // dispatch order, each after the previous one succeeded. Records of different
@@ -177,7 +186,12 @@
 //     is pending and leased to the Lease's owner and attempt, and return
 //     ErrLeaseLost otherwise. Skip releases the lease, so later updates under
 //     it are fenced out too.
-//  4. Times come from the Relay's clock in each request; keep them at
+//  4. Advance never lowers Progress. In a transaction of the Store's
+//     database it writes in that transaction, through the adapter's
+//     resolving session, and holds the record until that transaction ends,
+//     as a row lock does; in another database's transaction it returns
+//     transaction.ErrForeignTransaction. MarkDone relies on both.
+//  5. Times come from the Relay's clock in each request; keep them at
 //     millisecond precision or finer, and stamp UpdatedAt from the Store's
 //     own process clock.
 //

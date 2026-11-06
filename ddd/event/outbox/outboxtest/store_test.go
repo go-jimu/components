@@ -14,6 +14,10 @@ func TestMemoryStore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return outboxtest.Harness{Store: &outboxtest.Store{}, Transactor: manager}
+		foreign, err := transaction.NewManager(&transactiontest.Driver{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return outboxtest.Harness{Store: &outboxtest.Store{Manager: manager}, Transactor: manager, Foreign: foreign}
 	})
 }

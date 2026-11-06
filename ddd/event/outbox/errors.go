@@ -12,6 +12,10 @@ var (
 	// no longer holds. See "Leases".
 	ErrLeaseLost = errors.New("outbox: record lease lost")
 
+	// ErrNoDelivery means MarkDone got a ctx that does not come from a Handle
+	// that is running. See "Handlers".
+	ErrNoDelivery = errors.New("outbox: ctx carries no running delivery")
+
 	// ErrRecordNotFound means a Store has no record with that ID in a state
 	// the call applies to, such as Skip of a record whose Progress is not the
 	// given index.

@@ -6,6 +6,7 @@ package outboxtest
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"sync"
@@ -15,13 +16,20 @@ import (
 	"github.com/go-jimu/components/transaction"
 )
 
-// Store is an in-memory outbox.Store. It joins any transaction.Manager's
-// transaction: Insert keeps its records once that transaction commits. The
-// zero value is ready to use. Its methods are safe for concurrent use.
+// Store is an in-memory outbox.Store. Insert and Advance in a transaction
+// apply once that transaction commits. The zero value joins the transactions
+// of any Manager; set Manager to make the Store one database's, so that
+// another Manager's transaction is foreign to it. A record advanced in a
+// transaction is held, as by a row lock, until that transaction ends: Claim
+// skips it. Its methods are safe for concurrent use.
 type Store struct {
+	Manager *transaction.Manager
+
 	mu      sync.Mutex
 	seq     int
 	records map[string]*stored
+	// held maps a record ID to the ctx of the transaction that advanced it.
+	held map[string]context.Context
 }
 
 type stored struct {
@@ -34,6 +42,9 @@ var _ outbox.Store = (*Store)(nil)
 // Insert keeps records once the transaction ctx is in commits. It returns
 // transaction.ErrNoTransaction or transaction.ErrTransactionDone.
 func (s *Store) Insert(ctx context.Context, records []outbox.Record) error {
+	if err := s.foreign(ctx); err != nil {
+		return err
+	}
 	copied := make([]outbox.Record, len(records))
 	for i, r := range records {
 		copied[i] = clone(r)
@@ -58,7 +69,7 @@ func (s *Store) Claim(_ context.Context, req outbox.ClaimRequest) ([]outbox.Reco
 	var due []*stored
 	for _, st := range s.records {
 		r := st.record
-		if r.Status == outbox.StatusPending &&
+		if r.Status == outbox.StatusPending && !s.heldLocked(r.ID) &&
 			slices.Contains(req.Handlers, r.Handler) &&
 			!r.NextAttemptAt.After(req.Now) &&
 			!r.LeaseUntil.After(req.Now) {
@@ -80,9 +91,57 @@ func (s *Store) Claim(_ context.Context, req outbox.ClaimRequest) ([]outbox.Reco
 	return claimed, nil
 }
 
-// Advance implements outbox.Store.
-func (s *Store) Advance(_ context.Context, lease outbox.Lease, progress int) error {
-	return s.update(lease, func(r *outbox.Record) { r.Progress = progress })
+// Advance implements outbox.Store: in a transaction it checks the lease at
+// once and sets Progress when the transaction commits.
+func (s *Store) Advance(ctx context.Context, lease outbox.Lease, progress int) error {
+	if err := s.foreign(ctx); err != nil {
+		return err
+	}
+	apply := func(r *outbox.Record) { r.Progress = max(r.Progress, progress) }
+	if err := s.check(lease); err != nil {
+		return err
+	}
+	err := transaction.AfterCommit(ctx, func(context.Context) { _ = s.update(lease, apply) })
+	switch {
+	case errors.Is(err, transaction.ErrNoTransaction):
+		return s.update(lease, apply)
+	case err != nil:
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.held == nil {
+		s.held = make(map[string]context.Context)
+	}
+	s.held[lease.RecordID] = ctx
+	return nil
+}
+
+type liveKey struct{}
+
+// heldLocked reports whether a live transaction holds the record id.
+func (s *Store) heldLocked(id string) bool {
+	ctx, found := s.held[id]
+	if !found {
+		return false
+	}
+	if _, err := transaction.Value(ctx, liveKey{}, func() bool { return true }); err != nil {
+		delete(s.held, id) // the transaction has ended
+		return false
+	}
+	return true
+}
+
+// foreign returns transaction.ErrForeignTransaction for a ctx in a
+// transaction of a Manager other than s.Manager, when it is set.
+func (s *Store) foreign(ctx context.Context) error {
+	if s.Manager == nil {
+		return nil
+	}
+	if _, err := s.Manager.Current(ctx); errors.Is(err, transaction.ErrForeignTransaction) {
+		return err
+	}
+	return nil
 }
 
 // Complete implements outbox.Store.
@@ -225,14 +284,30 @@ func (s *Store) Records() []outbox.Record {
 func (s *Store) update(lease outbox.Lease, apply func(*outbox.Record)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, found := s.records[lease.RecordID]
-	if !found || st.record.Status != outbox.StatusPending ||
-		st.record.LeaseOwner != lease.Owner || st.record.Attempts != lease.Attempt {
-		return outbox.ErrLeaseLost
+	st, err := s.leased(lease)
+	if err != nil {
+		return err
 	}
 	apply(&st.record)
 	st.record.UpdatedAt = time.Now()
 	return nil
+}
+
+// check returns outbox.ErrLeaseLost unless lease holds.
+func (s *Store) check(lease outbox.Lease) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.leased(lease)
+	return err
+}
+
+func (s *Store) leased(lease outbox.Lease) (*stored, error) {
+	st, found := s.records[lease.RecordID]
+	if !found || st.record.Status != outbox.StatusPending ||
+		st.record.LeaseOwner != lease.Owner || st.record.Attempts != lease.Attempt {
+		return nil, outbox.ErrLeaseLost
+	}
+	return st, nil
 }
 
 func release(r *outbox.Record) {

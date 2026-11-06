@@ -110,17 +110,21 @@ func newFixture(t *testing.T, opts ...outbox.Option) *fixture {
 	if err := outbox.Register[OrderShipped](registry); err != nil {
 		t.Fatal(err)
 	}
-	store := &outboxtest.Store{}
-	opts = append([]outbox.Option{
-		outbox.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
-		outbox.WithPollInterval(5 * time.Millisecond),
-		outbox.WithBackoff(time.Millisecond, time.Millisecond),
-	}, opts...)
+	store := &outboxtest.Store{Manager: manager}
+	opts = append(fixtureOptions(), opts...)
 	o, err := outbox.New(store, registry, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &fixture{t: t, driver: driver, manager: manager, store: store, outbox: o}
+}
+
+func fixtureOptions() []outbox.Option {
+	return []outbox.Option{
+		outbox.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		outbox.WithPollInterval(5 * time.Millisecond),
+		outbox.WithBackoff(time.Millisecond, time.Millisecond),
+	}
 }
 
 func (f *fixture) subscribe(handlers ...*handler) {
