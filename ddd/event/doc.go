@@ -19,11 +19,9 @@
 // state as the use case's outcome.
 //
 // Runtime composition builds one dispatcher with NewDispatcher, subscribes
-// every Handler before traffic starts, and calls Close during shutdown: after
-// the servers, message consumers, and task workers whose code dispatches
-// events have stopped, and before the clients its handlers use, such as
-// publishers and enqueuers, are closed. An event whose Kind has no subscribed
-// handler goes to WithUnhandledEventHandler, or is logged.
+// every Handler before traffic starts, and calls Close during shutdown, as
+// "Shutdown" orders. An event whose Kind has no subscribed handler goes to
+// WithUnhandledEventHandler, or is logged.
 //
 // # Handlers
 //
@@ -82,6 +80,27 @@
 // holding its worker; when every worker does this on a full queue, they wait
 // on each other. Dispatch follow-ups from the use case, or pass a ctx with a
 // deadline.
+//
+// # Shutdown
+//
+// Call Close after the servers, message consumers, and task workers whose code
+// dispatches events have finished their running work, and before the clients
+// its handlers use, such as publishers and enqueuers, are closed. The
+// dispatcher's own handlers are the only callers left, so Close keeps
+// accepting events until it is idle: the queue is empty and no handler is
+// running. A handler that runs a use case dispatching a follow-up event gets
+// that event handled. Once idle, Close returns nil and Dispatch returns
+// ErrDispatcherClosed; a rejected dispatch is logged at Error with each
+// event's kind and key, since nothing recovers it.
+//
+// Close's ctx is the dispatcher's whole shutdown budget, handler chains
+// included; a chain of handlers dispatching each other ends when it runs out.
+// Then Close cancels running handlers, drops the events not yet started, and
+// returns ctx.Err(). Without WithCloseInterruptedHandler, each dropped event is
+// logged at Error with its kind, its key, and event_state in_flight or pending,
+// on the ctx of the Dispatch call that queued it, so its trace attributes lead
+// back to the request that raised it. Give events a key, from Keyed or
+// WithKeyFunc, to make them traceable to their aggregate.
 //
 // # Durability
 //

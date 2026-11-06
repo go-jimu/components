@@ -14,7 +14,6 @@ import (
 
 const (
 	defaultBufferSize = 1024
-	defaultDelayClose = 5 * time.Second
 	defaultWorkers    = 5
 )
 
@@ -38,15 +37,15 @@ type InMemoryDispatcher struct {
 	nextTicket              uint64
 	inFlight                map[uint64]queued
 	busyKeys                map[string]struct{}
-	closed                  bool
-	forced                  bool
+	closing                 bool // Close has started; events are still accepted
+	closed                  bool // events are rejected
+	forced                  bool // Close's ctx ended; workers stop
 	nextSeq                 uint64
 	done                    chan struct{}
 	handlers                map[Kind][]Handler
 	logger                  *slog.Logger
 	workers                 int
 	keyFunc                 func(Event) string
-	delayClose              time.Duration
 	handlerTimeout          time.Duration
 	contextFactory          func(context.Context, Event) context.Context
 	unhandledEventHandler   func(UnhandledContext)
@@ -74,7 +73,6 @@ func NewDispatcher(opts ...Option) *InMemoryDispatcher {
 		handlers:   make(map[Kind][]Handler),
 		logger:     slog.Default(),
 		workers:    defaultWorkers,
-		delayClose: defaultDelayClose,
 		bufferSize: defaultBufferSize,
 		rootCtx:    rootCtx,
 		rootCancel: rootCancel,
@@ -102,8 +100,8 @@ func NewDispatcher(opts ...Option) *InMemoryDispatcher {
 
 // Subscribe registers handler for each kind returned by handler.Listening.
 // Handlers of one kind run in subscription order. A nil handler, and any
-// Subscribe after Close has started rejecting events, is ignored. It is safe
-// for concurrent use.
+// Subscribe after Close has started, is ignored. It is safe for concurrent
+// use.
 func (d *InMemoryDispatcher) Subscribe(handler Handler) {
 	if handler == nil {
 		return
@@ -112,7 +110,7 @@ func (d *InMemoryDispatcher) Subscribe(handler Handler) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.closed {
+	if d.closing {
 		return
 	}
 	for _, kind := range handler.Listening() {
@@ -131,8 +129,9 @@ func (d *InMemoryDispatcher) Dispatch(ctx context.Context, event Event) error {
 // served, so a later call never overtakes an earlier one. More events than the
 // buffer size are accepted once the queue is empty. Nil events are skipped.
 //
-// It returns nil when the events are accepted, ErrDispatcherClosed once Close
-// has started rejecting events, and ctx.Err() when ctx ends while waiting.
+// It returns nil when the events are accepted, ErrDispatcherClosed once the
+// dispatcher rejects events (see Close), and ctx.Err() when ctx ends while
+// waiting.
 func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) error {
 	accepted := make([]queued, 0, len(events))
 	for _, event := range events {
@@ -155,7 +154,9 @@ func (d *InMemoryDispatcher) DispatchAll(ctx context.Context, events []Event) er
 		if d.closed {
 			d.removeWaiterLocked(turn)
 			d.mu.Unlock()
-			d.logger.LogAttrs(ctx, slog.LevelWarn, "domain event dispatch rejected", slog.Int("event_count", len(accepted)))
+			for _, item := range accepted {
+				d.logger.LogAttrs(ctx, slog.LevelError, "domain event dispatch rejected", eventAttrs(item)...)
+			}
 			return ErrDispatcherClosed
 		}
 		if d.isFirstWaiterLocked(turn) && d.fitsLocked(len(accepted)) {
@@ -236,100 +237,86 @@ func (d *InMemoryDispatcher) signalSpaceFreedLocked() {
 	d.spaceFreed = make(chan struct{})
 }
 
-// Close shuts the dispatcher down. It keeps accepting events for the
-// WithDelayClose period, then rejects new events with ErrDispatcherClosed and
-// waits until every accepted event has been handled, returning nil.
+// Close shuts the dispatcher down and returns nil once it is idle: the queue
+// is empty and no handler is running. Until then it keeps accepting events,
+// so the follow-up events that running handlers dispatch are handled too.
+// Once idle, it rejects new events with ErrDispatcherClosed.
 //
-// When ctx ends first, even during the delay, Close cancels the contexts of
-// running handlers, drops the events not yet started, reports both to
-// WithCloseInterruptedHandler, and returns ctx.Err(). Give Close a ctx that
-// outlasts the delay plus the time to drain the queue.
+// Close relies on the runtime to stop every caller of Dispatch from outside
+// the handlers before calling it; a caller that keeps dispatching keeps Close
+// waiting until ctx ends. See the package documentation, "Shutdown".
+//
+// When ctx ends first, Close rejects new events, cancels the contexts of
+// running handlers, drops the events not yet started, reports both (see
+// WithCloseInterruptedHandler), and returns ctx.Err(). Close's ctx is the
+// whole shutdown budget of the dispatcher, handler chains included.
 func (d *InMemoryDispatcher) Close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	defer d.rootCancel()
 
-	if d.delayClose > 0 {
-		timer := time.NewTimer(d.delayClose)
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			snapshot, started := d.interruptClose(ctx.Err())
-			if started {
-				d.logger.LogAttrs(ctx, slog.LevelInfo, "domain event dispatcher closing started")
-			}
-			d.reportCloseInterrupted(ctx, snapshot)
-			return ctx.Err()
-		}
-	}
-
-	closed := d.beginClose()
-	if closed {
+	started := d.beginClose()
+	if started {
 		d.logger.LogAttrs(ctx, slog.LevelInfo, "domain event dispatcher closing started")
 	}
 
 	select {
 	case <-d.done:
-		if closed {
+		if started {
 			d.logger.LogAttrs(ctx, slog.LevelInfo, "domain event dispatcher closed")
 		}
 		return nil
 	case <-ctx.Done():
-		snapshot, _ := d.interruptClose(ctx.Err())
-		d.reportCloseInterrupted(ctx, snapshot)
+		inFlight, pending := d.interruptClose()
+		d.reportCloseInterrupted(ctx, ctx.Err(), inFlight, pending)
 		return ctx.Err()
 	}
 }
 
+// beginClose marks the dispatcher closing and reports whether this call
+// started it.
 func (d *InMemoryDispatcher) beginClose() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.closed {
+	if d.closing {
 		return false
 	}
-	d.closed = true
-	d.ready.Broadcast()
-	d.signalSpaceFreedLocked()
+	d.closing = true
+	d.closeIfIdleLocked()
 	return true
 }
 
-func (d *InMemoryDispatcher) interruptClose(err error) (CloseInterruptedContext, bool) {
+// closeIfIdleLocked rejects new events and lets the workers exit once Close
+// has started, the queue is empty, and no handler is running: from then on no
+// handler can dispatch a follow-up event.
+func (d *InMemoryDispatcher) closeIfIdleLocked() {
+	if d.closing && !d.closed && len(d.queue) == 0 && len(d.inFlight) == 0 {
+		d.closed = true
+		d.ready.Broadcast()
+		d.signalSpaceFreedLocked()
+	}
+}
+
+// interruptClose stops the dispatcher at once and returns the events that
+// were running and those not yet started, each in acceptance order.
+func (d *InMemoryDispatcher) interruptClose() (inFlight, pending []queued) {
 	d.mu.Lock()
-	started := !d.closed
+	d.closing = true
 	d.closed = true
 	d.forced = true
-	snapshot := d.closeInterruptedSnapshotLocked(err)
+	for _, item := range d.inFlight {
+		inFlight = append(inFlight, item)
+	}
+	slices.SortFunc(inFlight, func(a, b queued) int { return compareSeq(a.seq, b.seq) })
+	pending = slices.Clone(d.queue)
 	d.ready.Broadcast()
 	d.signalSpaceFreedLocked()
 	d.mu.Unlock()
 
 	d.rootCancel()
-	return snapshot, started
-}
-
-func (d *InMemoryDispatcher) closeInterruptedSnapshotLocked(err error) CloseInterruptedContext {
-	snapshot := CloseInterruptedContext{Error: err}
-
-	inFlight := make([]queued, 0, len(d.inFlight))
-	for _, item := range d.inFlight {
-		inFlight = append(inFlight, item)
-	}
-	slices.SortFunc(inFlight, func(a, b queued) int { return compareSeq(a.seq, b.seq) })
-	for _, item := range inFlight {
-		snapshot.InFlight = append(snapshot.InFlight, item.event)
-	}
-	for _, item := range d.queue {
-		snapshot.Pending = append(snapshot.Pending, item.event)
-	}
-	return snapshot
+	return inFlight, pending
 }
 
 func compareSeq(a, b uint64) int {
@@ -343,26 +330,47 @@ func compareSeq(a, b uint64) int {
 	}
 }
 
-func (d *InMemoryDispatcher) reportCloseInterrupted(ctx context.Context, snapshot CloseInterruptedContext) {
-	d.logger.LogAttrs(ctx, slog.LevelWarn, "domain event dispatcher close interrupted",
-		sloghelper.Error(snapshot.Error),
-		slog.Int("in_flight_event_count", len(snapshot.InFlight)),
-		slog.Int("pending_event_count", len(snapshot.Pending)),
-		slog.Any("pending_event_kinds", eventKinds(snapshot.Pending)))
+// reportCloseInterrupted logs the interruption and hands the dropped events
+// to WithCloseInterruptedHandler. Without the hook, nothing recovers them, so
+// each one is logged at Error with its kind and key, on the ctx of the
+// Dispatch call that queued it.
+func (d *InMemoryDispatcher) reportCloseInterrupted(ctx context.Context, err error, inFlight, pending []queued) {
+	level := slog.LevelError
 	if d.closeInterruptedHandler != nil {
-		d.closeInterruptedHandler(snapshot)
+		level = slog.LevelWarn
+	}
+	d.logger.LogAttrs(ctx, level, "domain event dispatcher close interrupted",
+		sloghelper.Error(err),
+		slog.Int("in_flight_event_count", len(inFlight)),
+		slog.Int("pending_event_count", len(pending)))
+
+	if d.closeInterruptedHandler != nil {
+		d.closeInterruptedHandler(CloseInterruptedContext{
+			Error:    err,
+			InFlight: eventsOf(inFlight),
+			Pending:  eventsOf(pending),
+		})
+		return
+	}
+	for _, item := range inFlight {
+		d.logger.LogAttrs(item.logContext(), slog.LevelError, "domain event dropped",
+			append(eventAttrs(item), slog.String("event_state", "in_flight"))...)
+	}
+	for _, item := range pending {
+		d.logger.LogAttrs(item.logContext(), slog.LevelError, "domain event dropped",
+			append(eventAttrs(item), slog.String("event_state", "pending"))...)
 	}
 }
 
-func eventKinds(events []Event) []Kind {
-	if len(events) == 0 {
+func eventsOf(items []queued) []Event {
+	if len(items) == 0 {
 		return nil
 	}
-	kinds := make([]Kind, 0, len(events))
-	for _, event := range events {
-		kinds = append(kinds, event.Kind())
+	events := make([]Event, 0, len(items))
+	for _, item := range items {
+		events = append(events, item.event)
 	}
-	return kinds
+	return events
 }
 
 func (d *InMemoryDispatcher) run() {
@@ -396,7 +404,7 @@ func (d *InMemoryDispatcher) next() (queued, bool) {
 			d.signalSpaceFreedLocked()
 			return item, true
 		}
-		if d.closed && len(d.queue) == 0 {
+		if d.closed {
 			return queued{}, false
 		}
 		d.ready.Wait()
@@ -416,7 +424,7 @@ func (d *InMemoryDispatcher) nextEligibleLocked() int {
 }
 
 // finish releases the event's key and wakes workers that may be waiting for
-// it.
+// it, or for the dispatcher to become idle during Close.
 func (d *InMemoryDispatcher) finish(item queued) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -426,6 +434,7 @@ func (d *InMemoryDispatcher) finish(item queued) {
 		delete(d.busyKeys, item.key)
 		d.ready.Broadcast()
 	}
+	d.closeIfIdleLocked()
 }
 
 func (d *InMemoryDispatcher) handleEvent(item queued) {

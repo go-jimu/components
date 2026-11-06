@@ -23,17 +23,6 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithDelayClose sets how long Close keeps accepting events before it starts
-// rejecting them, so requests still running during shutdown can dispatch. The
-// default is 5s; 0 rejects at once, and a negative delay keeps the default.
-func WithDelayClose(delay time.Duration) Option {
-	return func(d *InMemoryDispatcher) {
-		if delay >= 0 {
-			d.delayClose = delay
-		}
-	}
-}
-
 // WithHandlerTimeout bounds each Handle call: its context is canceled after
 // timeout. The default, 0, sets no timeout; a negative timeout is ignored. The
 // handler must watch ctx for the timeout to free its worker.
@@ -77,7 +66,10 @@ func WithPanicHandler(fn func(PanicContext)) Option {
 
 // WithCloseInterruptedHandler sets a hook that Close calls when its ctx ends
 // before every accepted event was handled. The hook receives the events that
-// were running and those never started, for example to log or persist them.
+// were running and those never started, for example to persist them for
+// compensation. With the hook set, the dispatcher logs only a Warn summary
+// and the hook owns the events; without it, each event is logged at Error.
+// See the package documentation, "Shutdown".
 func WithCloseInterruptedHandler(fn func(CloseInterruptedContext)) Option {
 	return func(d *InMemoryDispatcher) {
 		d.closeInterruptedHandler = fn

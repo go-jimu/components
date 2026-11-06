@@ -67,7 +67,7 @@ func (SendReceipt) Handle(_ context.Context, e event.Event) {
 }
 
 func ExampleHandler() {
-	dispatcher := event.NewDispatcher(event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher()
 	dispatcher.Subscribe(SendReceipt{})
 
 	err := dispatcher.DispatchAll(context.Background(), []event.Event{
@@ -109,7 +109,7 @@ func (printStep) Handle(_ context.Context, e event.Event) {
 }
 
 func ExampleKeyed() {
-	dispatcher := event.NewDispatcher(event.WithWorkers(5), event.WithDelayClose(0))
+	dispatcher := event.NewDispatcher(event.WithWorkers(5))
 	dispatcher.Subscribe(printStep{})
 
 	err := dispatcher.DispatchAll(context.Background(), []event.Event{
@@ -153,7 +153,6 @@ func ExampleWithContextFactory() {
 
 	dispatcher := event.NewDispatcher(
 		event.WithContextFactory(copyRequestID),
-		event.WithDelayClose(0),
 	)
 	dispatcher.Subscribe(printRequestID{})
 
