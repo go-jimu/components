@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,7 +30,6 @@ type Outbox struct {
 
 	mu       sync.RWMutex
 	handlers map[string]Handler
-	byKind   map[event.Kind][]Handler
 	runDone  chan struct{}
 	cancel   context.CancelFunc
 
@@ -63,7 +64,6 @@ func New(store Store, registry *Registry, opts ...Option) (*Outbox, error) {
 		registry: registry,
 		cfg:      cfg,
 		handlers: make(map[string]Handler),
-		byKind:   make(map[event.Kind][]Handler),
 		hints:    make(chan []Record, 1024),
 		closing:  make(chan struct{}),
 	}, nil
@@ -87,9 +87,6 @@ func (o *Outbox) Subscribe(h Handler) error {
 		return fmt.Errorf("%w: %s", ErrDuplicateHandler, h.Name())
 	}
 	o.handlers[h.Name()] = h
-	for _, kind := range h.Listening() {
-		o.byKind[kind] = append(o.byKind[kind], h)
-	}
 	return nil
 }
 
@@ -98,22 +95,18 @@ func (o *Outbox) Dispatch(ctx context.Context, e event.Event) error {
 	return o.DispatchAll(ctx, []event.Event{e})
 }
 
-// DispatchAll adds events to the transaction ctx is in; see "Dispatch". It
-// returns transaction.ErrNoTransaction or transaction.ErrTransactionDone for
-// a ctx outside a live transaction, ErrUnregisteredKind wrapped for an event a
-// Handler listens to whose type is not registered, and
-// event.ErrDispatcherClosed after Close.
+// DispatchAll adds events to the transaction ctx is in, all or none; see
+// "Dispatch" for when it does and the errors it returns.
 func (o *Outbox) DispatchAll(ctx context.Context, events []event.Event) error {
-	select {
-	case <-o.closing:
+	if o.closed() {
 		return event.ErrDispatcherClosed
-	default:
 	}
+	subscribed := o.subscribed()
 	for _, e := range events {
 		if e == nil {
-			return fmt.Errorf("%w: nil event", ErrUnregisteredKind)
+			return fmt.Errorf("%w: nil event", ErrInvalidEvent)
 		}
-		if o.listened(e.Kind()) {
+		if listenedBy(subscribed, e.Kind()) {
 			if err := o.registry.check(e); err != nil {
 				return err
 			}
@@ -125,21 +118,24 @@ func (o *Outbox) DispatchAll(ctx context.Context, events []event.Event) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.flushed {
+		return ErrDispatchAfterFlush
+	}
 	if !b.hooked {
-		// A flush takes the events dispatched so far; events dispatched by a
-		// later BeforeCommit hook register the next flush.
 		if err := transaction.BeforeCommit(ctx, o.flush); err != nil {
 			return err
 		}
 		b.hooked = true
+		if o.cfg.capture != nil {
+			b.trace = o.cfg.capture(ctx)
+		}
 	}
 	b.events = append(b.events, events...)
 	return nil
 }
 
-// Close stops the Relay and closes the best-effort dispatcher; see
-// "Shutdown". It waits for running records until ctx ends, then cancels
-// their ctx; an interrupted record runs again once its lease expires.
+// Close stops the Relay and closes the best-effort dispatcher, waiting until
+// ctx ends; see "Shutdown".
 func (o *Outbox) Close(ctx context.Context) error {
 	o.closeOnce.Do(func() { close(o.closing) })
 	o.mu.RLock()
@@ -151,7 +147,6 @@ func (o *Outbox) Close(ctx context.Context) error {
 		case <-done:
 		case <-ctx.Done():
 			cancel()
-			<-done
 			err = ctx.Err()
 		}
 	}
@@ -161,41 +156,48 @@ func (o *Outbox) Close(ctx context.Context) error {
 	return err
 }
 
-type batchKey struct{ outbox *Outbox }
-
-type batch struct {
-	mu     sync.Mutex
-	hooked bool
-	events []event.Event
+func (o *Outbox) closed() bool {
+	select {
+	case <-o.closing:
+		return true
+	default:
+		return false
+	}
 }
 
-// take returns the buffered events and empties the batch.
-func (b *batch) take() []event.Event {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	events := b.events
-	b.events, b.hooked = nil, false
-	return events
+// relaying reports whether this Outbox's Relay takes new records: it runs and
+// is not shutting down.
+func (o *Outbox) relaying() bool {
+	return o.running.Load() && !o.closed()
+}
+
+type batchKey struct{ outbox *Outbox }
+
+// batch is the events one transaction dispatched to one Outbox.
+type batch struct {
+	mu      sync.Mutex
+	hooked  bool
+	flushed bool
+	trace   map[string]string
+	events  []event.Event
 }
 
 func newBatch() *batch { return &batch{} }
 
-func (o *Outbox) listened(kind event.Kind) bool {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return len(o.byKind[kind]) > 0
-}
-
-// flush runs before commit: it writes one record per Handler and hands the
-// records to the Relay, and the events to the best-effort dispatcher, after
-// commit.
+// flush runs before commit: it writes one record per Handler and, after
+// commit, hands the records to the Relay and the events to the best-effort
+// dispatcher.
 func (o *Outbox) flush(ctx context.Context) error {
 	b, err := transaction.Value(ctx, batchKey{o}, newBatch)
 	if err != nil {
 		return err
 	}
-	events := b.take()
-	records, err := o.records(ctx, events)
+	b.mu.Lock()
+	b.flushed = true
+	events, trace := b.events, b.trace
+	b.mu.Unlock()
+
+	records, err := o.records(events, trace)
 	if err != nil {
 		return err
 	}
@@ -208,7 +210,7 @@ func (o *Outbox) flush(ctx context.Context) error {
 		if len(records) > 0 && records[0].LeaseOwner != "" {
 			select {
 			case o.hints <- records:
-			default: // the Relay claims them once their lease expires
+			default: // the records wait for their lease to expire; see "Leases"
 			}
 		}
 		if o.cfg.bestEffort != nil {
@@ -217,27 +219,17 @@ func (o *Outbox) flush(ctx context.Context) error {
 	})
 }
 
-func (o *Outbox) records(ctx context.Context, events []event.Event) ([]Record, error) {
-	o.mu.RLock()
-	names := make([]string, 0, len(o.handlers))
-	for name := range o.handlers {
-		names = append(names, name)
-	}
-	handlers := o.handlers
-	o.mu.RUnlock()
-	slices.Sort(names)
-
-	var trace map[string]string
-	if o.cfg.capture != nil {
-		trace = o.cfg.capture(ctx)
-	}
-	// While this Outbox's Relay runs, a record is leased to it at insert and
-	// handed to it after commit; otherwise it waits unleased for any Relay.
+// records returns one record per subscribed Handler that listens to any of
+// events, holding those events in dispatch order.
+func (o *Outbox) records(events []event.Event, trace map[string]string) ([]Record, error) {
+	// While this Outbox's Relay takes records, a record is leased to it at
+	// insert and handed to it after commit; otherwise it waits unleased for
+	// any Relay.
 	now := time.Now()
-	leased := o.running.Load()
+	leased := o.relaying()
 	var records []Record
-	for _, name := range names {
-		kinds := handlers[name].Listening()
+	for _, h := range o.subscribed() {
+		kinds := h.Listening()
 		var encoded []EncodedEvent
 		for _, e := range events {
 			if !slices.Contains(kinds, e.Kind()) {
@@ -254,11 +246,11 @@ func (o *Outbox) records(ctx context.Context, events []event.Event) ([]Record, e
 		}
 		r := Record{
 			ID:            randomHex(16),
-			Handler:       name,
+			Handler:       h.Name(),
 			Events:        encoded,
 			Status:        StatusPending,
 			NextAttemptAt: now,
-			Trace:         trace,
+			Trace:         maps.Clone(trace),
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
@@ -270,28 +262,31 @@ func (o *Outbox) records(ctx context.Context, events []event.Event) ([]Record, e
 	return records, nil
 }
 
+// subscribed returns the subscribed Handlers ordered by name.
+func (o *Outbox) subscribed() []Handler {
+	o.mu.RLock()
+	handlers := slices.Collect(maps.Values(o.handlers))
+	o.mu.RUnlock()
+	slices.SortFunc(handlers, func(a, b Handler) int { return strings.Compare(a.Name(), b.Name()) })
+	return handlers
+}
+
+func listenedBy(handlers []Handler, kind event.Kind) bool {
+	return slices.ContainsFunc(handlers, func(h Handler) bool { return slices.Contains(h.Listening(), kind) })
+}
+
+func handlerNames(handlers []Handler) []string {
+	names := make([]string, len(handlers))
+	for i, h := range handlers {
+		names[i] = h.Name()
+	}
+	return names
+}
+
 func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b) // crypto/rand.Read never fails
 	return hex.EncodeToString(b)
-}
-
-func (o *Outbox) handler(name string) (Handler, bool) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	h, ok := o.handlers[name]
-	return h, ok
-}
-
-func (o *Outbox) handlerNames() []string {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	names := make([]string, 0, len(o.handlers))
-	for name := range o.handlers {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
 }
 
 func (o *Outbox) logError(ctx context.Context, msg string, err error, attrs ...slog.Attr) {

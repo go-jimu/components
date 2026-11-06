@@ -12,121 +12,97 @@ import (
 	"github.com/go-jimu/components/ddd/event"
 )
 
-// storeTimeout bounds one Store call the Relay makes for a record, so a
-// successful run is recorded even while the Relay shuts down.
+// storeTimeout bounds one Store update the Relay makes for a record, so the
+// outcome of a run is stored even while the Relay shuts down.
 const storeTimeout = 10 * time.Second
 
-// Run runs the Relay until ctx ends or Close is called, and returns nil then;
-// see "Relay". It returns ErrAlreadyRunning when another Run is active.
+// Run runs the Relay; see "Relay". It returns nil when ctx ends or after
+// Close, and ErrAlreadyRunning while another Run of this Outbox is active.
 func (o *Outbox) Run(ctx context.Context) error {
 	if !o.running.CompareAndSwap(false, true) {
 		return ErrAlreadyRunning
 	}
-	execCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	// loopCtx bounds the Relay's own Store calls; execCtx is the ctx records
+	// run on, which outlives ctx until the Relay stops them. Close cancels
+	// both once its own ctx ends.
+	loopCtx, cancelLoop := context.WithCancel(ctx)
+	execCtx, cancelExec := context.WithCancel(context.WithoutCancel(ctx))
+	cancel := func() {
+		cancelLoop()
+		cancelExec()
+	}
 	done := make(chan struct{})
 	o.mu.Lock()
-	select {
-	case <-o.closing:
+	if o.closed() {
 		// Close checks runDone under o.mu after closing, so either it waits
 		// for this Run or this Run sees closing here.
 		o.mu.Unlock()
 		cancel()
 		o.running.Store(false)
 		return nil
-	default:
 	}
 	o.runDone, o.cancel = done, cancel
 	o.mu.Unlock()
+
+	r := &relay{
+		outbox: o, loopCtx: loopCtx, execCtx: execCtx, cancelExec: cancelExec,
+		slots: make(chan struct{}, o.cfg.workers),
+	}
 	defer func() {
-		cancel()
 		o.running.Store(false)
+		r.releaseHints()
+		cancel()
 		close(done)
 	}()
+	r.run()
+	return nil
+}
 
-	o.startup(ctx)
+// relay is one Run of the Relay.
+type relay struct {
+	outbox  *Outbox
+	loopCtx context.Context
+	execCtx context.Context
+	// cancelExec cancels execCtx.
+	cancelExec context.CancelFunc
+	slots      chan struct{}
+	running    sync.WaitGroup
+}
 
-	slots := make(chan struct{}, o.cfg.workers)
-	var running sync.WaitGroup
-	// start waits for a free worker, and returns false when the Relay stops
-	// meanwhile.
-	start := func(r Record) bool {
-		select {
-		case slots <- struct{}{}:
-		case <-ctx.Done():
-			return false
-		case <-o.closing:
-			return false
-		}
-		running.Add(1)
-		go func() {
-			defer func() {
-				<-slots
-				running.Done()
-			}()
-			o.execute(execCtx, r)
-		}()
-		return true
-	}
-	claim := func() {
-		free := min(o.cfg.batchSize, cap(slots)-len(slots))
-		if free <= 0 {
-			return
-		}
-		now := time.Now()
-		records, err := o.store.Claim(ctx, ClaimRequest{
-			Owner:      o.cfg.owner,
-			Handlers:   o.handlerNames(),
-			Now:        now,
-			LeaseUntil: now.Add(o.cfg.lease),
-			Limit:      free,
-		})
-		if err != nil {
-			if ctx.Err() == nil {
-				o.logError(ctx, "outbox claim failed", err)
-			}
-			return
-		}
-		for _, r := range records {
-			if !start(r) {
-				return // the unstarted records run again once their lease expires
-			}
-		}
-	}
-
+func (r *relay) run() {
+	o := r.outbox
+	defer r.running.Wait()
+	r.startup()
 	poll := time.NewTicker(o.cfg.pollInterval)
 	defer poll.Stop()
 	purge := time.NewTicker(min(o.cfg.retention, time.Hour))
 	defer purge.Stop()
 
-	claim()
+	r.claim()
 	for {
 		select {
-		case <-ctx.Done():
-			cancel()
-			running.Wait()
-			return nil
+		case <-r.loopCtx.Done():
+			r.stopRecords()
+			return
 		case <-o.closing:
-			running.Wait() // Close cancels execCtx when its own ctx ends
-			return nil
+			return
 		case records := <-o.hints:
-			// A hint is a record this Outbox inserted, leased to its owner at
-			// insert; one whose lease has expired may be another Relay's now.
-			for _, r := range records {
-				if time.Now().Before(r.LeaseUntil) && !start(r) {
-					break
-				}
-			}
+			r.startAll(records)
 		case <-poll.C:
-			claim()
+			r.claim()
 		case <-purge.C:
-			o.purge(ctx)
+			r.purge()
 		}
 	}
 }
 
+// stopRecords cancels the running records once ctx of Run ends.
+func (r *relay) stopRecords() { r.cancelExec() }
+
 // startup puts failed records back to pending and reports records whose
 // handler this Outbox does not run.
-func (o *Outbox) startup(ctx context.Context) {
+func (r *relay) startup() {
+	o, ctx := r.outbox, r.loopCtx
 	if n, err := o.store.RetryFailed(ctx, time.Now()); err != nil {
 		o.logError(ctx, "outbox retry of failed records failed", err)
 	} else if n > 0 {
@@ -137,7 +113,7 @@ func (o *Outbox) startup(ctx context.Context) {
 		o.logError(ctx, "outbox record count failed", err)
 		return
 	}
-	known := o.handlerNames()
+	known := handlerNames(o.subscribed())
 	for _, c := range counts {
 		if !slices.Contains(known, c.Handler) {
 			o.cfg.logger.LogAttrs(ctx, slog.LevelError, "outbox records of an unsubscribed handler",
@@ -146,24 +122,104 @@ func (o *Outbox) startup(ctx context.Context) {
 	}
 }
 
-func (o *Outbox) purge(ctx context.Context) {
+func (r *relay) claim() {
+	o, ctx := r.outbox, r.loopCtx
+	free := min(o.cfg.batchSize, cap(r.slots)-len(r.slots))
+	if free <= 0 || o.closed() {
+		return
+	}
+	now := time.Now()
+	records, err := o.store.Claim(ctx, ClaimRequest{
+		Owner:      o.cfg.owner,
+		Handlers:   handlerNames(o.subscribed()),
+		Now:        now,
+		LeaseUntil: now.Add(o.cfg.lease),
+		Limit:      free,
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			o.logError(ctx, "outbox claim failed", err)
+		}
+		return
+	}
+	r.startAll(records)
+}
+
+// startAll runs leased records as workers free up. When the Relay stops
+// meanwhile, it releases the records not started, so another Relay claims
+// them without waiting for their lease to expire.
+func (r *relay) startAll(records []Record) {
+	for i, rec := range records {
+		select {
+		case r.slots <- struct{}{}:
+		case <-r.loopCtx.Done():
+			r.release(records[i:])
+			return
+		case <-r.outbox.closing:
+			r.release(records[i:])
+			return
+		}
+		r.running.Add(1)
+		go func() {
+			defer func() {
+				<-r.slots
+				r.running.Done()
+			}()
+			r.outbox.execute(r.execCtx, rec)
+		}()
+	}
+}
+
+// releaseHints releases the records handed over at commit that the Relay
+// did not start.
+func (r *relay) releaseHints() {
+	for {
+		select {
+		case records := <-r.outbox.hints:
+			r.release(records)
+		default:
+			return
+		}
+	}
+}
+
+func (r *relay) release(records []Record) {
+	for _, rec := range records {
+		r.outbox.record(r.execCtx, "outbox lease release failed", func(ctx context.Context) error {
+			return r.outbox.store.Retry(ctx, LeaseOf(rec), rec.NextAttemptAt, rec.LastError)
+		}, recordAttrs(rec))
+	}
+}
+
+func (r *relay) purge() {
+	o, ctx := r.outbox, r.loopCtx
 	if _, err := o.store.Purge(ctx, time.Now().Add(-o.cfg.retention)); err != nil && ctx.Err() == nil {
 		o.logError(ctx, "outbox purge failed", err)
 	}
 }
 
-// execute runs the events of one leased record from its Progress on, and
-// records the outcome.
-func (o *Outbox) execute(ctx context.Context, r Record) {
-	lease := LeaseOf(r)
-	attrs := []slog.Attr{
+func recordAttrs(r Record) []slog.Attr {
+	return []slog.Attr{
 		slog.String("record_id", r.ID),
 		slog.String("handler", r.Handler),
 		slog.Int("attempt", r.Attempts),
 	}
+}
+
+// execute runs the events of one leased record from its Progress on, and
+// stores the outcome.
+func (o *Outbox) execute(ctx context.Context, r Record) {
+	lease := LeaseOf(r)
+	attrs := recordAttrs(r)
+	if !time.Now().Before(r.LeaseUntil) {
+		// It waited for a worker past its lease; another Relay may run it.
+		o.cfg.logger.LogAttrs(ctx, slog.LevelWarn, "outbox lease expired before the record ran", attrs...)
+		return
+	}
 	h, ok := o.handler(r.Handler)
 	if !ok {
-		o.fail(ctx, lease, fmt.Errorf("handler %q is not subscribed", r.Handler), attrs)
+		// Unreachable: the Relay leases only records of subscribed handlers.
+		o.logError(ctx, "outbox record of an unsubscribed handler", ErrInvalidHandler, attrs...)
 		return
 	}
 	if o.cfg.restore != nil && r.Trace != nil {
@@ -196,6 +252,13 @@ func (o *Outbox) execute(ctx context.Context, r Record) {
 	o.record(ctx, "outbox completion failed", func(ctx context.Context) error {
 		return o.store.Complete(ctx, lease)
 	}, attrs)
+}
+
+func (o *Outbox) handler(name string) (Handler, bool) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	h, ok := o.handlers[name]
+	return h, ok
 }
 
 func handle(ctx context.Context, h Handler, e event.Event) (err error) {

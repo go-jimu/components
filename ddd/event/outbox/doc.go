@@ -39,16 +39,28 @@
 //		return dispatcher.DispatchAll(ctx, order.Events.Drain())
 //	})
 //
-// DispatchAll buffers the events in the transaction; a BeforeCommit hook
-// writes the records just before commit. Each record holds the transaction's
-// events its Handler listens to, in dispatch order, including events
-// dispatched by later BeforeCommit hooks. An event no Handler listens to is
-// not recorded. A rolled back transaction records nothing, and the Relay sees
-// a record only once its transaction has committed.
+// DispatchAll buffers the events in the transaction, and the first dispatch
+// registers a BeforeCommit hook that writes the records. Each record holds
+// the transaction's events its Handler listens to, in dispatch order. An
+// event no Handler listens to is not recorded. A rolled back transaction
+// records nothing, and the Relay sees a record only once its transaction has
+// committed.
 //
-// DispatchAll returns transaction.ErrNoTransaction outside Within,
-// ErrUnregisteredKind wrapped for an event a Handler listens to whose type is
-// not registered (see "Events"), and event.ErrDispatcherClosed after Close.
+// BeforeCommit hooks run in registration order, so a hook that dispatches,
+// such as a unit of work that saves aggregates and dispatches their events,
+// is registered before the transaction's first dispatch. A dispatch from a
+// hook registered later comes after the records are written and returns
+// ErrDispatchAfterFlush, which rolls the transaction back: a second record
+// per Handler would lose the order of the transaction's events.
+//
+// DispatchAll accepts all of its events or none. It returns:
+//   - transaction.ErrNoTransaction outside Within, and
+//     transaction.ErrTransactionDone on a ctx kept past its transaction;
+//   - ErrInvalidEvent wrapped for a nil event;
+//   - ErrUnregisteredKind wrapped for an event a Handler listens to whose
+//     type is not registered, see "Events";
+//   - ErrDispatchAfterFlush, as above;
+//   - event.ErrDispatcherClosed after Close.
 //
 // # Handlers
 //
@@ -89,22 +101,22 @@
 //
 // A Record is pending until its Handler has run all its events, then done.
 // Progress is the index of the next event to run, so a retry resumes after
-// the events that succeeded. A record fails on a permanent error and can be
-// skipped by an operator, see "Failures". The Relay purges done and skipped
-// records after WithRetention, 7 days by default; pending and failed records
-// stay until they settle.
+// the events that succeeded. A record fails on a permanent error, see
+// "Failures". The Relay purges done records after WithRetention, 7 days by
+// default; pending and failed records stay until they are done.
 //
 // # Leases
 //
 // A Relay runs a record only under a lease: Claim leases due records to the
 // Relay's owner (WithOwner) until now plus WithLease, and increments
 // Attempts. A record committed while its Outbox's Relay runs is leased to that
-// Relay at insert and handed to it after commit, so it runs at once; others
-// wait for a claim. A lease is fenced by owner and attempt: once it expires,
-// another Relay may claim the record, and the first Relay's updates then fail
-// with ErrLeaseLost, so the record is stored by one Relay only, though both
-// may have run the Handler. Keep the lease longer than the slowest record
-// takes.
+// Relay at insert and handed to it after commit, so it runs as soon as a
+// worker is free; other records wait for a claim. A record whose lease
+// expires before a worker takes it is left to the next claim. Once a lease
+// expires, another Relay may claim the record, and the first Relay's updates
+// then fail with ErrLeaseLost: the outcome is stored by one Relay only,
+// though both may have run the Handler. Keep the lease longer than the
+// slowest record takes.
 //
 // # Relay
 //
@@ -124,33 +136,38 @@
 //   - An error from Handle is transient: the record is retried after a
 //     backoff, WithBackoff, from 1 second doubling to 5 minutes by default,
 //     forever. A panic in Handle is transient too.
-//   - An error wrapping ErrPermanent, an event that does not decode, or a
-//     record whose Handler is not subscribed fails the record: it stops
-//     retrying and keeps the error in LastError.
+//   - An error wrapping ErrPermanent, or an event that does not decode,
+//     fails the record: it stops retrying and keeps the error in LastError.
 //   - Failed records go back to pending when a Relay starts, so deploying a
-//     fix retries them. An operator who decides a record must never run calls
-//     Store.Skip.
+//     fix retries them.
+//   - An operator who decides an event must never run lists failed records
+//     with Store.Failed and calls Store.Skip with the record's ID and
+//     Progress. Skip passes that one event; the record's later events still
+//     run.
 //
 // Every failure is logged with the record ID, the handler, the attempt, and
-// the event. Store.Counts reports pending and failed records per handler for
-// monitoring.
+// the event. For monitoring, Store.Counts reports pending and failed records
+// per handler with the CreatedAt of the oldest.
 //
 // # Context
 //
 // Handle runs on a ctx owned by the Relay, not on the dispatcher's request
 // ctx, which may have ended long before. It carries the Delivery and, with
-// WithTrace, the trace: capture runs at dispatch and its carrier is stored in
-// the record; restore derives the Handle ctx from it. The ctx is canceled only
-// when the Relay shuts down.
+// WithTrace, the trace: capture runs on the ctx of the transaction's first
+// dispatch and its carrier is stored in the transaction's records; restore
+// derives the Handle ctx from it. The ctx is canceled only when the Relay
+// shuts down.
 //
 // # Shutdown
 //
 // Call Close after the servers and workers whose code dispatches events have
 // finished. Close makes DispatchAll return event.ErrDispatcherClosed, stops
-// the Relay from taking new records, and waits for running records until ctx
-// ends; then it cancels their ctx and returns ctx.Err(). A record interrupted
-// this way is released and due at once, so another Relay runs it again. Close
-// then closes the WithBestEffort dispatcher.
+// the Relay from taking new records, releases the records it took but has not
+// started, and waits for running records until ctx ends. Then it cancels the
+// Relay's ctx and returns ctx.Err() without waiting further; a Handler that
+// ignores its ctx keeps running in the background. A record interrupted this
+// way is released and due at once, so another Relay runs it again. Close then
+// closes the WithBestEffort dispatcher.
 //
 // # Writing a store
 //
@@ -166,7 +183,8 @@
 //     oldest first.
 //  3. Advance, Complete, Retry, and Fail apply only while the record is
 //     pending and leased to the Lease's owner and attempt, and return
-//     ErrLeaseLost otherwise.
+//     ErrLeaseLost otherwise. Skip releases the lease, so an update under it
+//     fails the same way.
 //  4. Times come from the Relay's clock in each request; the Store keeps them
 //     at millisecond precision or finer, and stamps UpdatedAt with its own
 //     process clock.

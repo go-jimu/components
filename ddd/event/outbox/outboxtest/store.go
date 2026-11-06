@@ -125,16 +125,34 @@ func (s *Store) RetryFailed(_ context.Context, now time.Time) (int, error) {
 }
 
 // Skip implements outbox.Store.
-func (s *Store) Skip(_ context.Context, id string) error {
+func (s *Store) Skip(_ context.Context, id string, index int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st, found := s.records[id]
-	if !found || (st.record.Status != outbox.StatusPending && st.record.Status != outbox.StatusFailed) {
+	if !found || st.record.Progress != index ||
+		(st.record.Status != outbox.StatusPending && st.record.Status != outbox.StatusFailed) {
 		return outbox.ErrRecordNotFound
 	}
-	st.record.Status = outbox.StatusSkipped
-	release(&st.record)
+	r := &st.record
+	r.Progress = index + 1
+	r.Status = outbox.StatusPending
+	if r.Progress >= len(r.Events) {
+		r.Status = outbox.StatusDone
+	}
+	release(r)
+	r.UpdatedAt = time.Now()
 	return nil
+}
+
+// Failed implements outbox.Store.
+func (s *Store) Failed(_ context.Context, limit int) ([]outbox.Record, error) {
+	var failed []outbox.Record
+	for _, r := range s.Records() {
+		if r.Status == outbox.StatusFailed && len(failed) < limit {
+			failed = append(failed, r)
+		}
+	}
+	return failed, nil
 }
 
 // Purge implements outbox.Store.
@@ -144,7 +162,7 @@ func (s *Store) Purge(_ context.Context, before time.Time) (int, error) {
 	n := 0
 	for id, st := range s.records {
 		r := st.record
-		if (r.Status == outbox.StatusDone || r.Status == outbox.StatusSkipped) && r.UpdatedAt.Before(before) {
+		if r.Status == outbox.StatusDone && r.UpdatedAt.Before(before) {
 			delete(s.records, id)
 			n++
 		}
@@ -160,15 +178,25 @@ func (s *Store) Counts(context.Context) ([]outbox.Count, error) {
 		handler string
 		status  outbox.Status
 	}
-	counts := make(map[key]int)
+	counts := make(map[key]*outbox.Count)
 	for _, st := range s.records {
-		if st.record.Status == outbox.StatusPending || st.record.Status == outbox.StatusFailed {
-			counts[key{st.record.Handler, st.record.Status}]++
+		r := st.record
+		if r.Status != outbox.StatusPending && r.Status != outbox.StatusFailed {
+			continue
+		}
+		c, found := counts[key{r.Handler, r.Status}]
+		if !found {
+			c = &outbox.Count{Handler: r.Handler, Status: r.Status, Oldest: r.CreatedAt}
+			counts[key{r.Handler, r.Status}] = c
+		}
+		c.Records++
+		if r.CreatedAt.Before(c.Oldest) {
+			c.Oldest = r.CreatedAt
 		}
 	}
 	result := make([]outbox.Count, 0, len(counts))
-	for k, n := range counts {
-		result = append(result, outbox.Count{Handler: k.handler, Status: k.status, Records: n})
+	for _, c := range counts {
+		result = append(result, *c)
 	}
 	slices.SortFunc(result, func(a, b outbox.Count) int {
 		if a.Handler != b.Handler {

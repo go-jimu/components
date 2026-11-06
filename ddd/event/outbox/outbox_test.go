@@ -269,25 +269,75 @@ func TestDispatchFromBeforeCommitHook(t *testing.T) {
 	f := newFixture(t)
 	f.subscribe(newHandler("projector", OrderPaid{}.Kind(), OrderShipped{}.Kind()))
 	err := f.manager.Within(context.Background(), func(ctx context.Context) error {
-		if err := f.outbox.Dispatch(ctx, OrderPaid{OrderID: "o-1"}); err != nil {
+		// A hook registered before the first dispatch, such as a unit of work
+		// that saves aggregates and dispatches their events, runs before the
+		// Outbox writes its records.
+		if err := transaction.BeforeCommit(ctx, func(ctx context.Context) error {
+			return f.outbox.Dispatch(ctx, OrderShipped{OrderID: "o-1"})
+		}); err != nil {
 			return err
 		}
-		return transaction.BeforeCommit(ctx, func(ctx context.Context) error {
-			return f.outbox.Dispatch(ctx, OrderShipped{OrderID: "o-1"})
-		})
+		return f.outbox.Dispatch(ctx, OrderPaid{OrderID: "o-1"})
 	})
 	if err != nil {
 		t.Fatalf("Within = %v", err)
 	}
+	records := f.store.Records()
+	if len(records) != 1 {
+		t.Fatalf("stored %d records, want one for the transaction", len(records))
+	}
 	var kinds []event.Kind
-	for _, r := range f.store.Records() {
-		for _, e := range r.Events {
-			kinds = append(kinds, e.Kind)
-		}
+	for _, e := range records[0].Events {
+		kinds = append(kinds, e.Kind)
 	}
 	if !slices.Equal(kinds, []event.Kind{"order.paid", "order.shipped"}) {
-		t.Fatalf("recorded kinds %v, want both events in order", kinds)
+		t.Fatalf("recorded kinds %v, want both events in dispatch order", kinds)
 	}
+}
+
+func TestDispatchAfterFlush(t *testing.T) {
+	f := newFixture(t)
+	f.subscribe(newHandler("projector", OrderPaid{}.Kind(), OrderShipped{}.Kind()))
+	var lateErr error
+	err := f.manager.Within(context.Background(), func(ctx context.Context) error {
+		if err := f.outbox.Dispatch(ctx, OrderPaid{OrderID: "o-1"}); err != nil {
+			return err
+		}
+		return transaction.BeforeCommit(ctx, func(ctx context.Context) error {
+			lateErr = f.outbox.Dispatch(ctx, OrderShipped{OrderID: "o-1"})
+			return lateErr
+		})
+	})
+	if !errors.Is(lateErr, outbox.ErrDispatchAfterFlush) || !errors.Is(err, outbox.ErrDispatchAfterFlush) {
+		t.Fatalf("dispatch from a later hook = %v, Within = %v, want ErrDispatchAfterFlush", lateErr, err)
+	}
+	if records := f.store.Records(); len(records) != 0 {
+		t.Fatalf("stored %d records of a rolled back transaction", len(records))
+	}
+}
+
+func TestDispatchInvalidEvent(t *testing.T) {
+	f := newFixture(t)
+	if err := f.dispatch(nil); !errors.Is(err, outbox.ErrInvalidEvent) {
+		t.Fatalf("dispatch of nil = %v, want ErrInvalidEvent", err)
+	}
+}
+
+func TestSubscribeDuringCommits(t *testing.T) {
+	f := newFixture(t)
+	f.subscribe(newHandler("projector", OrderPaid{}.Kind()))
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := range 20 {
+			_ = f.outbox.Subscribe(newHandler(fmt.Sprintf("late-%d", i), OrderPaid{}.Kind()))
+		}
+	})
+	for range 20 {
+		if err := f.dispatch(OrderPaid{OrderID: "o-1"}); err != nil {
+			t.Fatalf("dispatch = %v", err)
+		}
+	}
+	wg.Wait()
 }
 
 func TestRelayRunsAfterCommit(t *testing.T) {
@@ -514,6 +564,148 @@ func TestCloseDeadlineCancelsRunningRecords(t *testing.T) {
 	}
 }
 
+func TestCloseReturnsAtDeadline(t *testing.T) {
+	t.Run("handler ignores ctx", func(t *testing.T) {
+		f := newFixture(t)
+		h := newHandler("projector", OrderPaid{}.Kind())
+		release, started := make(chan struct{}), make(chan struct{})
+		h.fail = func(event.Event, int) error {
+			close(started)
+			<-release
+			return nil
+		}
+		f.subscribe(h)
+		done := make(chan error, 1)
+		go func() { done <- f.outbox.Run(context.Background()) }()
+		if err := f.dispatch(OrderPaid{OrderID: "o-1"}); err != nil {
+			t.Fatalf("dispatch = %v", err)
+		}
+		<-started
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		if err := f.outbox.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Close = %v, want DeadlineExceeded", err)
+		}
+		close(release)
+		if err := <-done; err != nil {
+			t.Fatalf("Run = %v", err)
+		}
+	})
+	t.Run("store hangs", func(t *testing.T) {
+		f := newFixture(t)
+		f.subscribe(newHandler("projector", OrderPaid{}.Kind()))
+		hanging := &hangingStore{Store: f.store, claiming: make(chan struct{}, 1)}
+		registry := outbox.NewRegistry()
+		_ = outbox.Register[OrderPaid](registry)
+		o, err := outbox.New(hanging, registry, outbox.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- o.Run(context.Background()) }()
+		<-hanging.claiming
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		if err := o.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Close = %v, want DeadlineExceeded", err)
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("Run = %v", err)
+		}
+	})
+}
+
+// hangingStore blocks RetryFailed until ctx ends, as a database that stopped
+// answering.
+type hangingStore struct {
+	*outboxtest.Store
+	claiming chan struct{}
+}
+
+func (s *hangingStore) RetryFailed(ctx context.Context, _ time.Time) (int, error) {
+	s.claiming <- struct{}{}
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+// blockFirst makes h block on its first event until release closes or its
+// ctx ends, and closes started once it blocks.
+func blockFirst(h *handler, started, release chan struct{}) {
+	h.fail = func(_ event.Event, call int) error {
+		if call > 0 {
+			return nil
+		}
+		h.mu.Lock()
+		ctx := h.ctxs[0]
+		h.mu.Unlock()
+		close(started)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func TestRelaySkipsHandedOverRecordsWhoseLeaseExpired(t *testing.T) {
+	f := newFixture(t, outbox.WithWorkers(1), outbox.WithLease(50*time.Millisecond))
+	h := newHandler("projector", OrderPaid{}.Kind())
+	started, release := make(chan struct{}), make(chan struct{})
+	blockFirst(h, started, release)
+	f.subscribe(h)
+	f.run()
+	if err := f.dispatch(OrderPaid{OrderID: "o-1"}); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := f.dispatch(OrderPaid{OrderID: "o-2"}); err != nil { // waits for the one worker
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // past o-2's lease
+	close(release)
+	h.wait(t, 2)
+	f.waitFor("both records to complete", f.settled(outbox.StatusDone))
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.deliveries) != 2 || h.deliveries[1].Attempt != 2 {
+		t.Fatalf("deliveries %+v, want o-2 run once, under the lease of a claim (attempt 2)", h.deliveries)
+	}
+}
+
+func TestCloseReleasesRecordsNotStarted(t *testing.T) {
+	f := newFixture(t, outbox.WithWorkers(1), outbox.WithPollInterval(time.Hour))
+	h := newHandler("projector", OrderPaid{}.Kind())
+	started := make(chan struct{})
+	blockFirst(h, started, make(chan struct{}))
+	f.subscribe(h)
+	done := make(chan error, 1)
+	go func() { done <- f.outbox.Run(context.Background()) }()
+	f.waitFor("the Relay to start", func() bool { return outbox.Running(f.outbox) })
+	for _, id := range []string{"o-1", "o-2", "o-3"} {
+		if err := f.dispatch(OrderPaid{OrderID: id}); err != nil {
+			t.Fatal(err)
+		}
+		if id == "o-1" {
+			<-started
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_ = f.outbox.Close(ctx)
+	if err := <-done; err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+	for _, r := range f.store.Records() {
+		if r.Status != outbox.StatusPending || r.LeaseOwner != "" {
+			t.Fatalf("record %+v after Close, want pending and released", r)
+		}
+	}
+	if n := len(h.events()); n != 1 {
+		t.Fatalf("handler ran %d events, want only o-1", n)
+	}
+}
+
 func TestBestEffortGetsCommittedEvents(t *testing.T) {
 	best := &recordingDispatcher{}
 	f := newFixture(t, outbox.WithBestEffort(best))
@@ -547,8 +739,9 @@ func TestTraceCrossesIntoRelay(t *testing.T) {
 	h := newHandler("projector", OrderPaid{}.Kind())
 	f.subscribe(h)
 	f.run()
-	ctx := context.WithValue(context.Background(), traceKey{}, "trace-1")
-	err := f.manager.Within(ctx, func(ctx context.Context) error {
+	err := f.manager.Within(context.Background(), func(ctx context.Context) error {
+		// A span started inside the use case is the one captured.
+		ctx = context.WithValue(ctx, traceKey{}, "trace-1")
 		return f.outbox.Dispatch(ctx, OrderPaid{OrderID: "o-1"})
 	})
 	if err != nil {

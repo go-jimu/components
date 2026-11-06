@@ -271,22 +271,45 @@ func Value[T any](ctx context.Context, key any, init func() T) (T, error) {
 	if !ok {
 		return zero, ErrNoTransaction
 	}
+	if value, found, err := s.value(key); err != nil || found {
+		return asT[T](key, value), err
+	}
+	// init runs unlocked, so it may use the transaction; a concurrent first
+	// call for the same key may run init too, and the first value stored wins.
+	value := init()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.active {
 		return zero, ErrTransactionDone
 	}
 	if stored, found := s.values[key]; found {
-		value, isT := stored.(T)
-		if !isT {
-			panic(fmt.Sprintf("transaction: value of key %T is %T, not %T", key, stored, zero))
-		}
-		return value, nil
+		return asT[T](key, stored), nil
 	}
-	value := init()
 	if s.values == nil {
 		s.values = make(map[any]any)
 	}
 	s.values[key] = value
 	return value, nil
+}
+
+func (s *scope) value(key any) (value any, found bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.active {
+		return nil, false, ErrTransactionDone
+	}
+	value, found = s.values[key]
+	return value, found, nil
+}
+
+func asT[T any](key, value any) T {
+	if value == nil {
+		var zero T
+		return zero
+	}
+	t, isT := value.(T)
+	if !isT {
+		panic(fmt.Sprintf("transaction: value of key %T is %T, not %T", key, value, t))
+	}
+	return t
 }

@@ -246,7 +246,7 @@ var storeCases = []struct {
 			t.Fatalf("claimed %d records once due, want 1", len(got))
 		}
 		counts := s.counts()
-		if len(counts) != 1 || counts[0] != (outbox.Count{Handler: "a", Status: outbox.StatusPending, Records: 1}) {
+		if !countsAre(counts, outbox.Count{Handler: "a", Status: outbox.StatusPending, Records: 1, Oldest: r.CreatedAt}) {
 			t.Fatalf("Counts = %+v, want 1 pending record of a", counts)
 		}
 	}},
@@ -261,7 +261,7 @@ var storeCases = []struct {
 			t.Fatalf("claimed a failed record")
 		}
 		counts := s.counts()
-		if len(counts) != 1 || counts[0] != (outbox.Count{Handler: "a", Status: outbox.StatusFailed, Records: 1}) {
+		if !countsAre(counts, outbox.Count{Handler: "a", Status: outbox.StatusFailed, Records: 1, Oldest: r.CreatedAt}) {
 			t.Fatalf("Counts = %+v, want 1 failed record of a", counts)
 		}
 		n, err := s.h.Store.RetryFailed(ctx, s.base)
@@ -277,45 +277,84 @@ var storeCases = []struct {
 		}
 	}},
 	{"Skip", func(t *testing.T, s *suite) {
-		pending, failed, done := s.record("a"), s.record("a"), s.record("a")
-		for _, r := range []outbox.Record{pending, failed, done} {
+		two, one, leased, done := s.record("a"), s.record("a"), s.record("a"), s.record("a")
+		two.Events = append(two.Events, outbox.EncodedEvent{Kind: "test.happened", Payload: []byte(`{"n":2}`)})
+		for _, r := range []outbox.Record{two, one, leased, done} {
 			s.insert(r)
 		}
 		ctx := context.Background()
-		claimed := s.claim(10)
-		for _, r := range claimed {
+		var leasedNow outbox.Record
+		for _, r := range s.claim(10) {
 			var err error
 			switch r.ID {
-			case failed.ID:
-				err = s.h.Store.Fail(ctx, outbox.LeaseOf(r), "x")
+			case two.ID, one.ID:
+				err = s.h.Store.Fail(ctx, outbox.LeaseOf(r), "poison")
 			case done.ID:
 				err = s.h.Store.Complete(ctx, outbox.LeaseOf(r))
 			default:
-				err = s.h.Store.Retry(ctx, outbox.LeaseOf(r), s.base, "x")
+				leasedNow = r
 			}
 			if err != nil {
 				t.Fatalf("settling %s = %v", r.ID, err)
 			}
 		}
-		for _, id := range []string{pending.ID, failed.ID} {
-			if err := s.h.Store.Skip(ctx, id); err != nil {
-				t.Fatalf("Skip(%s) = %v", id, err)
+		if err := s.h.Store.Skip(ctx, two.ID, 1); !errors.Is(err, outbox.ErrRecordNotFound) {
+			t.Fatalf("Skip of an index other than Progress = %v, want ErrRecordNotFound", err)
+		}
+		for _, id := range []string{two.ID, one.ID, leased.ID} {
+			if err := s.h.Store.Skip(ctx, id, 0); err != nil {
+				t.Fatalf("Skip(%s, 0) = %v", id, err)
 			}
 		}
-		for _, id := range []string{done.ID, pending.ID, "missing"} {
-			if err := s.h.Store.Skip(ctx, id); !errors.Is(err, outbox.ErrRecordNotFound) {
-				t.Fatalf("Skip(%s) = %v, want ErrRecordNotFound", id, err)
+		for _, id := range []string{done.ID, one.ID, "missing"} {
+			if err := s.h.Store.Skip(ctx, id, 0); !errors.Is(err, outbox.ErrRecordNotFound) {
+				t.Fatalf("Skip(%s, 0) = %v, want ErrRecordNotFound", id, err)
 			}
 		}
-		if got := s.claimAt("relay-1", []string{"a"}, s.at(24*time.Hour), 10); len(got) != 0 {
-			t.Fatalf("claimed %v after skipping", ids(got))
+		if err := s.h.Store.Complete(ctx, outbox.LeaseOf(leasedNow)); !errors.Is(err, outbox.ErrLeaseLost) {
+			t.Fatalf("Complete under a lease Skip released = %v, want ErrLeaseLost", err)
 		}
-		if counts := s.counts(); len(counts) != 0 {
-			t.Fatalf("Counts = %+v, want none", counts)
+		got := s.claimAt("relay-1", []string{"a"}, s.at(24*time.Hour), 10)
+		if len(got) != 1 || got[0].ID != two.ID || got[0].Progress != 1 || got[0].Status != outbox.StatusPending {
+			t.Fatalf("claim after skipping = %+v, want only %s, pending at progress 1", got, two.ID)
+		}
+		if failed := s.failed(10); len(failed) != 0 {
+			t.Fatalf("Failed = %v, want none after skipping", ids(failed))
+		}
+	}},
+	{"FailedAndCounts", func(t *testing.T, s *suite) {
+		first, second, third, pending := s.record("a"), s.record("a"), s.record("b"), s.record("b")
+		for _, r := range []outbox.Record{first, second, third, pending} {
+			s.insert(r)
+		}
+		ctx := context.Background()
+		for _, r := range s.claimAt("relay-1", []string{"a", "b"}, s.base, 10) {
+			var err error
+			if r.ID == pending.ID {
+				err = s.h.Store.Retry(ctx, outbox.LeaseOf(r), s.base, "x")
+			} else {
+				err = s.h.Store.Fail(ctx, outbox.LeaseOf(r), "poison "+r.ID)
+			}
+			if err != nil {
+				t.Fatalf("settling %s = %v", r.ID, err)
+			}
+		}
+		failed := s.failed(2)
+		if len(failed) != 2 || failed[0].ID != first.ID || failed[1].ID != second.ID ||
+			failed[0].LastError != "poison "+first.ID || failed[0].Status != outbox.StatusFailed {
+			t.Fatalf("Failed(2) = %+v, want %s then %s with their errors", failed, first.ID, second.ID)
+		}
+		if !countsAre(s.counts(),
+			outbox.Count{Handler: "a", Status: outbox.StatusFailed, Records: 2, Oldest: first.CreatedAt},
+			outbox.Count{Handler: "b", Status: outbox.StatusPending, Records: 1, Oldest: pending.CreatedAt},
+			outbox.Count{Handler: "b", Status: outbox.StatusFailed, Records: 1, Oldest: third.CreatedAt},
+		) {
+			t.Fatalf("Counts = %+v, want per handler and status with the oldest CreatedAt", s.counts())
 		}
 	}},
 	{"Purge", func(t *testing.T, s *suite) {
 		done, skipped, pending, failed := s.record("a"), s.record("a"), s.record("a"), s.record("a")
+		failed.Events = append(failed.Events, failed.Events[0])
 		for _, r := range []outbox.Record{done, skipped, pending, failed} {
 			s.insert(r)
 		}
@@ -325,7 +364,7 @@ var storeCases = []struct {
 			switch r.ID {
 			case done.ID:
 				err = s.h.Store.Complete(ctx, outbox.LeaseOf(r))
-			case failed.ID:
+			case failed.ID, skipped.ID:
 				err = s.h.Store.Fail(ctx, outbox.LeaseOf(r), "x")
 			default:
 				err = s.h.Store.Retry(ctx, outbox.LeaseOf(r), s.base, "x")
@@ -334,23 +373,20 @@ var storeCases = []struct {
 				t.Fatalf("settling %s = %v", r.ID, err)
 			}
 		}
-		if err := s.h.Store.Skip(ctx, skipped.ID); err != nil {
+		if err := s.h.Store.Skip(ctx, skipped.ID, 0); err != nil {
 			t.Fatalf("Skip = %v", err)
 		}
 		if n, err := s.h.Store.Purge(ctx, time.Now().Add(-time.Hour)); err != nil || n != 0 {
 			t.Fatalf("Purge before the records settled = %d, %v, want 0", n, err)
 		}
 		if n, err := s.h.Store.Purge(ctx, time.Now().Add(time.Hour)); err != nil || n != 2 {
-			t.Fatalf("Purge = %d, %v, want the done and skipped records", n, err)
+			t.Fatalf("Purge = %d, %v, want the done records, one skipped to done", n, err)
 		}
-		counts := s.counts()
-		want := []outbox.Count{
-			{Handler: "a", Status: outbox.StatusPending, Records: 1},
-			{Handler: "a", Status: outbox.StatusFailed, Records: 1},
-		}
-		slices.SortFunc(counts, func(a, b outbox.Count) int { return int(a.Status) - int(b.Status) })
-		if !slices.Equal(counts, want) {
-			t.Fatalf("Counts after Purge = %+v, want %+v", counts, want)
+		if counts := s.counts(); !countsAre(counts,
+			outbox.Count{Handler: "a", Status: outbox.StatusPending, Records: 1, Oldest: pending.CreatedAt},
+			outbox.Count{Handler: "a", Status: outbox.StatusFailed, Records: 1, Oldest: failed.CreatedAt},
+		) {
+			t.Fatalf("Counts after Purge = %+v, want the pending and failed records", counts)
 		}
 	}},
 }
@@ -407,6 +443,23 @@ func (s *suite) counts() []outbox.Count {
 		s.t.Fatalf("Counts = %v", err)
 	}
 	return counts
+}
+
+func (s *suite) failed(limit int) []outbox.Record {
+	s.t.Helper()
+	failed, err := s.h.Store.Failed(context.Background(), limit)
+	if err != nil {
+		s.t.Fatalf("Failed = %v", err)
+	}
+	return failed
+}
+
+// countsAre reports whether got equals want, in order, comparing Oldest as
+// an instant.
+func countsAre(got []outbox.Count, want ...outbox.Count) bool {
+	return slices.EqualFunc(got, want, func(a, b outbox.Count) bool {
+		return a.Handler == b.Handler && a.Status == b.Status && a.Records == b.Records && a.Oldest.Equal(b.Oldest)
+	})
 }
 
 func ids(records []outbox.Record) []string {

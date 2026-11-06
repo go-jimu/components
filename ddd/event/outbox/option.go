@@ -109,8 +109,8 @@ func WithBackoff(minDelay, maxDelay time.Duration) Option {
 	}
 }
 
-// WithRetention sets how long done and skipped records are kept before the
-// Relay purges them, 7 days by default.
+// WithRetention sets how long done records are kept before the Relay purges
+// them, 7 days by default.
 func WithRetention(d time.Duration) Option {
 	return func(c *config) {
 		if d > 0 {
@@ -128,9 +128,9 @@ func WithBestEffort(dispatcher event.Dispatcher) Option {
 	}
 }
 
-// WithTrace sets how the caller's trace crosses into the Relay: capture runs
-// at dispatch and its carrier is stored in the record; restore derives the
-// ctx Handle receives from it. See "Context".
+// WithTrace sets how the caller's trace crosses into the Relay: capture
+// returns a carrier from the dispatching ctx, and restore derives the ctx
+// Handle receives from it. See "Context".
 func WithTrace(capture func(context.Context) map[string]string, restore func(context.Context, map[string]string) context.Context) Option {
 	return func(c *config) {
 		if capture != nil && restore != nil {

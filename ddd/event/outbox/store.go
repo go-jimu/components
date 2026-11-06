@@ -18,8 +18,6 @@ const (
 	// StatusFailed means an event failed permanently; RetryFailed puts the
 	// record back to pending.
 	StatusFailed
-	// StatusSkipped means an operator skipped the record with Skip.
-	StatusSkipped
 )
 
 func (s Status) String() string {
@@ -30,8 +28,6 @@ func (s Status) String() string {
 		return "done"
 	case StatusFailed:
 		return "failed"
-	case StatusSkipped:
-		return "skipped"
 	default:
 		return "unknown"
 	}
@@ -99,6 +95,9 @@ type Count struct {
 	Handler string
 	Status  Status
 	Records int
+	// Oldest is the CreatedAt of the oldest of those records: how long the
+	// handler has been behind.
+	Oldest time.Time
 }
 
 // Store keeps the outbox records of one transactional resource, such as one
@@ -127,13 +126,17 @@ type Store interface {
 	// RetryFailed puts every failed record back to pending, due at now, and
 	// returns how many it reset.
 	RetryFailed(ctx context.Context, now time.Time) (int, error)
-	// Skip marks a pending or failed record skipped, or returns
-	// ErrRecordNotFound.
-	Skip(ctx context.Context, id string) error
-	// Purge deletes done and skipped records last updated before before, and
-	// returns how many it deleted.
+	// Skip skips the event at index of a pending or failed record whose
+	// Progress is index: it sets Progress to index+1, marks the record done
+	// when no event is left and pending otherwise, and releases the lease. It
+	// returns ErrRecordNotFound when no such record exists. See "Failures".
+	Skip(ctx context.Context, id string, index int) error
+	// Purge deletes done records last updated before before, and returns how
+	// many it deleted.
 	Purge(ctx context.Context, before time.Time) (int, error)
-	// Counts returns the number of records per handler and status, for
-	// pending and failed records.
+	// Counts returns the number of pending and failed records per handler and
+	// status, ordered by handler and status.
 	Counts(ctx context.Context) ([]Count, error)
+	// Failed returns up to limit failed records, oldest first.
+	Failed(ctx context.Context, limit int) ([]Record, error)
 }

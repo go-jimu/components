@@ -16,12 +16,23 @@ var (
 	ErrLeaseLost = errors.New("outbox: record lease lost")
 
 	// ErrRecordNotFound means a Store has no record with that ID in a state
-	// the call applies to.
+	// the call applies to, such as Skip of a record whose Progress is not the
+	// given index.
 	ErrRecordNotFound = errors.New("outbox: record not found")
 
 	// ErrUnregisteredKind means an event's Kind, or its Go type for that Kind,
 	// is not in the Registry. See "Events".
 	ErrUnregisteredKind = errors.New("outbox: event kind is not registered")
+
+	// ErrInvalidEvent means an event is nil, or its type reports an empty
+	// Kind.
+	ErrInvalidEvent = errors.New("outbox: event is invalid")
+
+	// ErrDispatchAfterFlush means DispatchAll ran in a transaction whose
+	// records this Outbox has already written: a BeforeCommit hook registered
+	// after the transaction's first dispatch dispatched again. See
+	// "Dispatch".
+	ErrDispatchAfterFlush = errors.New("outbox: events dispatched after the transaction's records were written")
 
 	// ErrDuplicateKind means Register was called twice for one Kind.
 	ErrDuplicateKind = errors.New("outbox: event kind is already registered")

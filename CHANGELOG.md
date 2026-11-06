@@ -9,8 +9,11 @@
   Relay (`Run`) runs each record after commit, in dispatch order, retrying
   with backoff until the handler succeeds. A handler error wrapping
   `ErrPermanent` fails the record; failed records retry when a Relay starts,
-  and an operator can `Skip` one. Relays of several processes share records
-  through fenced leases. Technology adapters implement `Store`;
+  and an operator lists them with `Store.Failed` and skips the one event that
+  must not run with `Store.Skip`. A dispatch from a BeforeCommit hook
+  registered after the transaction's first dispatch returns
+  `ErrDispatchAfterFlush`, keeping one record per handler per transaction.
+  Relays of several processes share records through fenced leases. Technology adapters implement `Store`;
   `ddd/event/outbox/outboxtest` provides an in-memory one and `TestStore`, the
   conformance suite.
 - Added: `transaction.Value` keeps one value per key for the life of a

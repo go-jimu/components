@@ -27,8 +27,8 @@ func NewRegistry() *Registry {
 }
 
 // Register adds event type T under the Kind its zero value reports. It
-// returns ErrUnregisteredKind wrapped when that Kind is empty or the zero
-// value cannot report it, and ErrDuplicateKind when the Kind is already
+// returns ErrInvalidEvent wrapped when that Kind is empty or the zero value
+// cannot report it, and ErrDuplicateKind when the Kind is already
 // registered.
 func Register[T event.Event](r *Registry) error {
 	kind, err := kindOf[T]()
@@ -56,13 +56,13 @@ func Register[T event.Event](r *Registry) error {
 func kindOf[T event.Event]() (kind event.Kind, err error) {
 	defer func() {
 		if recover() != nil {
-			err = fmt.Errorf("%w: zero %s cannot report its Kind", ErrUnregisteredKind, reflect.TypeFor[T]())
+			err = fmt.Errorf("%w: zero %s cannot report its Kind", ErrInvalidEvent, reflect.TypeFor[T]())
 		}
 	}()
 	var zero T
 	kind = zero.Kind()
 	if kind == "" {
-		return "", fmt.Errorf("%w: %s has an empty Kind", ErrUnregisteredKind, reflect.TypeFor[T]())
+		return "", fmt.Errorf("%w: %s has an empty Kind", ErrInvalidEvent, reflect.TypeFor[T]())
 	}
 	return kind, nil
 }
@@ -75,8 +75,9 @@ func (r *Registry) Registered(kind event.Kind) bool {
 	return found
 }
 
-// Encode returns e in stored form. It returns ErrUnregisteredKind wrapped
-// when e's Kind is not registered or was registered for another Go type.
+// Encode returns e in stored form. It returns ErrInvalidEvent wrapped for a
+// nil e, and ErrUnregisteredKind wrapped when e's Kind is not registered or
+// was registered for another Go type.
 func (r *Registry) Encode(e event.Event) (EncodedEvent, error) {
 	if err := r.check(e); err != nil {
 		return EncodedEvent{}, err
@@ -106,7 +107,7 @@ func (r *Registry) Decode(e EncodedEvent) (event.Event, error) {
 
 func (r *Registry) check(e event.Event) error {
 	if e == nil {
-		return fmt.Errorf("%w: nil event", ErrUnregisteredKind)
+		return fmt.Errorf("%w: nil event", ErrInvalidEvent)
 	}
 	r.mu.RLock()
 	reg, found := r.kinds[e.Kind()]
