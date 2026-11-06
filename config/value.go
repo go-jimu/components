@@ -25,6 +25,8 @@ type Value interface {
 	Duration() (time.Duration, error)
 	Slice() ([]Value, error)
 	Map() (map[string]Value, error)
+	// Scan decodes the value into a pointer, converting strings to the kinds
+	// of the target fields as Config.Scan does; see "Scanning" in README.md.
 	Scan(interface{}) error
 	Load() interface{}
 	Store(interface{})
@@ -225,7 +227,7 @@ func (v *atomicValue) Scan(obj interface{}) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, obj)
+	return scanJSON(data, obj)
 }
 
 type errValue struct {

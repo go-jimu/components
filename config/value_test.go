@@ -277,6 +277,24 @@ func TestAtomicValue_Scan(t *testing.T) {
 	}
 }
 
+// Intent: Value.Scan converts strings to the target field kinds like
+// Config.Scan, so a module struct scans from env-supplied string values.
+func TestAtomicValue_ScanConvertsStrings(t *testing.T) {
+	v := atomicValue{}
+	v.Store(map[string]interface{}{"port": "8080", "debug": "true", "timeout": "5s"})
+	var got struct {
+		Port    int           `json:"port"`
+		Debug   bool          `json:"debug"`
+		Timeout time.Duration `json:"timeout"`
+	}
+	if err := v.Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Port != 8080 || !got.Debug || got.Timeout != 5*time.Second {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 // Intent: a missing key yields a Value whose accessors all report the lookup
 // error instead of panicking.
 func TestErrValueReportsErrorFromEveryAccessor(t *testing.T) {
