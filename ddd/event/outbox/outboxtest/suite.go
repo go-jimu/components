@@ -157,7 +157,9 @@ var storeCases = []struct {
 		var wg sync.WaitGroup
 		for i := range relays {
 			wg.Go(func() {
-				for {
+				// A Store that reclaims leased records never runs dry; the
+				// bound turns that into duplicate claims instead of a hang.
+				for range records {
 					got, err := s.h.Store.Claim(context.Background(), outbox.ClaimRequest{
 						Owner: fmt.Sprintf("relay-%d", i), Handlers: []string{"a"},
 						Now: s.base, LeaseUntil: s.at(time.Minute), Limit: 3,
