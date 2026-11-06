@@ -112,6 +112,9 @@ func (o *Outbox) DispatchAll(ctx context.Context, events []event.Event) error {
 			if err := o.registry.check(e); err != nil {
 				return err
 			}
+			if err := validate(e); err != nil {
+				return fmt.Errorf("outbox: dispatch %s: %w", e.Kind(), err)
+			}
 		}
 	}
 	b, err := transaction.Value(ctx, batchKey{o}, newBatch)

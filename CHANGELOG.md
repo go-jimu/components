@@ -3,7 +3,7 @@
 ## v0.12.11
 
 - Added: an outbox event type may implement `Validate() error`
-  (go-jimu/components#91). The `Registry` calls it when a must-run handler's
+  (go-jimu/components#91). It runs when a must-run handler's
   event is dispatched, so `DispatchAll` returns `ErrInvalidEvent` wrapped and
   the transaction rolls back, and after decoding a record, so an older
   record that lacks a now-required field fails with the error in

@@ -130,7 +130,7 @@
 // fields means fewer fields to evolve.
 //
 // An event type may implement Validate() error to reject values it cannot
-// handle, such as a required field left zero. The Registry calls it when a
+// handle, such as a required field left zero. It runs when a
 // must-run handler's event is dispatched, so DispatchAll returns
 // ErrInvalidEvent wrapped and the transaction rolls back, and after every
 // decode, so an older record that lacks the field fails, see "Failures",

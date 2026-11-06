@@ -292,9 +292,13 @@ func TestDispatchRejectsUnregisteredType(t *testing.T) {
 func TestDispatchRejectsEventsThatFailValidate(t *testing.T) {
 	f := newFixture(t)
 	f.subscribe(newHandler("refunds", OrderRefunded{}.Kind()))
-	err := f.dispatch(OrderRefunded{OrderID: "o-1", Amount: 100}, OrderRefunded{OrderID: "o-2"})
-	if !errors.Is(err, outbox.ErrInvalidEvent) || !strings.Contains(err.Error(), "amount is required") {
-		t.Fatalf("dispatch = %v, want ErrInvalidEvent with the Validate error", err)
+	var dispatchErr error
+	err := f.manager.Within(context.Background(), func(ctx context.Context) error {
+		dispatchErr = f.outbox.DispatchAll(ctx, []event.Event{OrderRefunded{OrderID: "o-1", Amount: 100}, OrderRefunded{OrderID: "o-2"}})
+		return dispatchErr
+	})
+	if !errors.Is(dispatchErr, outbox.ErrInvalidEvent) || !strings.Contains(dispatchErr.Error(), "amount is required") || !errors.Is(err, outbox.ErrInvalidEvent) {
+		t.Fatalf("DispatchAll = %v, Within = %v, want ErrInvalidEvent with the Validate error from both", dispatchErr, err)
 	}
 	if last := f.driver.Last(); last.State() != transactiontest.RolledBack {
 		t.Fatalf("transaction %s, want rolled back", last.State())
