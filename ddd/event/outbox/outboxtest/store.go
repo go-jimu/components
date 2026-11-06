@@ -19,8 +19,10 @@ import (
 // Store is an in-memory outbox.Store. Insert and Advance in a transaction
 // apply once that transaction commits. The zero value joins the transactions
 // of any Manager; set Manager to make the Store one database's, so that
-// another Manager's transaction is foreign to it. Its methods are safe for
-// concurrent use.
+// another Manager's transaction is foreign to it. Unlike a database, it does
+// not lock a record for the transaction that advanced it: when the lease
+// changes before that transaction commits, the advance is dropped. Its
+// methods are safe for concurrent use.
 type Store struct {
 	Manager *transaction.Manager
 
@@ -94,8 +96,8 @@ func (s *Store) Advance(ctx context.Context, lease outbox.Lease, progress int) e
 	if err := s.foreign(ctx); err != nil {
 		return err
 	}
-	apply := func(r *outbox.Record) { r.Progress = progress }
-	if err := s.update(lease, func(*outbox.Record) {}); err != nil {
+	apply := func(r *outbox.Record) { r.Progress = max(r.Progress, progress) }
+	if err := s.check(lease); err != nil {
 		return err
 	}
 	err := transaction.AfterCommit(ctx, func(context.Context) { _ = s.update(lease, apply) })
@@ -257,14 +259,30 @@ func (s *Store) Records() []outbox.Record {
 func (s *Store) update(lease outbox.Lease, apply func(*outbox.Record)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, found := s.records[lease.RecordID]
-	if !found || st.record.Status != outbox.StatusPending ||
-		st.record.LeaseOwner != lease.Owner || st.record.Attempts != lease.Attempt {
-		return outbox.ErrLeaseLost
+	st, err := s.leased(lease)
+	if err != nil {
+		return err
 	}
 	apply(&st.record)
 	st.record.UpdatedAt = time.Now()
 	return nil
+}
+
+// check returns outbox.ErrLeaseLost unless lease holds.
+func (s *Store) check(lease outbox.Lease) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.leased(lease)
+	return err
+}
+
+func (s *Store) leased(lease outbox.Lease) (*stored, error) {
+	st, found := s.records[lease.RecordID]
+	if !found || st.record.Status != outbox.StatusPending ||
+		st.record.LeaseOwner != lease.Owner || st.record.Attempts != lease.Attempt {
+		return nil, outbox.ErrLeaseLost
+	}
+	return st, nil
 }
 
 func release(r *outbox.Record) {

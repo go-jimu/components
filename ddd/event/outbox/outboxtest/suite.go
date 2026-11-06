@@ -16,8 +16,8 @@ import (
 )
 
 // Harness is one empty Store under test, the Transactor of its database, and
-// optionally the Transactor of another database, whose transactions are
-// foreign to the Store.
+// the Transactor of another database, whose transactions are foreign to the
+// Store. All three are required.
 type Harness struct {
 	Store      outbox.Store
 	Transactor transaction.Transactor
@@ -236,7 +236,9 @@ var storeCases = []struct {
 		}
 	}},
 	{"AdvanceJoinsTransaction", func(t *testing.T, s *suite) {
-		s.insert(s.record("a"))
+		rec := s.record("a")
+		rec.Events = append(rec.Events, rec.Events[0], rec.Events[0])
+		s.insert(rec)
 		r := s.claim(10)[0]
 		rollback := errors.New("rollback")
 		err := s.h.Transactor.Within(context.Background(), func(ctx context.Context) error {
@@ -271,13 +273,28 @@ var storeCases = []struct {
 			t.Fatalf("Advance under a stale lease in a transaction = %v, want ErrLeaseLost", err)
 		}
 		if s.h.Foreign == nil {
-			return
+			t.Fatal("Harness.Foreign is required")
 		}
 		err = s.h.Foreign.Within(context.Background(), func(ctx context.Context) error {
 			return s.h.Store.Advance(ctx, outbox.LeaseOf(r), 2)
 		})
 		if !errors.Is(err, transaction.ErrForeignTransaction) {
 			t.Fatalf("Advance in another database's transaction = %v, want ErrForeignTransaction", err)
+		}
+	}},
+	{"AdvanceNeverLowers", func(t *testing.T, s *suite) {
+		rec := s.record("a")
+		rec.Events = append(rec.Events, rec.Events[0], rec.Events[0])
+		s.insert(rec)
+		r := s.claim(10)[0]
+		ctx := context.Background()
+		for _, p := range []int{2, 1} {
+			if err := s.h.Store.Advance(ctx, outbox.LeaseOf(r), p); err != nil {
+				t.Fatalf("Advance(%d) = %v", p, err)
+			}
+		}
+		if got := s.progressAfterRetry(r); got != 2 {
+			t.Fatalf("progress %d after Advance(2) then Advance(1), want 2", got)
 		}
 	}},
 	{"RetryReleases", func(t *testing.T, s *suite) {

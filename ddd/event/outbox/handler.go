@@ -3,8 +3,10 @@ package outbox
 import (
 	"context"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/go-jimu/components/ddd/event"
+	"github.com/go-jimu/components/transaction"
 )
 
 // Handler is a must-run handler. See "Handlers".
@@ -35,9 +37,57 @@ func (d Delivery) Key() string {
 
 type deliveryKey struct{}
 
+// running is one run of one event by Handle, carried in Handle's ctx.
+type running struct {
+	outbox   *Outbox
+	lease    Lease
+	delivery Delivery
+	// progress is the record's progress once this event is done.
+	progress int
+	// active is true until Handle returns.
+	active atomic.Bool
+	// stored is set once a transaction that called MarkDone commits.
+	stored atomic.Bool
+}
+
 // DeliveryFrom returns the Delivery of the event a Handler runs, from the ctx
 // the Relay passes to Handle.
 func DeliveryFrom(ctx context.Context) (Delivery, bool) {
-	d, ok := ctx.Value(deliveryKey{}).(Delivery)
-	return d, ok
+	r, ok := ctx.Value(deliveryKey{}).(*running)
+	if !ok {
+		return Delivery{}, false
+	}
+	return r.delivery, true
+}
+
+type markKey struct{ run *running }
+
+// MarkDone stores, in the transaction ctx is in, that the event Handle runs
+// is done, so that transaction's writes take effect exactly once; see
+// "Handlers". Call it inside that transaction, on a ctx derived from the one
+// Handle received; a second call in the same transaction does nothing. It
+// returns:
+//   - ErrNoDelivery when ctx does not come from a Handle that is running;
+//   - transaction.ErrNoTransaction or transaction.ErrTransactionDone outside
+//     a live transaction;
+//   - transaction.ErrForeignTransaction in a transaction of another database
+//     than the Store's;
+//   - ErrLeaseLost when another Relay has taken the record over.
+func MarkDone(ctx context.Context) error {
+	r, ok := ctx.Value(deliveryKey{}).(*running)
+	if !ok || !r.active.Load() {
+		return ErrNoDelivery
+	}
+	marked, err := transaction.Value(ctx, markKey{r}, func() *atomic.Bool { return new(atomic.Bool) })
+	if err != nil {
+		return err
+	}
+	if marked.Load() {
+		return nil
+	}
+	if err := r.outbox.store.Advance(ctx, r.lease, r.progress); err != nil {
+		return err
+	}
+	marked.Store(true)
+	return transaction.AfterCommit(ctx, func(context.Context) { r.stored.Store(true) })
 }
