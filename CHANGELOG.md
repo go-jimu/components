@@ -1,5 +1,19 @@
 # Change log
 
+## v0.12.8
+
+- Added: `transaction.WithBeforeCommit` returns a ctx that carries a
+  BeforeCommit hook into every transaction started on it, for code that calls
+  into a use case without knowing whether it opens one (go-jimu/components#84).
+- Added: a must-run handler's writes in the Store's database take effect
+  exactly once. The Relay stores the event's progress inside the transaction
+  the handler opens on that database, so the writes and the progress commit
+  together, even when the commit's reply is lost; see "Handlers" in
+  `ddd/event/outbox`. `Store.Advance` writes in the transaction ctx is in and
+  returns `transaction.ErrForeignTransaction` in another database's;
+  `outboxtest.TestStore` checks both, given `Harness.Foreign`.
+  `outboxtest.Store.Manager` ties the in-memory Store to one database.
+
 ## v0.12.7
 
 - Added: package `ddd/event/outbox` runs the domain event handlers that must

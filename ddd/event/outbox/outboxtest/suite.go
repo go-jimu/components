@@ -15,11 +15,13 @@ import (
 	"github.com/go-jimu/components/transaction"
 )
 
-// Harness is one empty Store under test and the Transactor whose
-// transactions its Insert joins.
+// Harness is one empty Store under test, the Transactor of its database, and
+// optionally the Transactor of another database, whose transactions are
+// foreign to the Store.
 type Harness struct {
 	Store      outbox.Store
 	Transactor transaction.Transactor
+	Foreign    transaction.Transactor
 }
 
 // TestStore checks a Store adapter against the outbox.Store contract; see
@@ -233,6 +235,51 @@ var storeCases = []struct {
 			t.Fatalf("claim after Advance and Retry = %+v, want progress 1, last error boom, attempt 2", got)
 		}
 	}},
+	{"AdvanceJoinsTransaction", func(t *testing.T, s *suite) {
+		s.insert(s.record("a"))
+		r := s.claim(10)[0]
+		rollback := errors.New("rollback")
+		err := s.h.Transactor.Within(context.Background(), func(ctx context.Context) error {
+			if err := s.h.Store.Advance(ctx, outbox.LeaseOf(r), 1); err != nil {
+				return err
+			}
+			return rollback
+		})
+		if !errors.Is(err, rollback) {
+			t.Fatalf("Within = %v, want the rollback error", err)
+		}
+		if got := s.progressAfterRetry(r); got != 0 {
+			t.Fatalf("progress %d after a rolled back Advance, want 0", got)
+		}
+		r = s.claim(10)[0]
+		err = s.h.Transactor.Within(context.Background(), func(ctx context.Context) error {
+			return s.h.Store.Advance(ctx, outbox.LeaseOf(r), 1)
+		})
+		if err != nil {
+			t.Fatalf("Within = %v", err)
+		}
+		if got := s.progressAfterRetry(r); got != 1 {
+			t.Fatalf("progress %d after a committed Advance, want 1", got)
+		}
+		r = s.claim(10)[0]
+		stale := outbox.LeaseOf(r)
+		stale.Attempt--
+		err = s.h.Transactor.Within(context.Background(), func(ctx context.Context) error {
+			return s.h.Store.Advance(ctx, stale, 2)
+		})
+		if !errors.Is(err, outbox.ErrLeaseLost) {
+			t.Fatalf("Advance under a stale lease in a transaction = %v, want ErrLeaseLost", err)
+		}
+		if s.h.Foreign == nil {
+			return
+		}
+		err = s.h.Foreign.Within(context.Background(), func(ctx context.Context) error {
+			return s.h.Store.Advance(ctx, outbox.LeaseOf(r), 2)
+		})
+		if !errors.Is(err, transaction.ErrForeignTransaction) {
+			t.Fatalf("Advance in another database's transaction = %v, want ErrForeignTransaction", err)
+		}
+	}},
 	{"RetryReleases", func(t *testing.T, s *suite) {
 		s.insert(s.record("a"))
 		r := s.claim(10)[0]
@@ -418,6 +465,23 @@ func (s *suite) insert(r outbox.Record) {
 	if err != nil {
 		s.t.Fatalf("inserting %s = %v", r.ID, err)
 	}
+}
+
+// progressAfterRetry releases r's lease and returns the Progress the next
+// claim reads.
+func (s *suite) progressAfterRetry(r outbox.Record) int {
+	s.t.Helper()
+	if err := s.h.Store.Retry(context.Background(), outbox.LeaseOf(r), s.base, "x"); err != nil {
+		s.t.Fatalf("Retry = %v", err)
+	}
+	got := s.claim(10)
+	if len(got) != 1 {
+		s.t.Fatalf("claimed %d records, want 1", len(got))
+	}
+	if err := s.h.Store.Retry(context.Background(), outbox.LeaseOf(got[0]), s.base, "x"); err != nil {
+		s.t.Fatalf("Retry = %v", err)
+	}
+	return got[0].Progress
 }
 
 // claim claims records of handler "a" at base.

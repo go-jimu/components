@@ -93,6 +93,13 @@
 // Both return ErrNoTransaction for a ctx in no transaction and
 // ErrTransactionDone once the transaction has ended.
 //
+// Code that calls into a use case without knowing whether it opens a
+// transaction, such as an outbox Relay running a handler, attaches a hook to
+// the transactions that use case opens: WithBeforeCommit returns a ctx whose
+// every Within registers the hook first. A Within on another Manager runs the
+// hook too, so the hook checks which transaction it is in, as with
+// Manager.Current.
+//
 // # Transaction values
 //
 // Value keeps one value per key for the life of one transaction, such as a

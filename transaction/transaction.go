@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -120,7 +121,7 @@ func (m *Manager) Within(ctx context.Context, fn func(context.Context) error) er
 	if err != nil {
 		return fmt.Errorf("transaction: begin: %w", err)
 	}
-	s := &scope{owner: m, tx: tx, active: true}
+	s := &scope{owner: m, tx: tx, active: true, beforeCommit: carried(ctx)}
 	txCtx := context.WithValue(ctx, scopeKey{}, s)
 
 	committing, settled := false, false
@@ -230,6 +231,25 @@ func BeforeCommit(ctx context.Context, fn func(context.Context) error) error {
 		return ErrNilFunc
 	}
 	return register(ctx, func(s *scope) { s.beforeCommit = append(s.beforeCommit, fn) })
+}
+
+// WithBeforeCommit returns a ctx that carries fn to the transactions started
+// on it: every Within on the returned ctx, or on a ctx derived from it,
+// registers fn as a BeforeCommit hook ahead of the hooks fn's code registers.
+// See "Hooks". A nil fn returns ctx unchanged.
+func WithBeforeCommit(ctx context.Context, fn func(context.Context) error) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, carriedKey{}, append(carried(ctx), fn))
+}
+
+type carriedKey struct{}
+
+// carried returns a copy of the hooks WithBeforeCommit put on ctx.
+func carried(ctx context.Context) []func(context.Context) error {
+	hooks, _ := ctx.Value(carriedKey{}).([]func(context.Context) error)
+	return slices.Clone(hooks)
 }
 
 // AfterCommit registers fn to run once the transaction ctx is in has

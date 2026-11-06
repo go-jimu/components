@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-jimu/components/ddd/event"
+	"github.com/go-jimu/components/transaction"
 )
 
 // storeTimeout bounds one Store update the Relay makes for a record, so the
@@ -247,11 +249,25 @@ func (o *Outbox) execute(ctx context.Context, r Record) {
 			return
 		}
 		deliveryCtx := context.WithValue(ctx, deliveryKey{}, Delivery{RecordID: r.ID, Index: i, Attempt: r.Attempts})
-		if err := handle(deliveryCtx, h, e); err != nil {
-			if errors.Is(err, ErrPermanent) {
-				o.fail(ctx, lease, err, eventAttrs)
-				return
+		var stored atomic.Bool
+		deliveryCtx = transaction.WithBeforeCommit(deliveryCtx, o.storeProgress(lease, i+1, &stored))
+		err = handle(deliveryCtx, h, e)
+		switch {
+		case stored.Load():
+			// The handler's transaction committed the progress with its writes:
+			// the event is done whatever Handle returned.
+			if err != nil {
+				o.cfg.logger.LogAttrs(ctx, slog.LevelWarn, "outbox handler failed after its transaction stored the event as done",
+					append(eventAttrs, slog.String("error", err.Error()))...)
 			}
+			continue
+		case errors.Is(err, ErrLeaseLost):
+			o.cfg.logger.LogAttrs(ctx, slog.LevelWarn, "outbox lease lost; another relay runs the record", eventAttrs...)
+			return
+		case errors.Is(err, ErrPermanent):
+			o.fail(ctx, lease, err, eventAttrs)
+			return
+		case err != nil:
 			o.retry(ctx, lease, err, eventAttrs)
 			return
 		}
@@ -266,6 +282,25 @@ func (o *Outbox) execute(ctx context.Context, r Record) {
 	o.record(ctx, "outbox completion failed", func(ctx context.Context) error {
 		return o.store.Complete(ctx, lease)
 	}, attrs)
+}
+
+// storeProgress returns the hook the Relay carries into the transactions
+// Handle opens; see "Handlers". In a transaction of the Store's database it
+// sets the record's progress, so it commits with the handler's writes, and
+// sets stored once that transaction commits. In another database's
+// transaction it does nothing, and the Relay stores the progress after Handle
+// returns.
+func (o *Outbox) storeProgress(lease Lease, progress int, stored *atomic.Bool) func(context.Context) error {
+	return func(ctx context.Context) error {
+		err := o.store.Advance(ctx, lease, progress)
+		if errors.Is(err, transaction.ErrForeignTransaction) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return transaction.AfterCommit(ctx, func(context.Context) { stored.Store(true) })
+	}
 }
 
 func (o *Outbox) handler(name string) (Handler, bool) {

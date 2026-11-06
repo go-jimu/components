@@ -6,6 +6,7 @@ package outboxtest
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"sync"
@@ -15,10 +16,14 @@ import (
 	"github.com/go-jimu/components/transaction"
 )
 
-// Store is an in-memory outbox.Store. It joins any transaction.Manager's
-// transaction: Insert keeps its records once that transaction commits. The
-// zero value is ready to use. Its methods are safe for concurrent use.
+// Store is an in-memory outbox.Store. Insert and Advance in a transaction
+// apply once that transaction commits. The zero value joins the transactions
+// of any Manager; set Manager to make the Store one database's, so that
+// another Manager's transaction is foreign to it. Its methods are safe for
+// concurrent use.
 type Store struct {
+	Manager *transaction.Manager
+
 	mu      sync.Mutex
 	seq     int
 	records map[string]*stored
@@ -34,6 +39,9 @@ var _ outbox.Store = (*Store)(nil)
 // Insert keeps records once the transaction ctx is in commits. It returns
 // transaction.ErrNoTransaction or transaction.ErrTransactionDone.
 func (s *Store) Insert(ctx context.Context, records []outbox.Record) error {
+	if err := s.foreign(ctx); err != nil {
+		return err
+	}
 	copied := make([]outbox.Record, len(records))
 	for i, r := range records {
 		copied[i] = clone(r)
@@ -80,9 +88,33 @@ func (s *Store) Claim(_ context.Context, req outbox.ClaimRequest) ([]outbox.Reco
 	return claimed, nil
 }
 
-// Advance implements outbox.Store.
-func (s *Store) Advance(_ context.Context, lease outbox.Lease, progress int) error {
-	return s.update(lease, func(r *outbox.Record) { r.Progress = progress })
+// Advance implements outbox.Store: in a transaction it checks the lease at
+// once and sets Progress when the transaction commits.
+func (s *Store) Advance(ctx context.Context, lease outbox.Lease, progress int) error {
+	if err := s.foreign(ctx); err != nil {
+		return err
+	}
+	apply := func(r *outbox.Record) { r.Progress = progress }
+	if err := s.update(lease, func(*outbox.Record) {}); err != nil {
+		return err
+	}
+	err := transaction.AfterCommit(ctx, func(context.Context) { _ = s.update(lease, apply) })
+	if errors.Is(err, transaction.ErrNoTransaction) {
+		return s.update(lease, apply)
+	}
+	return err
+}
+
+// foreign returns transaction.ErrForeignTransaction for a ctx in a
+// transaction of a Manager other than s.Manager, when it is set.
+func (s *Store) foreign(ctx context.Context) error {
+	if s.Manager == nil {
+		return nil
+	}
+	if _, err := s.Manager.Current(ctx); errors.Is(err, transaction.ErrForeignTransaction) {
+		return err
+	}
+	return nil
 }
 
 // Complete implements outbox.Store.
