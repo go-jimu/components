@@ -1,6 +1,6 @@
 # Change log
 
-## Unreleased
+## v0.12.7
 
 - Added: package `ddd/event/outbox` runs the domain event handlers that must
   not lose an event (go-jimu/components#84). The `Outbox` is an
