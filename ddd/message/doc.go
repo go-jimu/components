@@ -88,6 +88,14 @@
 //     continue safely. Context cancellation or expiration is a normal shutdown
 //     and returns nil, matching taskqueue.Runner.
 //
+// A message-level failure that matches ErrPermanent is one retrying cannot
+// fix, such as a payload that breaks its published contract. A handler marks
+// it by wrapping ErrPermanent, as in
+// fmt.Errorf("%w: email is required", message.ErrPermanent), and stays free
+// of provider packages. A provider's default failure policy does not retry
+// it: it applies at once the action it takes when retries run out. A policy
+// the application configures itself decides on its own and may retry it.
+//
 // Each function documents the Err* values it returns; compare them with
 // errors.Is.
 //
@@ -101,6 +109,8 @@
 //   - decodes each payload into the target its PayloadResolver returns, then
 //     routes the message, usually through a Router, which also implements
 //     Subscriber;
+//   - does not retry a Handle error that matches ErrPermanent under its
+//     default failure policy, and says so where a custom policy plugs in;
 //   - applies its failure policy to a Handle error and logs the failure at the
 //     level that policy implies, such as Warn for a retry and Error for a lost
 //     message; Logging records it at Debug only.
