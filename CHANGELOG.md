@@ -1,5 +1,14 @@
 # Change log
 
+## v0.12.13
+
+- Changed: the module requires Go 1.26; Go 1.25 is past its support
+  window. `go.opentelemetry.io/otel/trace`, an indirect dependency through
+  `samber/oops`, moves from v1.44.0 to v1.47.0, which fixes
+  GHSA-q7gw-24fr-5p69 (span attribute value length limit bypass) and
+  requires Go 1.26. CI tests Go 1.26 and 1.27 and reports coverage from
+  1.26.
+
 ## v0.12.12
 
 - Added: `message.ErrPermanent` marks a `Handle` error that retrying cannot

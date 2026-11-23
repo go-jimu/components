@@ -61,7 +61,7 @@ jobs:
             ~/go/pkg/mod
           key: go-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
       - name: Code Coverage Report
-        if: ${{ matrix.go-version == '1.25.x' }}
+        if: ${{ matrix.go-version == '1.26.x' }}
         uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
@@ -72,8 +72,8 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        # 1.25 is the minimum go.mod requires.
-        go-version: [1.25.x, 1.26.x, 1.27.x]
+        # 1.26 is the minimum go.mod requires.
+        go-version: [1.26.x, 1.27.x]
         os: [ubuntu-latest]
   lint:
     runs-on: ubuntu-latest
