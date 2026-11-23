@@ -180,3 +180,30 @@ func ExampleHandler() {
 	// Output:
 	// message msg-2: unexpected payload *wrapperspb.Int64Value
 }
+
+// A handler marks a failure that retrying cannot fix by wrapping
+// ErrPermanent, and a provider's default failure policy skips its retries. The
+// handler imports no provider package.
+func ExampleErrPermanent() {
+	handle := func(_ context.Context, msg message.Message) error {
+		payload, _ := msg.Payload().(*wrapperspb.StringValue)
+		if payload.GetValue() == "" {
+			return fmt.Errorf("%w: message %s has no customer name", message.ErrPermanent, msg.ID())
+		}
+		return nil
+	}
+
+	payload := wrapperspb.String("")
+	msg, err := message.New(message.KindOf(payload), payload, message.WithID("msg-1"))
+	if err != nil {
+		panic(err)
+	}
+
+	err = handle(context.Background(), msg)
+	fmt.Println(errors.Is(err, message.ErrPermanent))
+	fmt.Println(err)
+
+	// Output:
+	// true
+	// message failure is permanent: message msg-1 has no customer name
+}
