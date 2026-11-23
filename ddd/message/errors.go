@@ -21,6 +21,11 @@ var (
 	// ErrUnknownKind means PayloadRegistry.Resolve has no factory for the
 	// kind. See "Consuming".
 	ErrUnknownKind = errors.New("unknown message kind")
+	// ErrPermanent marks a Handle error that retrying cannot fix, such as a
+	// payload that breaks its published contract, as in
+	// fmt.Errorf("%w: email is required", message.ErrPermanent). A provider
+	// does not retry it. See "Failures".
+	ErrPermanent = errors.New("message: permanent failure")
 
 	// ErrNilPayloadResolver means PayloadResolverFunc.Resolve was called on a
 	// nil function.

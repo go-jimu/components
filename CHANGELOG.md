@@ -1,5 +1,13 @@
 # Change log
 
+## v0.12.12
+
+- Added: `message.ErrPermanent` marks a `Handle` error that retrying cannot
+  fix, the integration-message counterpart of `outbox.ErrPermanent`. A
+  handler wraps it to stop retries without importing a provider package,
+  which application layers forbid. "Failures" and "Providers" in
+  `ddd/message` state that a provider does not retry it.
+
 ## v0.12.11
 
 - Added: an outbox event type may implement `Validate() error`
