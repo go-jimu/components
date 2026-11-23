@@ -6,7 +6,8 @@
   fix, the integration-message counterpart of `outbox.ErrPermanent`. A
   handler wraps it to stop retries without importing a provider package,
   which application layers forbid. "Failures" and "Providers" in
-  `ddd/message` state that a provider does not retry it.
+  `ddd/message` state that a provider's default failure policy does not
+  retry it; a policy the application configures may.
 
 ## v0.12.11
 

@@ -182,8 +182,8 @@ func ExampleHandler() {
 }
 
 // A handler marks a failure that retrying cannot fix by wrapping
-// ErrPermanent, and the provider skips its retries. The handler imports no
-// provider package.
+// ErrPermanent, and a provider's default failure policy skips its retries. The
+// handler imports no provider package.
 func ExampleErrPermanent() {
 	handle := func(_ context.Context, msg message.Message) error {
 		payload, _ := msg.Payload().(*wrapperspb.StringValue)
@@ -205,5 +205,5 @@ func ExampleErrPermanent() {
 
 	// Output:
 	// true
-	// message: permanent failure: message msg-1 has no customer name
+	// message failure is permanent: message msg-1 has no customer name
 }
